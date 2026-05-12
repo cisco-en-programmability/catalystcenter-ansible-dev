@@ -1,0 +1,37 @@
+---
+- name: Configure device credentials on Cisco Catalyst Center
+  hosts: localhost
+  vars_files:
+    - vars/credentials.yml
+  connection: local
+  gather_facts: false  # This space must be "no". It was set to false due to formatting errors.but the correct value is "no".
+  tasks:
+    - name: User and Role Workflow Manager
+      cisco.catalystcenter.user_role_workflow_manager:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify }}"
+        catalystcenter_port: "{{ catalystcenter_port }}"
+        catalystcenter_version: "{{ catalystcenter_version }}"
+        catalystcenter_debug: "{{ catalystcenter_debug }}"
+        catalystcenter_log: true
+        catalystcenter_log_level: DEBUG
+        config_verify: true
+        catalystcenter_api_task_timeout: 1000
+        catalystcenter_task_poll_interval: 1
+        state: merged
+        config:
+          user_details:
+            - username: ajithandrewj
+              first_name: ajith
+              last_name: Andrew
+              email: ajith@gmail.com
+              password: Example@0101
+              password_update: true
+              role_list:
+                - Test_role_1
+          role_details:
+            - role_name: Test_role_1
+              assurance:
+                - overall: write
