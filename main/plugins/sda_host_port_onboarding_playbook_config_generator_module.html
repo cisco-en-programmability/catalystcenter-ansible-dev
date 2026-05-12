@@ -1577,9 +1577,10 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 </tr>
 <tr class="row-even"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/component_specific_filters/wireless_ssids"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-sda-host-port-onboarding-playbook-config-generator-module-parameter-config-component-specific-filters-wireless-ssids"><strong>wireless_ssids</strong></p>
-<a class="ansibleOptionLink" href="#parameter-config/component_specific_filters/wireless_ssids" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">dictionary</span></p>
+<a class="ansibleOptionLink" href="#parameter-config/component_specific_filters/wireless_ssids" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">list</span> / <span class="ansible-option-elements">elements=dictionary</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Filters for wireless SSID configuration extraction.</p>
+<p>Each list entry targets one or more fabric sites for wireless SSID to VLAN mapping extraction.</p>
 <p>Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies.</p>
 <p>Fabric site names must be full hierarchical paths (case-sensitive).</p>
 <p>If not specified when component included in components_list, extracts all wireless SSID mappings across all fabric sites.</p>
@@ -1930,8 +1931,8 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <span class="w">      </span><span class="nt">component_specific_filters</span><span class="p">:</span>
 <span class="w">        </span><span class="nt">components_list</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;wireless_ssids&quot;</span><span class="p p-Indicator">]</span>
 <span class="w">        </span><span class="nt">wireless_ssids</span><span class="p">:</span>
-<span class="w">          </span><span class="nt">fabric_site_name_hierarchy</span><span class="p">:</span>
-<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;Global/Site_India/Karnataka/Bangalore&quot;</span>
+<span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">fabric_site_name_hierarchy</span><span class="p">:</span>
+<span class="w">              </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;Global/Site_India/Karnataka/Bangalore&quot;</span>
 </pre></div>
 </div>
 </section>

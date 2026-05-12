@@ -1236,7 +1236,7 @@ Parameters
 
       .. rst-class:: ansible-option-type-line
 
-      :ansible-option-type:`dictionary`
+      :ansible-option-type:`list` / :ansible-option-elements:`elements=dictionary`
 
       .. raw:: html
 
@@ -1247,6 +1247,8 @@ Parameters
         <div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell">
 
       Filters for wireless SSID configuration extraction.
+
+      Each list entry targets one or more fabric sites for wireless SSID to VLAN mapping extraction.
 
       Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies.
 
@@ -1767,8 +1769,8 @@ Examples
           component_specific_filters:
             components_list: ["wireless_ssids"]
             wireless_ssids:
-              fabric_site_name_hierarchy:
-                - "Global/Site_India/Karnataka/Bangalore"
+              - fabric_site_name_hierarchy:
+                  - "Global/Site_India/Karnataka/Bangalore"
 
 
 
