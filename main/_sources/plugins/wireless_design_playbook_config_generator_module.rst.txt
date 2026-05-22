@@ -1733,12 +1733,12 @@ Notes
    - SDK Methods used are
      sites.Sites.get\_site
      site\_design.SiteDesigns.get\_sites
-     wirelesss.Wireless.get\_ssid\_by\_site
-     wirelesss.Wireless.get\_interfaces
-     wirelesss.Wireless.get\_power\_profiles
-     wirelesss.Wireless.get\_ap\_profiles
-     wirelesss.Wireless.get\_rf\_profiles
-     wirelesss.Wireless.get\_anchor\_groups
+     wireless.Wireless.get\_ssid\_by\_site
+     wireless.Wireless.get\_interfaces
+     wireless.Wireless.get\_power\_profiles
+     wireless.Wireless.get\_ap\_profiles
+     wireless.Wireless.get\_rf\_profiles
+     wireless.Wireless.get\_anchor\_groups
    - SDK Paths used are
      GET /dna/intent/api/v1/sites
      GET /dna/intent/api/v1/sites/${siteId}/wirelessSettings/ssids
