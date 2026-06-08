@@ -1614,14 +1614,13 @@ associated configuration details.</p></li>
 </tr>
 <tr class="row-even"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/feature_template/additional_identifiers"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-provision-workflow-manager-module-parameter-config-feature-template-additional-identifiers"><strong>additional_identifiers</strong></p>
-<a class="ansibleOptionLink" href="#parameter-config/feature_template/additional_identifiers" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">list</span> / <span class="ansible-option-elements">elements=dictionary</span></p>
+<a class="ansibleOptionLink" href="#parameter-config/feature_template/additional_identifiers" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">dictionary</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><ul class="simple">
 <li><dl class="simple">
-<dt>A list of additional context-specific identifiers that provide customization parameters for the feature template.</dt><dd><ul>
+<dt>A dictionary of additional context-specific identifiers that provide customization parameters for the feature template.</dt><dd><ul>
 <li><p>These identifiers enable site-specific and WLAN-specific customization of the template during deployment.</p></li>
-<li><p>Each identifier contains key-value pairs that help adapt the template for specific deployment scenarios and locations.</p></li>
-<li><p>Multiple identifiers can be specified to support complex deployment requirements with different WLAN profiles and site contexts.</p></li>
+<li><p>Contains key-value pairs that help adapt the template for specific deployment scenarios and locations.</p></li>
 </ul>
 </dd>
 </dl>
@@ -1656,7 +1655,6 @@ associated configuration details.</p></li>
 <dt>The WLAN profile name to be associated with the feature template during wireless controller provisioning.</dt><dd><ul>
 <li><p>This profile defines wireless network parameters including SSID, security settings, VLAN assignments, and QoS policies.</p></li>
 <li><p>The WLAN profile must exist in Cisco Catalyst Center and be properly configured before template application.</p></li>
-<li><p>Multiple WLAN profiles can be referenced by specifying multiple additional identifier entries.</p></li>
 </ul>
 </dd>
 </dl>
@@ -2240,7 +2238,7 @@ and later.</p></li>
 </section>
 <section id="return-values">
 <h2><a class="toc-backref" href="#id100" role="doc-backlink">Return Values</a><a class="headerlink" href="#return-values" title="Permalink to this heading"></a></h2>
-<p>Common return values are documented <a class="reference external" href="https://docs.ansible.com/projects/ansible/latest/reference_appendices/common_return_values.html#common-return-values" title="(in Ansible v13)"><span class="xref std std-ref">here</span></a>, the following are the fields unique to this module:</p>
+<p>Common return values are documented <a class="reference external" href="https://docs.ansible.com/projects/ansible/latest/reference_appendices/common_return_values.html#common-return-values" title="(in Ansible v14)"><span class="xref std std-ref">here</span></a>, the following are the fields unique to this module:</p>
 <table class="ansible-option-table docutils align-default" style="width: 100%">
 <thead>
 <tr class="row-odd"><th class="head"><p>Key</p></th>
