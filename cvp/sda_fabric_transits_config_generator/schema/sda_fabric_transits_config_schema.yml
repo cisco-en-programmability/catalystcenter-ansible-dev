@@ -84,6 +84,7 @@ catalystcenter_log_level: str(required=False)
 
 # SDA Fabric Transits Config Generator Entry Schema
 # Each entry represents one generation task with its own filters and output settings
+---
 sda_fabric_transits_config_generator_type:
   
   # Output file path for generated YAML configuration

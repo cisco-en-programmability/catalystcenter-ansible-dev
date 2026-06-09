@@ -11,6 +11,7 @@ catalystcenter_log_file_path: str(required=False, default='catalystcenter.log')
 catalystcenter_log_level: enum("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", required=False)
 catalystcenter_task_poll_interval: int(required=False)
 assurance_health_score_settings: list(include('assurance_health_score_settings_type'), min=0, max=1000, required=False)
+---
 assurance_health_score_settings_type:
   device_health_score: list(include('device_health_score_type'), min=0, max=1000, required=False)
   

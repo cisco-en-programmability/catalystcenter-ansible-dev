@@ -144,6 +144,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Provision Configuration Generator Schema
+---
 provision_config_generator_type:
   # Output file path
   file_path: str(required=False)

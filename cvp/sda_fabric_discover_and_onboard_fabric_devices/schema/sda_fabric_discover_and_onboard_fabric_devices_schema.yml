@@ -25,6 +25,7 @@ catalystcenter_task_poll_interval: int(required=False)
 # Workflow root and job structure
 # ==============================================================================
 
+---
 workflow_root:
   jobs: list(include('workflow_job'), min=1, max=500, required=True)
 

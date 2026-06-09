@@ -198,6 +198,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 
 # Template Config Generator Entry Schema
+---
 template_config_generator_type:
   # Output file path for generated YAML
   file_path: str(required=False)

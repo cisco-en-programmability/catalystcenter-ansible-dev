@@ -167,6 +167,7 @@ catalystcenter_log_file_path: str(required=False, default='catalystcenter.log')
 catalystcenter_log_level: enum("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", required=False)
 catalyst_center_config_verify: bool(required=False)
 # ==================================================================================================================
+---
 network_compliance_details_type:
   ip_address_list: list(str, required=False)
   run_compliance: bool(required=False)

@@ -117,6 +117,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Network Profile Wireless Configuration Generator Schema
+---
 network_profile_wireless_config_type:
   # Output file path
   file_path: str(required=False)

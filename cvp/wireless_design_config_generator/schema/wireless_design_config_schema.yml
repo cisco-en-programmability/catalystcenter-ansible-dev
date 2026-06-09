@@ -35,6 +35,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Wireless Design Config Generator Entry Schema
+---
 wireless_design_config_generator_type:
   file_path: str(required=False)
   file_mode: enum('overwrite', 'append', required=False)

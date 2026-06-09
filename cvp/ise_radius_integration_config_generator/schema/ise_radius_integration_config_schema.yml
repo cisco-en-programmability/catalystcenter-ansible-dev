@@ -153,6 +153,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 
 # ISE Radius Integration Config Generator Entry Schema
+---
 ise_radius_integration_config_generator_type:
   # Output file path (optional - module level parameter)
   file_path: str(required=False)

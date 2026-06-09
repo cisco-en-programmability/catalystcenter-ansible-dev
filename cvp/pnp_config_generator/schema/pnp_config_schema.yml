@@ -83,6 +83,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # PnP Config Generator Entry Schema
+---
 pnp_config_generator_type:
   # Output file path for generated YAML
   file_path: str(required=False)

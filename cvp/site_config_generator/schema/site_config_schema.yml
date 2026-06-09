@@ -87,6 +87,7 @@ catalyst_center_config_verify: bool(required=False)
 
 # Site Config Generator Entry Schema
 # Each entry represents one generation task with its own filters and output settings
+---
 site_config_generator_type:
 
   # Output file path (optional - module level parameter)

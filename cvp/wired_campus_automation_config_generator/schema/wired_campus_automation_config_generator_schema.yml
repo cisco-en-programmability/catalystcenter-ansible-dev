@@ -24,6 +24,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
+---
 wired_campus_automation_config_type:
   generate_all_configurations: bool(required=False)
   file_path: str(required=False)

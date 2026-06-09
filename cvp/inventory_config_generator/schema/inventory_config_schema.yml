@@ -198,6 +198,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Inventory Config Generator Entry Schema
+---
 inventory_config_generator_type:
 
    # Output file path (optional - module level parameter)

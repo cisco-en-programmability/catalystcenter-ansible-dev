@@ -160,6 +160,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Assurance Device Health Score Settings Config Generator Entry Schema
+---
 assurance_device_health_score_settings_config_generator_type:
   # Output file path
   file_path: str(required=False)

@@ -98,6 +98,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # SDA Host Port Onboarding Configuration Generator Schema
+---
 sda_host_port_onboarding_config_type:
   # Generate all configurations flag
   generate_all_configurations: bool(required=False)

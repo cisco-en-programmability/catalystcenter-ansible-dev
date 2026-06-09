@@ -55,6 +55,7 @@
 
 fabric_device_info_details: list(include('fabric_device_query'), required=True)
 
+---
 fabric_device_query:
   fabric_devices: list(include('fabric_device_type'), required=True)
 
