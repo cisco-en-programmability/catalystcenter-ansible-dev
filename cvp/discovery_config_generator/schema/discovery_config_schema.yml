@@ -194,6 +194,7 @@ catalyst_center_config_verify: bool(required=False)
 
 # Discovery Config Generator Entry Schema
 # Each list entry is a dict passed directly as the module's config parameter (type: dict)
+---
 discovery_config_generator_type:
 
   # Output file path (optional - module level parameter)

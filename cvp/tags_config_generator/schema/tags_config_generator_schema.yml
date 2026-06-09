@@ -158,6 +158,7 @@ catalyst_center_config_verify: bool(required=False)
 
 # Tags Configuration Generator Schema
 # Omit 'config' key entirely to generate all configurations (full auto-discovery)
+---
 tags_config_generator:
   # Output file path
   file_path: str(required=False)

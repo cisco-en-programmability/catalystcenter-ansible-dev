@@ -13,6 +13,7 @@ catalystcenter_task_poll_interval: int(required=False, default=2)
 jinjatemplate: bool(required=False)
 jinjatemplate_file: str(required=False)
 accesspoints_details: list(include('accesspoints_details_type'), min=0, max=1000, required=False)
+---
 accesspoints_details_type:
   # Note: At least one of mac_address, hostname, or management_ip_address must be provided to identify the access point.
   2.4ghz_radio: include('radio_type_ghz', required=False)

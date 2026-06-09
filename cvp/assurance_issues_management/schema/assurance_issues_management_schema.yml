@@ -12,6 +12,7 @@ catalystcenter_log_file_path: str(required=False, default='catalystcenter.log')
 catalystcenter_log_level: enum("CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", required=False)
 catalystcenter_task_poll_interval: int(required=False)
 assurance_issues_settings: list(include('assurance_issues_settings_type'), min=0, max=1000, required=False)
+---
 assurance_issues_settings_type:
   assurance_user_defined_issue_settings: list(include('assurance_user_defined_issue_settings_type'), min=0, max=1000, required=False)
   assurance_system_issue_settings: list(include('assurance_system_issue_settings_type'), min=0, max=1000, required=False)

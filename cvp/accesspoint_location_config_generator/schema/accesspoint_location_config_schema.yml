@@ -282,6 +282,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Access Point Location Config Generator Entry Schema
+---
 accesspoint_location_config_generator_type:
 
  # Output file path (optional - module level parameter)

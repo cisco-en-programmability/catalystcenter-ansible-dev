@@ -19,6 +19,7 @@ passwords_file: str(required=False)
 jinjatemplate_file: str(required=False)
 ccc_poll_interval: int(required=False)  
 
+---
 lan_automation_type:
   lan_automation:
     discovered_device_site_name_hierarchy: str(required=True)

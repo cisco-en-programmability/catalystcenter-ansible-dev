@@ -223,6 +223,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 
 # SDA Virtual Networks Configuration Generator Schema
+---
 sda_vn_config_generator_type:
   # Output file path (optional - module level parameter)
   file_path: str(required=False)

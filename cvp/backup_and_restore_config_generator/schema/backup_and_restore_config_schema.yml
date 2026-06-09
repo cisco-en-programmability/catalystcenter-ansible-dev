@@ -202,6 +202,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Individual Configuration Generation Task Schema
+---
 backup_restore_config_generator_type:
   # Output file path (optional - module level parameter)
   file_path: str(required=False)

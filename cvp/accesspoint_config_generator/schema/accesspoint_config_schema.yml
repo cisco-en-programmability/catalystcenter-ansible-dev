@@ -21,6 +21,7 @@ catalystcenter_log_level: str(required=False)
 catalyst_center_config_verify: bool(required=False)
 
 # Access Point Config Generator Entry Schema
+---
 accesspoint_config_generator_type:
   # Workflow-level convenience flag. If true, the playbook omits module config
   # and the module runs in full-discovery mode.

@@ -198,6 +198,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 
 # SDA Configuration Generator Schema
+---
 sda_config_generator_type:
   # Output file path
   file_path: str(required=False)

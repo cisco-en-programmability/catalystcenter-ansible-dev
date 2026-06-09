@@ -172,6 +172,7 @@ catalystcenter_log_file_path: str(required=False)
 catalystcenter_log_level: str(required=False)
 
 # Assurance Issue Configuration Generator Schema
+---
 assurance_issue_config_generator:
   # Output file path (optional - module level parameter)
   file_path: str(required=False)
