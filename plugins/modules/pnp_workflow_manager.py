@@ -83,6 +83,24 @@ options:
             description: Pnp Device's pid.
             type: str
             required: true
+          description:
+            description:
+              - Optional description for the PnP device.
+              - Sent to Catalyst Center as C(description).
+            type: str
+            required: false
+          mac_address:
+            description:
+              - MAC address of the PnP device.
+              - Sent to Catalyst Center as C(macAddress).
+            type: str
+            required: false
+          site_id:
+            description:
+              - Site identifier associated with the PnP device.
+              - Sent to Catalyst Center as C(siteId).
+            type: str
+            required: false
           serial_number:
             description: Pnp Device's serial_number.
             type: str
@@ -103,6 +121,146 @@ options:
             type: list
             elements: str
             required: false
+          device_sudi_serial_nos:
+            description:
+              - List of device SUDI serial numbers.
+              - Sent to Catalyst Center as C(deviceSudiSerialNos).
+            type: list
+            elements: str
+            required: false
+          user_mic_numbers:
+            description:
+              - List of user MIC numbers.
+              - Sent to Catalyst Center as C(userMicNumbers).
+            type: list
+            elements: str
+            required: false
+          workflow_id:
+            description:
+              - Workflow identifier to use for PnP device onboarding.
+              - Sent to Catalyst Center as C(workflowId).
+            type: str
+            required: false
+          workflow_name:
+            description:
+              - Workflow name to use for PnP device onboarding.
+              - Sent to Catalyst Center as C(workflowName).
+            type: str
+            required: false
+          stack_info:
+            description:
+              - Stack metadata used when adding a stack device.
+              - Sent to Catalyst Center as C(stackInfo).
+            type: dict
+            required: false
+            suboptions:
+              supports_stack_workflows:
+                description:
+                  - Whether the stack supports stack workflows.
+                  - Sent to Catalyst Center as C(supportsStackWorkflows).
+                type: bool
+                required: false
+              is_full_ring:
+                description:
+                  - Whether the stack is cabled as a full ring.
+                  - Sent to Catalyst Center as C(isFullRing).
+                type: bool
+                required: false
+              stack_member_list:
+                description:
+                  - List of stack members.
+                  - Sent to Catalyst Center as C(stackMemberList).
+                type: list
+                elements: dict
+                required: false
+                suboptions:
+                  serial_number:
+                    description:
+                      - Stack member serial number.
+                      - Sent to Catalyst Center as C(serialNumber).
+                    type: str
+                    required: false
+                  state:
+                    description:
+                      - Stack member state.
+                    type: str
+                    required: false
+                  role:
+                    description:
+                      - Stack member role.
+                    type: str
+                    required: false
+                  mac_address:
+                    description:
+                      - Stack member MAC address.
+                      - Sent to Catalyst Center as C(macAddress).
+                    type: str
+                    required: false
+                  pid:
+                    description:
+                      - Stack member product ID.
+                    type: str
+                    required: false
+                  license_level:
+                    description:
+                      - Stack member license level.
+                      - Sent to Catalyst Center as C(licenseLevel).
+                    type: str
+                    required: false
+                  license_type:
+                    description:
+                      - Stack member license type.
+                      - Sent to Catalyst Center as C(licenseType).
+                    type: str
+                    required: false
+                  sudi_serial_number:
+                    description:
+                      - Stack member SUDI serial number.
+                      - Sent to Catalyst Center as C(sudiSerialNumber).
+                    type: str
+                    required: false
+                  hardware_version:
+                    description:
+                      - Stack member hardware version.
+                      - Sent to Catalyst Center as C(hardwareVersion).
+                    type: str
+                    required: false
+                  stack_number:
+                    description:
+                      - Stack member number.
+                      - Sent to Catalyst Center as C(stackNumber).
+                    type: int
+                    required: false
+                  software_version:
+                    description:
+                      - Stack member software version.
+                      - Sent to Catalyst Center as C(softwareVersion).
+                    type: str
+                    required: false
+                  priority:
+                    description:
+                      - Stack member priority.
+                    type: int
+                    required: false
+              stack_ring_protocol:
+                description:
+                  - Stack ring protocol.
+                  - Sent to Catalyst Center as C(stackRingProtocol).
+                type: str
+                required: false
+              valid_license_levels:
+                description:
+                  - Valid license levels for the stack.
+                  - Sent to Catalyst Center as C(validLicenseLevels).
+                type: list
+                elements: str
+                required: false
+              total_member_count:
+                description:
+                  - Total count of stack members.
+                  - Sent to Catalyst Center as C(totalMemberCount).
+                type: int
+                required: false
           is_stack_device:
             description:
               - Set to true if the device is a stack device. Only applies when
@@ -188,8 +346,7 @@ options:
       license_level:
         description:
           - License level applied when claiming a Catalyst switch / stack switch.
-          - Refer to your Catalyst Center version's API schema (Platform > Developer Toolkit)
-            for the authoritative list of accepted values.
+          - Common values include 'Cisco DNA Essentials', 'Cisco DNA Advantage'.
           - Optional. Most commonly used together with 'pnp_type' set to
             'Default' (switches/routers) or 'StackSwitch'.
         type: str
@@ -777,6 +934,47 @@ class PnP(CatalystCenterBase):
                 "failed", False, self.msg, "ERROR"
             ).check_return_status()
 
+    @staticmethod
+    def rename_payload_keys(payload, key_map):
+        """
+        Convert module snake_case payload keys to Catalyst Center SDK camelCase keys.
+        """
+        for module_key, sdk_key in key_map.items():
+            if module_key in payload:
+                payload[sdk_key] = payload.pop(module_key)
+
+    def normalize_stack_info_payload(self, stack_info):
+        """
+        Normalize stack_info payload fields for the add_device API.
+        """
+        stack_info_key_map = {
+            "supports_stack_workflows": "supportsStackWorkflows",
+            "is_full_ring": "isFullRing",
+            "stack_member_list": "stackMemberList",
+            "stack_ring_protocol": "stackRingProtocol",
+            "valid_license_levels": "validLicenseLevels",
+            "total_member_count": "totalMemberCount",
+        }
+        stack_member_key_map = {
+            "serial_number": "serialNumber",
+            "mac_address": "macAddress",
+            "license_level": "licenseLevel",
+            "license_type": "licenseType",
+            "sudi_serial_number": "sudiSerialNumber",
+            "hardware_version": "hardwareVersion",
+            "stack_number": "stackNumber",
+            "software_version": "softwareVersion",
+        }
+
+        self.rename_payload_keys(stack_info, stack_info_key_map)
+        stack_member_list = stack_info.get("stackMemberList")
+        if isinstance(stack_member_list, list):
+            for stack_member in stack_member_list:
+                if isinstance(stack_member, dict):
+                    self.rename_payload_keys(stack_member, stack_member_key_map)
+
+        return stack_info
+
     def get_pnp_params(self, params):
         """
         Store pnp parameters from the playbook for pnp processing in Cisco Catalyst Center.
@@ -797,16 +995,31 @@ class PnP(CatalystCenterBase):
 
         params_list = params["device_info"]
         device_info_list = []
+        device_info_key_map = {
+            "serial_number": "serialNumber",
+            "is_sudi_required": "sudiRequired",
+            "device_sudi_serial_nos": "deviceSudiSerialNos",
+            "user_mic_numbers": "userMicNumbers",
+            "user_sudi_serial_nos": "userSudiSerialNos",
+            "mac_address": "macAddress",
+            "site_id": "siteId",
+            "workflow_id": "workflowId",
+            "workflow_name": "workflowName",
+            "stack_info": "stackInfo",
+        }
         for param in params_list:
             device_dict = {}
-            param["serialNumber"] = param.pop("serial_number")
-            if "is_sudi_required" in param:
-                param["sudiRequired"] = param.pop("is_sudi_required")
+            self.rename_payload_keys(param, device_info_key_map)
 
-            if "user_sudi_serial_nos" in param:
-                param["userSudiSerialNos"] = param.pop("user_sudi_serial_nos")
+            if "is_stack_device" in param:
+                param["stack"] = param.pop("is_stack_device")
+            elif "stack" not in param:
+                param["stack"] = False
 
-            param["stack"] = param.pop("is_stack_device", False)
+            if isinstance(param.get("stackInfo"), dict):
+                param["stackInfo"] = self.normalize_stack_info_payload(
+                    param["stackInfo"]
+                )
 
             if "authorize" in param:
                 param["authorize"] = param.pop("authorize")
