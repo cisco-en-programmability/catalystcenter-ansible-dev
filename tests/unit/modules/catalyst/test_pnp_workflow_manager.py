@@ -427,7 +427,7 @@ class TestCatalystCenterPnpWorkflow(TestCatalystModule):
 
     def test_pnp_workflow_manager_device_info_sudi_stack_payload(self):
         """
-        Test device_info SUDI and stack fields are passed to the add-device payload.
+        Test device_info fields are converted for the add-device payload.
         """
         pnp = pnp_workflow_manager.PnP.__new__(pnp_workflow_manager.PnP)
         pnp.log = lambda *args, **kwargs: None
@@ -439,9 +439,39 @@ class TestCatalystCenterPnpWorkflow(TestCatalystModule):
                         "hostname": "dfrwr",
                         "serial_number": "gdgttee",
                         "pid": "C9300-24H",
+                        "description": "PnP stack device",
+                        "mac_address": "00:11:22:33:44:55",
+                        "site_id": "site-123",
                         "is_sudi_required": True,
+                        "device_sudi_serial_nos": ["device-sudi-1"],
+                        "user_mic_numbers": ["mic-1"],
                         "user_sudi_serial_nos": ["gdgttee"],
+                        "workflow_id": "workflow-123",
+                        "workflow_name": "Default workflow",
                         "is_stack_device": True,
+                        "stack_info": {
+                            "supports_stack_workflows": True,
+                            "is_full_ring": True,
+                            "stack_member_list": [
+                                {
+                                    "serial_number": "gdgttee",
+                                    "state": "Unclaimed",
+                                    "role": "ACTIVE",
+                                    "mac_address": "00:11:22:33:44:55",
+                                    "pid": "C9300-24H",
+                                    "license_level": "network-advantage",
+                                    "license_type": "permanent",
+                                    "sudi_serial_number": "sudi-1",
+                                    "hardware_version": "V01",
+                                    "stack_number": 1,
+                                    "software_version": "17.12.1",
+                                    "priority": 15,
+                                }
+                            ],
+                            "stack_ring_protocol": "stackwise",
+                            "valid_license_levels": ["network-advantage"],
+                            "total_member_count": 1,
+                        },
                     },
                     {
                         "serial_number": "ABC123",
@@ -454,11 +484,57 @@ class TestCatalystCenterPnpWorkflow(TestCatalystModule):
         self.assertEqual(
             pnp_params[0]["deviceInfo"]["serialNumber"], "gdgttee"
         )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["macAddress"], "00:11:22:33:44:55"
+        )
+        self.assertEqual(pnp_params[0]["deviceInfo"]["siteId"], "site-123")
         self.assertTrue(pnp_params[0]["deviceInfo"]["sudiRequired"])
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["deviceSudiSerialNos"],
+            ["device-sudi-1"]
+        )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["userMicNumbers"], ["mic-1"]
+        )
         self.assertEqual(
             pnp_params[0]["deviceInfo"]["userSudiSerialNos"], ["gdgttee"]
         )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["workflowId"], "workflow-123"
+        )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["workflowName"], "Default workflow"
+        )
         self.assertTrue(pnp_params[0]["deviceInfo"]["stack"])
+        self.assertTrue(
+            pnp_params[0]["deviceInfo"]["stackInfo"]["supportsStackWorkflows"]
+        )
+        self.assertTrue(
+            pnp_params[0]["deviceInfo"]["stackInfo"]["isFullRing"]
+        )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["stackInfo"]["stackRingProtocol"],
+            "stackwise"
+        )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["stackInfo"]["validLicenseLevels"],
+            ["network-advantage"]
+        )
+        self.assertEqual(
+            pnp_params[0]["deviceInfo"]["stackInfo"]["totalMemberCount"], 1
+        )
+        stack_member = pnp_params[0]["deviceInfo"]["stackInfo"]["stackMemberList"][0]
+        self.assertEqual(stack_member["serialNumber"], "gdgttee")
+        self.assertEqual(stack_member["macAddress"], "00:11:22:33:44:55")
+        self.assertEqual(stack_member["licenseLevel"], "network-advantage")
+        self.assertEqual(stack_member["licenseType"], "permanent")
+        self.assertEqual(stack_member["sudiSerialNumber"], "sudi-1")
+        self.assertEqual(stack_member["hardwareVersion"], "V01")
+        self.assertEqual(stack_member["stackNumber"], 1)
+        self.assertEqual(stack_member["softwareVersion"], "17.12.1")
+        self.assertNotIn("mac_address", pnp_params[0]["deviceInfo"])
+        self.assertNotIn("stack_info", pnp_params[0]["deviceInfo"])
+        self.assertNotIn("serial_number", stack_member)
         self.assertFalse(pnp_params[1]["deviceInfo"]["stack"])
 
     def test_pnp_workflow_manager_claim_ap_claimed_new(self):
