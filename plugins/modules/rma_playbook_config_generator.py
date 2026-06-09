@@ -57,7 +57,7 @@ options:
       separate playbooks with different filter criteria.
     type: list
     elements: dict
-    required: true
+    required: false
     suboptions:
       file_path:
         description:
@@ -382,8 +382,9 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
 
         # Check if configuration is available
         if not self.config:
+            self.validated_config = [{"generate_all_configurations": True}]
             self.status = "success"
-            self.msg = "Configuration is not available in the playbook for validation"
+            self.msg = "No config provided — defaulting to auto-discovery (generate_all_configurations=True)"
             self.log(self.msg, "INFO")
             return self
 
@@ -425,7 +426,8 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
                 self.set_operation_result("failed", False, self.msg, "ERROR")
                 return self
 
-        self.validate_minimum_requirements(self.config)
+        for config_item in self.config:
+            self.validate_minimum_requirements(config_item)
 
         self.log("Validating configuration parameters with schema - config: {0} and temp_spec: {1}".format(self.config, temp_spec), "DEBUG")
 
@@ -1809,7 +1811,7 @@ def main():
         # Playbook Configuration Parameters
         # ============================================
         "config": {
-            "required": True,
+            "required": False,
             "type": "list",
             "elements": "dict"
         },
@@ -1854,7 +1856,7 @@ def main():
             module.params.get("catalystcenter_verify"),
             module.params.get("catalystcenter_version"),
             module.params.get("state"),
-            len(module.params.get("config", []))
+            len(module.params.get("config") or [])
         ),
         "DEBUG"
     )
