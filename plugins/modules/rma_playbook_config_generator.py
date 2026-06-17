@@ -382,7 +382,7 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
 
         # Check if configuration is available
         if not self.config:
-            self.validated_config = [{"generate_all_configurations": True}]
+            self.validated_config = {"generate_all_configurations": True}
             self.status = "success"
             self.msg = "No config provided — defaulting to auto-discovery (generate_all_configurations=True)"
             self.log(self.msg, "INFO")
