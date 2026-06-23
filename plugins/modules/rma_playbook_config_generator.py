@@ -47,48 +47,43 @@ options:
     type: str
     choices: [gathered]
     default: gathered
+  file_path:
+    description:
+    - Path where the YAML configuration file will be saved.
+    - If not provided, the file will be saved in the current working directory with
+      a default file name C(rma_playbook_config_<YYYY-MM-DD_HH-MM-SS>.yml).
+    - For example, C(rma_playbook_config_2025-04-22_21-43-26.yml).
+    - Ensure the directory path exists and has write permissions.
+    type: str
+    required: false
+  file_mode:
+    description:
+    - Controls how the YAML file is written when C(file_path) is specified.
+    - C(overwrite) replaces any existing file content.
+    - C(append) adds new configurations to the end of an existing file.
+    - This parameter is only relevant when C(file_path) is specified.
+      Defaults to C(overwrite).
+    type: str
+    required: false
+    default: overwrite
+    choices: [overwrite, append]
   config:
     description:
     - A list of configuration filters for generating YAML
       playbooks compatible with the C(rma_workflow_manager) module.
-    - Each configuration entry can include file path specification,
-      component filters, and auto-discovery settings.
+    - Each configuration entry can include component filters.
     - Multiple configuration entries can be provided to generate
       separate playbooks with different filter criteria.
     type: list
     elements: dict
     required: false
     suboptions:
-      file_path:
-        description:
-        - Path where the YAML configuration file will be saved.
-        - If not provided, the file will be saved in the current working directory with
-          a default file name C(rma_playbook_config_<YYYY-MM-DD_HH-MM-SS>.yml).
-        - For example, C(rma_playbook_config_2025-04-22_21-43-26.yml).
-        - Ensure the directory path exists and has write
-          permissions.
-        type: str
-      generate_all_configurations:
-        description:
-        - Enables automatic discovery and generation of YAML
-          configurations for all RMA device replacement workflows.
-        - When C(true), retrieves all device replacement workflows
-          from Cisco Catalyst Center without requiring specific
-          filters.
-        - Overrides any provided C(component_specific_filters) to
-          ensure complete configuration retrieval.
-        - Ideal for complete brownfield infrastructure migration and
-          comprehensive documentation of all RMA workflows.
-        type: bool
-        default: false
       component_specific_filters:
         description:
         - Component-level filters to selectively include specific
           RMA configurations in the generated playbook.
         - Allows fine-grained control over which device replacement
           workflows are extracted from Cisco Catalyst Center.
-        - If C(generate_all_configurations) is C(true), these
-          filters are ignored and all configurations are retrieved.
         type: dict
         suboptions:
           components_list:
@@ -199,9 +194,10 @@ EXAMPLES = r"""
     catalystcenter_log: true
     catalystcenter_log_level: "{{catalystcenter_log_level}}"
     state: gathered
+    file_path: "/tmp/rma_workflows_config.yaml"
     config:
-      - file_path: "/tmp/rma_workflows_config.yaml"
-        generate_all_configurations: true
+      - component_specific_filters:
+          components_list: ["device_replacement_workflows"]
 
 - name: Generate YAML Configuration for specific device replacement workflows
   cisco.catalystcenter.rma_playbook_config_generator:
@@ -215,9 +211,9 @@ EXAMPLES = r"""
     catalystcenter_log: true
     catalystcenter_log_level: "{{catalystcenter_log_level}}"
     state: gathered
+    file_path: "/tmp/rma_specific_workflows.yaml"
     config:
-      - file_path: "/tmp/rma_specific_workflows.yaml"
-        component_specific_filters:
+      - component_specific_filters:
           components_list: ["device_replacement_workflows"]
           device_replacement_workflows:
             - faulty_device_serial_number: "FJC2327U0S2"
@@ -235,9 +231,9 @@ EXAMPLES = r"""
     catalystcenter_log: true
     catalystcenter_log_level: "{{catalystcenter_log_level}}"
     state: gathered
+    file_path: "/tmp/rma_replacement_device_workflows.yaml"
     config:
-      - file_path: "/tmp/rma_replacement_device_workflows.yaml"
-        component_specific_filters:
+      - component_specific_filters:
           components_list: ["device_replacement_workflows"]
           device_replacement_workflows:
             - replacement_device_serial_number: "FCW2225C020"
