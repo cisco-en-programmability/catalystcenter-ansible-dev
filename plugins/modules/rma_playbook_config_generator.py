@@ -390,44 +390,19 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
 
         # Expected schema for configuration parameters
         temp_spec = {
-            "file_path": {"type": "str", "required": False},
-            "generate_all_configurations": {"type": "bool", "required": False},
-            "component_specific_filters": {"type": "dict", "required": False},
-            "global_filters": {"type": "dict", "required": False},
+            "component_specific_filters": {
+                "type": "dict",
+                "required": False
+            },
+            "global_filters": {
+                "type": "dict",
+                "required": False
+            },
         }
 
-        allowed_keys = set(temp_spec.keys())
-
-        # Validate that only allowed keys are present in the configuration
-        for config_index, config_item in enumerate(self.config, start=1):
-            self.log(
-                "Validating configuration item {0}/{1}".format(
-                    config_index, len(self.config)
-                ),
-                "DEBUG",
-            )
-            if not isinstance(config_item, dict):
-                self.msg = "Configuration item must be a dictionary, got: {0}".format(type(config_item).__name__)
-                self.set_operation_result("failed", False, self.msg, "ERROR")
-                return self
-
-            # Check for invalid keys
-            config_keys = set(config_item.keys())
-            invalid_keys = config_keys - allowed_keys
-
-            if invalid_keys:
-                self.msg = (
-                    "Invalid parameters found in playbook configuration: {0}. "
-                    "Only the following parameters are allowed: {1}. "
-                    "Please remove the invalid parameters and try again.".format(
-                        list(invalid_keys), list(allowed_keys)
-                    )
-                )
-                self.set_operation_result("failed", False, self.msg, "ERROR")
-                return self
-
+        self.log("Validating invalid parameters against provided config", "DEBUG")
         for config_item in self.config:
-            self.validate_minimum_requirements(config_item)
+            self.validate_invalid_params(config_item, temp_spec.keys())
 
         self.log("Validating configuration parameters with schema - config: {0} and temp_spec: {1}".format(self.config, temp_spec), "DEBUG")
 
@@ -1327,28 +1302,15 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
             "DEBUG",
         )
 
-        # Fix: Properly handle file_path when it's None
-        file_path = yaml_config_generator.get("file_path")
+        # Get file_path and file_mode from self.params (top-level parameters)
+        file_path = self.params.get("file_path")
         if not file_path:
+            self.log("No file_path provided by user, generating default filename", "DEBUG")
             file_path = self.generate_filename()
         else:
-            self.log(
-                "Using user-specified file path: {0}".format(
-                    file_path
-                ),
-                "DEBUG",
-            )
+            self.log("Using user-provided file_path: {0}".format(file_path), "DEBUG")
 
         self.log("File path determined: {0}".format(file_path), "DEBUG")
-
-        # Handle generate_all_configurations flag
-        generate_all_configurations = yaml_config_generator.get("generate_all_configurations", False)
-        self.log(
-            "Auto-discovery mode: {0}".format(
-                "enabled" if generate_all_configurations else "disabled"
-            ),
-            "INFO",
-        )
 
         component_specific_filters = (
             yaml_config_generator.get("component_specific_filters") or {}
@@ -1357,24 +1319,11 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
             "Component-specific filters: {0}".format(component_specific_filters),
             "DEBUG",
         )
-        self.log(
-            "Generate all configurations: {0}".format(generate_all_configurations),
-            "DEBUG",
-        )
-
         module_supported_network_elements = self.module_schema.get("network_elements", {})
 
-        if generate_all_configurations:
-            components_list = list(module_supported_network_elements.keys())
-            self.log(
-                "Auto-discovery mode: using all available "
-                "components: {0}".format(components_list),
-                "INFO",
-            )
-        else:
-            components_list = component_specific_filters.get(
-                "components_list", list(module_supported_network_elements.keys())
-            )
+        components_list = component_specific_filters.get(
+            "components_list", list(module_supported_network_elements.keys())
+        )
 
         self.log(
             "Processing {0} component(s): {1}".format(
@@ -1539,6 +1488,16 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
         )
 
         self.validate_params(config)
+
+        # Set default component_specific_filters if not provided
+        if not config.get("component_specific_filters"):
+            config["component_specific_filters"] = {
+                "components_list": ["device_replacement_workflows"]
+            }
+            self.log(
+                "No component_specific_filters provided. Defaulting to device_replacement_workflows.",
+                "INFO"
+            )
 
         want = {}
         want["yaml_config_generator"] = config
@@ -1815,6 +1774,13 @@ def main():
             "type": "list",
             "elements": "dict"
         },
+        "file_path": {"required": False, "type": "str"},
+        "file_mode": {
+            "required": False,
+            "type": "str",
+            "default": "overwrite",
+            "choices": ["overwrite", "append"],
+        },
         "state": {
             "default": "gathered",
             "choices": ["gathered"]
@@ -1957,152 +1923,20 @@ def main():
     )
 
     # ============================================
-    # Configuration Processing and Default Handling
+    # Configuration Processing
     # ============================================
     config_list = ccc_rma_playbook_generator.validated_config
 
     ccc_rma_playbook_generator.log(
-        "Starting configuration processing and default handling - will process {0} configuration "
-        "item(s) from playbook".format(len(config_list)),
+        "Processing {0} configuration item(s) for state '{1}'".format(
+            len(config_list), state
+        ),
         "INFO"
     )
 
-    # Handle generate_all_configurations and set component defaults
-    for config_index, config_item in enumerate(config_list, start=1):
-        ccc_rma_playbook_generator.log(
-            "Processing configuration item {0}/{1} for generate_all_configurations and default component handling".format(
-                config_index, len(config_list)
-            ),
-            "DEBUG"
-        )
-
-        if config_item.get("generate_all_configurations", False):
-            ccc_rma_playbook_generator.log(
-                "Configuration item {0}: generate_all_configurations=True detected. Setting default "
-                "components to include device_replacement_workflows".format(
-                    config_index
-                ),
-                "INFO"
-            )
-
-            # Set default components when generate_all_configurations is True
-            if not config_item.get("component_specific_filters"):
-                config_item["component_specific_filters"] = {
-                    "components_list": ["device_replacement_workflows"]
-                }
-                ccc_rma_playbook_generator.log(
-                    "Configuration item {0}: Set default component_specific_filters for generate_all mode: {1}".format(
-                        config_index, config_item["component_specific_filters"]
-                    ),
-                    "DEBUG"
-                )
-            else:
-                ccc_rma_playbook_generator.log(
-                    "Configuration item {0}: component_specific_filters already provided in generate_all mode - "
-                    "using existing filters: {1}".format(
-                        config_index, config_item.get("component_specific_filters")
-                    ),
-                    "DEBUG"
-                )
-
-        elif config_item.get("component_specific_filters") is None:
-            ccc_rma_playbook_generator.log(
-                "Configuration item {0}: No component_specific_filters provided in normal mode. "
-                "Applying default configuration to retrieve device_replacement_workflows".format(
-                    config_index
-                ),
-                "INFO"
-            )
-
-            # Existing fallback logic for when no filters are specified
-            ccc_rma_playbook_generator.msg = (
-                "No component filters specified, defaulting to device_replacement_workflows."
-            )
-
-            config_item["component_specific_filters"] = {
-                "components_list": ["device_replacement_workflows"]
-            }
-
-            ccc_rma_playbook_generator.log(
-                "Configuration item {0}: Applied default component_specific_filters: {1}".format(
-                    config_index, config_item["component_specific_filters"]
-                ),
-                "DEBUG"
-            )
-        else:
-            ccc_rma_playbook_generator.log(
-                "Configuration item {0}: component_specific_filters already provided in normal mode - "
-                "using existing filters: {1}".format(
-                    config_index, config_item.get("component_specific_filters")
-                ),
-                "DEBUG"
-            )
-
-    # Update validated config after default handling
-    ccc_rma_playbook_generator.validated_config = config_list
-
-    ccc_rma_playbook_generator.log(
-        "Configuration preprocessing completed. Updated validated_config with default component "
-        "handling. Final configuration count: {0}".format(len(config_list)),
-        "INFO"
-    )
-
-    # ============================================
-    # Configuration Processing Loop
-    # ============================================
-    final_config_list = ccc_rma_playbook_generator.validated_config
-
-    ccc_rma_playbook_generator.log(
-        "Starting configuration processing loop - will process {0} final configuration "
-        "item(s) after default handling".format(len(final_config_list)),
-        "INFO"
-    )
-
-    for config_index, config_item in enumerate(final_config_list, start=1):
-        components_list = config_item.get("component_specific_filters", {}).get("components_list", "all")
-
-        ccc_rma_playbook_generator.log(
-            "Processing configuration item {0}/{1} for state '{2}' with components: {3}".format(
-                config_index, len(final_config_list), state, components_list
-            ),
-            "INFO"
-        )
-
-        # Reset values for clean state between configurations
-        ccc_rma_playbook_generator.log(
-            "Resetting module state variables for clean configuration processing",
-            "DEBUG"
-        )
-        ccc_rma_playbook_generator.reset_values()
-
-        # Collect desired state (want) from configuration
-        ccc_rma_playbook_generator.log(
-            "Collecting desired state parameters from configuration item {0} - "
-            "building want dictionary for RMA operations".format(
-                config_index
-            ),
-            "DEBUG"
-        )
-        ccc_rma_playbook_generator.get_want(
-            config_item, state
-        ).check_return_status()
-
-        # Execute state-specific operation (gathered workflow)
-        ccc_rma_playbook_generator.log(
-            "Executing state-specific operation for '{0}' workflow on "
-            "configuration item {1} - will retrieve device replacement workflows "
-            "from Catalyst Center".format(state, config_index),
-            "INFO"
-        )
+    for config_item in config_list:
+        ccc_rma_playbook_generator.get_want(config_item, state).check_return_status()
         ccc_rma_playbook_generator.get_diff_state_apply[state]().check_return_status()
-
-        ccc_rma_playbook_generator.log(
-            "Successfully completed processing for configuration item {0}/{1} - "
-            "RMA device replacement workflow data extraction and YAML generation completed".format(
-                config_index, len(final_config_list)
-            ),
-            "INFO"
-        )
 
     # ============================================
     # Module Completion and Exit
@@ -2116,30 +1950,20 @@ def main():
     )
 
     ccc_rma_playbook_generator.log(
-        "RMA playbook generator module execution completed successfully "
-        "at timestamp {0}. Total execution time: {1:.2f} seconds. Processed {2} "
-        "configuration item(s) with final status: {3}".format(
+        "Module execution completed successfully at timestamp {0}. "
+        "Total execution time: {1:.2f} seconds. Final status: {2}".format(
             completion_timestamp,
             module_duration,
-            len(final_config_list),
             ccc_rma_playbook_generator.status
         ),
         "INFO"
     )
 
-    ccc_rma_playbook_generator.log(
-        "Final module result summary: changed={0}, msg_type={1}, response_available={2}".format(
-            ccc_rma_playbook_generator.result.get("changed", False),
-            type(ccc_rma_playbook_generator.result.get("msg")).__name__,
-            "response" in ccc_rma_playbook_generator.result
-        ),
-        "DEBUG"
-    )
-
     # Exit module with results
-    # This is a terminal operation - function does not return after this
     ccc_rma_playbook_generator.log(
-        "Exiting Ansible module with result containing RMA device replacement extraction results",
+        "Exiting Ansible module with result: {0}".format(
+            ccc_rma_playbook_generator.result
+        ),
         "DEBUG"
     )
 

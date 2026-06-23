@@ -112,6 +112,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info_generate_all",
                 config=self.playbook_generate_all_configurations
             )
         )
@@ -123,7 +124,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 "components_processed": 1,
                 "components_skipped": 0,
                 "configurations_count": 1,
-                "file_path": "/Users/priyadharshini/Downloads/rma_info",
+                "file_path": "/tmp/rma_info_generate_all",
                 "message": "YAML configuration file generated successfully for module 'rma_workflow_manager'",
                 "status": "success"
             }
@@ -145,6 +146,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info_component_filters",
                 config=self.playbook_component_filters
             )
         )
@@ -156,7 +158,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 "components_processed": 1,
                 "components_skipped": 0,
                 "configurations_count": 1,
-                "file_path": "/Users/priyadharshini/Downloads/rma_info",
+                "file_path": "/tmp/rma_info_component_filters",
                 "message": "YAML configuration file generated successfully for module 'rma_workflow_manager'",
                 "status": "success"
             }
@@ -178,6 +180,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info_specific_filters",
                 config=self.playbook_specifc_filters
             )
         )
@@ -189,7 +192,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 "components_processed": 1,
                 "components_skipped": 0,
                 "configurations_count": 1,
-                "file_path": "/Users/priyadharshini/Downloads/rma_info",
+                "file_path": "/tmp/rma_info_specific_filters",
                 "message": "YAML configuration file generated successfully for module 'rma_workflow_manager'",
                 "status": "success"
             }
@@ -211,6 +214,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info",
                 config=self.playbook_no_device_found
             )
         )
@@ -247,6 +251,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info_component_specific_filters1",
                 config=self.playbook_component_specific_filters1
             )
         )
@@ -258,7 +263,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 "components_processed": 1,
                 "components_skipped": 0,
                 "configurations_count": 1,
-                "file_path": "/Users/priyadharshini/Downloads/rma_info",
+                "file_path": "/tmp/rma_info_component_specific_filters1",
                 "message": "YAML configuration file generated successfully for module 'rma_workflow_manager'",
                 "status": "success"
             }
@@ -280,6 +285,7 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
                 catalystcenter_log=True,
                 state="gathered",
                 catalystcenter_version="2.3.7.6",
+                file_path="/tmp/rma_info",
                 config=self.playbook_negative_scenario1
             )
         )
@@ -290,6 +296,6 @@ class TestCatalystCenterRmaPlaybookGenerator(TestCatalystModule):
             (
                 "Invalid network components provided for module 'rma_workflow_manager': "
                 "['device_replacement_workflow']. "
-                "Valid components are: ['device_replacement_workflows']"
+                "Valid components are: ['device_replacement_workflows', 'components_list']"
             )
         )
