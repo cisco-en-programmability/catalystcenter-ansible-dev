@@ -612,6 +612,38 @@ sda_fabric_discover_and_onboard_fabric_devices:
                 data_vlan_name: "APPOOL_INFRA_VN"
 ```
 
+## Validate Input (Schema & Vars Validation)
+
+Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+
+- `-s` : path to the schema file
+- `-v` : path to the vars (input) file
+
+```bash
+./tools/schemavalidation.sh \
+  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
+  -v cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+```
+
+Expected output:
+
+```bash
+(pyats) bash-4.4$ ./tools/schemavalidation.sh \
+  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
+  -v cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml
+cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+yamale  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml  cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+Validating .../cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml...
+Validation success! 👍
+```
+
+If `yamale` is not installed in your active environment:
+
+```bash
+pip install yamale
+```
+
 ## Step 3: Export Credentials
 
 ```bash

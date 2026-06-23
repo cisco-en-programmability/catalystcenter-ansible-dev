@@ -426,11 +426,11 @@ network_settings_details:
       settings:
         network_aaa: {}
         client_and_endpoint_aaa: {}
-        dhcp_server: {}
+        dhcp_server: []
         dns_server: {}
-        ntp_server: {}
+        ntp_server: []
         message_of_the_day: {}
-        timezone: {}
+        timezone: ''
         netflow_collector:
           collector_type: Builtin
           enable_on_wired_access_devices: false
@@ -481,12 +481,12 @@ To run scale network settings, we need to create a scalable site first.
         area:
           name: Network Settings Scale
           parent_name: Global
-      site_type: area
+      type: area
   {% for i in range(1, range_site|int + 1) %}
     - site:
         area:
           name: {{site_name}}-{{ i|string }}
-          parentName: Global/Network Settings Scale
+          parent_name: Global/Network Settings Scale
       type: area
   {% endfor %}
   ```
@@ -508,23 +508,23 @@ To run scale network settings, we need to create a scalable site first.
         area:
           name: Network Settings Scale
           parent_name: Global
-      site_type: area
+      type: area
 
     - site:
         area:
           name: country-1
-          parentName: Global/Network Settings Scale
+          parent_name: Global/Network Settings Scale
       type: area
     - site:
         area:
           name: country-2
-          parentName: Global/Network Settings Scale
+          parent_name: Global/Network Settings Scale
       type: area
     ...
     - site:
         area:
           name: country-10
-          parentName: Global/Network Settings Scale
+          parent_name: Global/Network Settings Scale
       type: area
   ```
 

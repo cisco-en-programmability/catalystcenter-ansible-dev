@@ -41,16 +41,16 @@ Supported membership identifiers:
 ## Validate
 
 ```bash
-./tools/schemavalidation.sh -s workflows/tags_config_generator/schema/tags_config_generator_schema.yml \
-  -v workflows/tags_config_generator/vars/tags_config_generator_input.yml
+./tools/schemavalidation.sh -s cvp/tags_config_generator/schema/tags_config_generator_schema.yml \
+  -v cvp/tags_config_generator/vars/tags_config_generator_input.yml
 ```
 
 ## Execute
 
 ```bash
 ansible-playbook -i inventory/demo_lab/hosts.yaml \
-  workflows/tags_config_generator/playbook/tags_config_generator.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/workflows/tags_config_generator/vars/tags_config_generator_input.yml
+  cvp/tags_config_generator/playbook/tags_config_generator.yml \
+  --extra-vars VARS_FILE_PATH=${PWD}/cvp/tags_config_generator/vars/tags_config_generator_input.yml
 ```
 
 ## Examples
@@ -90,12 +90,12 @@ tags_config:
 You can also run this workflow without `VARS_FILE_PATH` by moving the sample workflow data into inventory, `host_vars`, or `group_vars`.
 
 1. Create an inventory vars file such as `inventory/group_vars/all.yml` or `inventory/host_vars/<host>.yml`.
-2. Copy the sample workflow data from `workflows/tags_config_generator/vars/tags_config_generator_input.yml` into that inventory vars file.
+2. Copy the sample workflow data from `cvp/tags_config_generator/vars/tags_config_generator_input.yml` into that inventory vars file.
 3. Keep the same top-level variable name in inventory: `tags_config`.
 4. Run the playbook without `VARS_FILE_PATH`:
 
 ```bash
-ansible-playbook -i <inventory-file> workflows/tags_config_generator/playbook/tags_config_generator.yml -vvvv
+ansible-playbook -i <inventory-file> cvp/tags_config_generator/playbook/tags_config_generator.yml -vvvv
 ```
 ## VARS_FILE_PATH Path Resolution
 
@@ -104,5 +104,5 @@ Ansible resolves `VARS_FILE_PATH` relative to the playbook directory, not the cu
 Use either of these forms:
 
 - Relative to the playbook: `../vars/tags_config_generator_input.yml`
-- Fully resolved from the repo root: `${PWD}/workflows/tags_config_generator/vars/tags_config_generator_input.yml`
+- Fully resolved from the repo root: `${PWD}/cvp/tags_config_generator/vars/tags_config_generator_input.yml`
 

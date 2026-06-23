@@ -138,6 +138,38 @@ port_assignment_migration:
 Update:
 - `cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml`
 
+## Validate Input (Schema & Vars Validation)
+
+Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+
+- `-s` : path to the schema file
+- `-v` : path to the vars (input) file
+
+```bash
+./tools/schemavalidation.sh \
+  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml \
+  -v cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
+```
+
+Expected output:
+
+```bash
+(pyats) bash-4.4$ ./tools/schemavalidation.sh \
+  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml \
+  -v cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
+cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml
+cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
+yamale  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml  cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
+Validating .../cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml...
+Validation success! 👍
+```
+
+If `yamale` is not installed in your active environment:
+
+```bash
+pip install yamale
+```
+
 ## Step 3: Setup Env Variables and Run Playbook
 
 The inventory file `inventory/demo_lab/hosts.yaml` reads Catalyst Center connection values from environment variables.

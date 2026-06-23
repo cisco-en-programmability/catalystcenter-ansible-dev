@@ -134,6 +134,50 @@ export CATALYST_CENTER_PASSWORD='<password>'
 ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/fabric_devices_info/playbook/fabric_devices_info_playbook.yml -vvvv
 ```
 
+Or pass the vars input file explicitly via `--extra-vars VARS_FILE_PATH=...`:
+
+```bash
+ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
+  ./cvp/fabric_devices_info/playbook/fabric_devices_info_playbook.yml \
+  --extra-vars VARS_FILE_PATH=${PWD}/cvp/fabric_devices_info/vars/fabric_devices_info_input.yml \
+  -vvvv
+```
+
+> `VARS_FILE_PATH` is resolved relative to the playbook directory, so you can also use the shorter form `--extra-vars "VARS_FILE_PATH=../vars/fabric_devices_info_input.yml"`.
+
+
+## Validate Input (Schema & Vars Validation)
+
+Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+
+- `-s` : path to the schema file
+- `-v` : path to the vars (input) file
+
+```bash
+./tools/schemavalidation.sh \
+  -s cvp/fabric_devices_info/schema/fabric_devices_info_schema.yml \
+  -v cvp/fabric_devices_info/vars/fabric_devices_info_input.yml
+```
+
+Expected output:
+
+```bash
+(pyats) bash-4.4$ ./tools/schemavalidation.sh \
+  -s cvp/fabric_devices_info/schema/fabric_devices_info_schema.yml \
+  -v cvp/fabric_devices_info/vars/fabric_devices_info_input.yml
+cvp/fabric_devices_info/schema/fabric_devices_info_schema.yml
+cvp/fabric_devices_info/vars/fabric_devices_info_input.yml
+yamale  -s cvp/fabric_devices_info/schema/fabric_devices_info_schema.yml  cvp/fabric_devices_info/vars/fabric_devices_info_input.yml
+Validating .../cvp/fabric_devices_info/vars/fabric_devices_info_input.yml...
+Validation success! 👍
+```
+
+If `yamale` is not installed in your active environment:
+
+```bash
+pip install yamale
+```
+
 
 ## Usage Examples
 The UI display (example):

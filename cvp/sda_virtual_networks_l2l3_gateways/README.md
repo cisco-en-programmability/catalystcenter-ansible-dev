@@ -583,13 +583,13 @@ This example can be reused and customized to your requirement and increase the r
           area:
             name: SDA Sites
             parent_name: Global
-        site_type: area
+        type: area
     {% for i in range(range_site|int) %}
       - site:
           area:
             name: {{ site_name }}-{{ i|string }}
             parent_name: Global/SDA Sites
-        site_type: area
+        type: area
     {% endfor %}
 
     ### -------------------- Scale Fabric Site Zone -------------------- ###
@@ -612,18 +612,18 @@ This example can be reused and customized to your requirement and increase the r
           area:
             name: SDA Sites
             parent_name: Global
-        site_type: area
+        type: area
       - site:
           area:
             name: site_scale-0
             parent_name: Global/SDA Sites
-        site_type: area
+        type: area
       ...
       - site:
           area:
             name: site_scale-9
             parent_name: Global/SDA Sites
-        site_type: area
+        type: area
     ### -------------------- Scale Fabric Site Zone -------------------- ###
     fabric_sites_and_zones:
       - fabric_sites:

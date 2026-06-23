@@ -202,7 +202,7 @@ Once the input validation is complete and no errors are found, you can run the p
 
 ```bash
 
-     ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=/Users/majlona/dnac_ansible_cvp/cvp/sda_fabric_device_roles/vars/sda_fabric_device_roles_input.yml -vvv
+     ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=${PWD}/cvp/sda_fabric_device_roles/vars/sda_fabric_device_roles_input.yml -vvv
 ```
 
 If there is an error in the input or an issue with the API call during execution, the playbook will halt and display the relevant error details.
@@ -299,7 +299,7 @@ fabric_devices_details:
 ##### Execute the Playbook
 
 ```bash
-    ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/delete_sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=w/Users/majlona/Desktop/dnac_ansible_workflows_vs_copilot/cvp/sda_fabric_device_roles/vars/delete_sda_fabric_device_roles_input.yml -vvv
+    ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/delete_sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=${PWD}/cvp/sda_fabric_device_roles/vars/delete_sda_fabric_device_roles_input.yml -vvv
 ```
 
 #### Delete SDA Fabric Device Roles
@@ -326,7 +326,7 @@ fabric_devices_details:
 ##### Execute the Playbook
 
 ```bash
-    ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/delete_sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=w/Users/majlona/Desktop/dnac_ansible_workflows_vs_copilot/cvp/sda_fabric_device_roles/vars/delete_sda_fabric_device_roles_input.yml -vvv
+    ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/sda_fabric_device_roles/playbook/delete_sda_fabric_device_roles_playbook.yml --e VARS_FILE_PATH=${PWD}/cvp/sda_fabric_device_roles/vars/delete_sda_fabric_device_roles_input.yml -vvv
 ```
 ## Workflow Steps
 ## User Flow (3 Steps)
