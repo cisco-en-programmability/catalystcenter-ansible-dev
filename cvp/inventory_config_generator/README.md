@@ -130,7 +130,7 @@ ansible-galaxy collection install cisco.catalystcenter --force
 export HOSTIP=<catalyst-center-ip-or-fqdn>
 export CATALYST_CENTER_USERNAME=<username>
 export CATALYST_CENTER_PASSWORD='<password>'
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/discovery_config_generator/playbook/discovery_config_generator.yml -vvvv
+ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/inventory_config_generator/playbook/inventory_config_generator.yml -vvvv
 ```
 
 ---

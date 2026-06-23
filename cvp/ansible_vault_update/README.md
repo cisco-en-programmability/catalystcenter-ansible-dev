@@ -32,6 +32,39 @@ ansible-playbook -i host_inventory cvp/ansible_vault_update/playbook/ansible_vau
 ## Removing variables from ansible vault
 
 ansible-playbook -i host_inventory cvp/ansible_vault_update/playbook/delete_ansible_vault_update_playbook.yml --extra-vars "VARS_FILE_PATH=../vars/ansible_vault_update_inputs.yml"
+
+## Validate Input (Schema & Vars Validation)
+
+Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+
+- `-s` : path to the schema file
+- `-v` : path to the vars (input) file
+
+```bash
+./tools/schemavalidation.sh \
+  -s cvp/ansible_vault_update/schema/ansible_vault_update_schema.yml \
+  -v cvp/ansible_vault_update/vars/ansible_vault_update_inputs.yml
+```
+
+Expected output:
+
+```bash
+(pyats) bash-4.4$ ./tools/schemavalidation.sh \
+  -s cvp/ansible_vault_update/schema/ansible_vault_update_schema.yml \
+  -v cvp/ansible_vault_update/vars/ansible_vault_update_inputs.yml
+cvp/ansible_vault_update/schema/ansible_vault_update_schema.yml
+cvp/ansible_vault_update/vars/ansible_vault_update_inputs.yml
+yamale  -s cvp/ansible_vault_update/schema/ansible_vault_update_schema.yml  cvp/ansible_vault_update/vars/ansible_vault_update_inputs.yml
+Validating .../cvp/ansible_vault_update/vars/ansible_vault_update_inputs.yml...
+Validation success! 👍
+```
+
+If `yamale` is not installed in your active environment:
+
+```bash
+pip install yamale
+```
+
 ## Workflow Steps
 ## User Flow (3 Steps)
 
