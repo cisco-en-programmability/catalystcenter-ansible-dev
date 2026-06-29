@@ -27,13 +27,21 @@ flowchart TD
 
 ## Step 1: Setup Environment
 
-From the repository root:
+Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
+
+Placeholders used in the examples below (replace each with the actual absolute path on your system):
+
+- `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
+- `/<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml` — the playbook file
+- `/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml` — your input vars file
+- `/<abs-path-to-schema>/sda_fabric_discover_and_onboard_fabric_devices_schema.yml` — the schema file
+- `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv /<abs-path-to-your-project>/.venv
+source /<abs-path-to-your-project>/.venv/bin/activate
 pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+pip install -r /<abs-path-to-your-project>/requirements.txt
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
@@ -614,27 +622,27 @@ sda_fabric_discover_and_onboard_fabric_devices:
 
 ## Validate Input (Schema & Vars Validation)
 
-Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+Before running the playbook, validate the input file against the schema using the `schemavalidation.sh` helper (a wrapper around `yamale`). Pass absolute paths for both arguments:
 
-- `-s` : path to the schema file
-- `-v` : path to the vars (input) file
+- `-s` : absolute path to the schema file
+- `-v` : absolute path to the vars (input) file
 
 ```bash
-./tools/schemavalidation.sh \
-  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
-  -v cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+/<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
+  -v /<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml
 ```
 
 Expected output:
 
 ```bash
-(pyats) bash-4.4$ ./tools/schemavalidation.sh \
-  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
-  -v cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
-cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml
-cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
-yamale  -s cvp/sda_fabric_discover_and_onboard_fabric_devices/schema/sda_fabric_discover_and_onboard_fabric_devices_schema.yml  cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml
-Validating .../cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml...
+(pyats) bash-4.4$ /<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/sda_fabric_discover_and_onboard_fabric_devices_schema.yml \
+  -v /<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+/<abs-path-to-schema>/sda_fabric_discover_and_onboard_fabric_devices_schema.yml
+/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+yamale  -s /<abs-path-to-schema>/sda_fabric_discover_and_onboard_fabric_devices_schema.yml  /<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+Validating /<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml...
 Validation success! 👍
 ```
 
@@ -654,16 +662,17 @@ export CATALYST_CENTER_PASSWORD='your_password'
 
 ## Step 4: Run the Playbook
 
-The playbook supports two input methods:
+The playbook supports two input methods. Always pass **absolute paths** — the playbook and the vars file may live in different directories in your project.
 
 ### Option A: Vars file input (recommended for version-controlled configs)
 
-Pass the input vars file via `VARS_FILE_PATH`:
+Pass the input vars file via `VARS_FILE_PATH` (must be an absolute path):
 
 ```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
   -vvvv
 ```
 
@@ -671,7 +680,7 @@ ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
 
 Omit `VARS_FILE_PATH` and define the workflow variables directly as host variables in the inventory file. This is useful when you want to keep all configuration (credentials + workflow data) in a single inventory file or when using `host_vars`/`group_vars` directories.
 
-**Example inventory file (`inventory/demo_lab/hosts.yaml`):**
+**Example inventory file (`/<abs-path-to-inventory>/hosts.yaml`):**
 
 ```yaml
 ---
@@ -731,8 +740,9 @@ catalyst_center_hosts:
 Then run **without** `VARS_FILE_PATH`:
 
 ```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
   -vvvv
 ```
 
@@ -744,21 +754,24 @@ The playbook auto-detects the input source and prints it at the start:
 
 ```bash
 # Run only discovery
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
   --tags discovery -vvvv
 
 # Run LAN automation and all later stages
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
   --tags lan_automation,inventory_roles,provision,fabric_devices,host_port_onboarding -vvvv
 
 # Run any single stage (replace TAG with one from the table below)
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
   --tags TAG -vvvv
 ```
 
@@ -778,9 +791,10 @@ ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
 Run with `--check` to validate inputs and preview what would be configured **without making any changes** to Catalyst Center:
 
 ```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml \
   --check -vvvv
 ```
 
@@ -844,13 +858,13 @@ flowchart TD
 1. Create and activate a Python virtual environment, then install dependencies.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv /<abs-path-to-your-project>/.venv
+source /<abs-path-to-your-project>/.venv/bin/activate
+pip install -r /<abs-path-to-your-project>/requirements.txt
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
-2. Provide workflow inputs in either inventory (`inventory/demo_lab/hosts.yaml`) or the workflow `vars/` file.
+2. Provide workflow inputs in either your inventory file (`/<abs-path-to-inventory>/hosts.yaml`) or your vars input file (`/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml`).
 
 3. Export Catalyst Center environment variables and run the playbook.
 
@@ -858,14 +872,20 @@ ansible-galaxy collection install cisco.catalystcenter --force
 export HOSTIP=<catalyst-center-ip-or-fqdn>
 export CATALYST_CENTER_USERNAME=<username>
 export CATALYST_CENTER_PASSWORD='<password>'
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/sda_fabric_discover_and_onboard_fabric_devices/playbook/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml -vvvv
+
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_fabric_discover_and_onboard_fabric_devices_playbook.yml \
+  -vvvv
 ```
-## VARS_FILE_PATH Path Resolution
 
-Ansible resolves `VARS_FILE_PATH` relative to the playbook directory, not the current working directory.
+## VARS_FILE_PATH
 
-Use either of these forms:
+Always pass `VARS_FILE_PATH` as an **absolute path**, for example:
 
-- Relative to the playbook: `../vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml`
-- Fully resolved from the repo root: `${PWD}/cvp/sda_fabric_discover_and_onboard_fabric_devices/vars/sda_fabric_discover_and_onboard_fabric_devices_input.yml`
+```
+/<abs-path-to-vars>/sda_fabric_discover_and_onboard_fabric_devices_input.yml
+```
+
+Relative paths are intentionally not documented — the playbook and the vars file may live in different directories on a customer's system, so absolute paths are the only supported form.
 
