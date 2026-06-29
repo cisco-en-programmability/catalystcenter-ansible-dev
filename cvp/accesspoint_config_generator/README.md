@@ -35,13 +35,13 @@ The Access Point config generator automates YAML playbook generation for existin
 
 ### Software Requirements
 
-| Component | Version |
-|-----------|---------|
-| Ansible | 2.13+ |
-| cisco.catalystcenter collection | 2.6.0 |
-| Python | 3.9+ |
-| Cisco Catalyst Center | 2.3.5.3+ |
-| catalystcentersdk | 2.10.10+ |
+| Component                       | Version  |
+| ------------------------------- | -------- |
+| Ansible                         | 2.13+    |
+| cisco.catalystcenter collection | 2.6.0    |
+| Python                          | 3.9+     |
+| Cisco Catalyst Center           | 2.3.5.3+ |
+| catalystcentersdk               | 2.10.10+ |
 
 ### Required Collections
 
@@ -79,12 +79,12 @@ accesspoint_config_generator/
 
 ### Basic Configuration
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `generate_all_configurations` | boolean | No | false | Workflow convenience flag. When true, the playbook omits module `config` |
-| `file_path` | string | No | auto-generated | Output file path for generated YAML |
-| `file_mode` | string | No | `overwrite` | File write mode: `overwrite` or `append` |
-| `global_filters` | dict | No | omitted | Workflow convenience wrapper mapped to module `config.global_filters` |
+| Parameter                       | Type    | Required | Default        | Description                                                               |
+| ------------------------------- | ------- | -------- | -------------- | ------------------------------------------------------------------------- |
+| `generate_all_configurations` | boolean | No       | false          | Workflow convenience flag. When true, the playbook omits module`config` |
+| `file_path`                   | string  | No       | auto-generated | Output file path for generated YAML                                       |
+| `file_mode`                   | string  | No       | `overwrite`  | File write mode:`overwrite` or `append`                               |
+| `global_filters`              | dict    | No       | omitted        | Workflow convenience wrapper mapped to module`config.global_filters`    |
 
 ### Global Filters
 
@@ -95,6 +95,7 @@ accesspoint_config_generator/
 - `accesspoint_provision_config_mac_list`
 
 Module filter priority:
+
 - `site_list` > `provision_hostname_list` > `accesspoint_config_list` > `accesspoint_provision_config_list` > `accesspoint_provision_config_mac_list`
 
 ---
@@ -102,6 +103,7 @@ Module filter priority:
 ## Getting Started
 
 ## Workflow Steps
+
 ## User Flow (3 Steps)
 
 ```mermaid
@@ -118,63 +120,76 @@ flowchart TD
   I --> J[Done]
 ```
 
-### Installation and Run (Aligned)
+### Installation and Run
+
+> Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
+>
+> Placeholders used in the examples below (replace each with the actual absolute path on your system):
+>
+> - `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
+> - `/<abs-path-to-playbook>/accesspoint_config_generator.yml` — the playbook file
+> - `/<abs-path-to-vars>/accesspoint_config_inputs.yml` — your input vars file
+> - `/<abs-path-to-schema>/accesspoint_config_schema.yml` — the schema file
+> - `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
 
 1. Create and activate a Python virtual environment, then install dependencies.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv /<abs-path-to-your-project>/.venv
+source /<abs-path-to-your-project>/.venv/bin/activate
+pip install -r /<abs-path-to-your-project>/requirements.txt
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
-2. Provide workflow inputs in either inventory (`inventory/demo_lab/hosts.yaml`) or the workflow `vars/` file.
-
+2. Provide workflow inputs in either your inventory file (`/<abs-path-to-inventory>/hosts.yaml`) or your vars input file (`/<abs-path-to-vars>/accesspoint_config_inputs.yml`).
 3. Export Catalyst Center environment variables and run the playbook.
 
 ```bash
 export HOSTIP=<catalyst-center-ip-or-fqdn>
 export CATALYST_CENTER_USERNAME=<username>
 export CATALYST_CENTER_PASSWORD='<password>'
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/accesspoint_config_generator/playbook/accesspoint_config_generator.yml -vvvv
-```
 
-Or pass the vars input file explicitly via `--extra-vars VARS_FILE_PATH=...`:
-
-```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/accesspoint_config_generator/playbook/accesspoint_config_generator.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/accesspoint_config_generator.yml \
   -vvvv
 ```
 
-> `VARS_FILE_PATH` is resolved relative to the playbook directory, so you can also use the shorter form `--extra-vars "VARS_FILE_PATH=../vars/accesspoint_config_inputs.yml"`.
+Or pass the vars input file explicitly via `--extra-vars VARS_FILE_PATH=...` (must be an absolute path):
 
+```bash
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/accesspoint_config_generator.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/accesspoint_config_inputs.yml \
+  -vvvv
+```
+
+> Always pass `VARS_FILE_PATH` as an **absolute path**. The playbook and the vars file may live in different directories in your project, so relative paths are not supported by this documentation.
 
 ## Validate Input (Schema & Vars Validation)
 
-Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+Before running the playbook, validate the input file against the schema using the `schemavalidation.sh` helper (a wrapper around `yamale`). Pass absolute paths for both arguments:
 
-- `-s` : path to the schema file
-- `-v` : path to the vars (input) file
+- `-s` : absolute path to the schema file
+- `-v` : absolute path to the vars (input) file
 
 ```bash
-./tools/schemavalidation.sh \
-  -s cvp/accesspoint_config_generator/schema/accesspoint_config_schema.yml \
-  -v cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml
+/<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/accesspoint_config_schema.yml \
+  -v /<abs-path-to-vars>/accesspoint_config_inputs.yml
 ```
 
 Expected output:
 
 ```bash
-(pyats) bash-4.4$ ./tools/schemavalidation.sh \
-  -s cvp/accesspoint_config_generator/schema/accesspoint_config_schema.yml \
-  -v cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml
-cvp/accesspoint_config_generator/schema/accesspoint_config_schema.yml
-cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml
-yamale  -s cvp/accesspoint_config_generator/schema/accesspoint_config_schema.yml  cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml
-Validating .../cvp/accesspoint_config_generator/vars/accesspoint_config_inputs.yml...
+(pyats) bash-4.4$ /<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/accesspoint_config_schema.yml \
+  -v /<abs-path-to-vars>/accesspoint_config_inputs.yml
+/<abs-path-to-schema>/accesspoint_config_schema.yml
+/<abs-path-to-vars>/accesspoint_config_inputs.yml
+yamale  -s /<abs-path-to-schema>/accesspoint_config_schema.yml  /<abs-path-to-vars>/accesspoint_config_inputs.yml
+Validating /<abs-path-to-vars>/accesspoint_config_inputs.yml...
 Validation success! 👍
 ```
 
@@ -184,21 +199,24 @@ If `yamale` is not installed in your active environment:
 pip install yamale
 ```
 
-
 ## Operations
 
 ### Generate Operations (state: gathered)
 
 1. **Generate all AP configurations**
+
 - Set `generate_all_configurations: true`, or omit `global_filters` entirely.
 
 2. **Generate by site list**
+
 - Use `global_filters.site_list`.
 
 3. **Generate by AP hostname filters**
+
 - Use `global_filters.provision_hostname_list` or `global_filters.accesspoint_config_list`.
 
 4. **Generate by combined hostname/MAC filters**
+
 - Use `global_filters.accesspoint_provision_config_list` or `global_filters.accesspoint_provision_config_mac_list`.
 
 ---
@@ -237,3 +255,4 @@ accesspoint_config:
 
 - `accesspoint_playbook_config_generator` expects `config.global_filters` when filtering is used.
 - This workflow omits module `config` when `generate_all_configurations: true` is set or when `global_filters` is omitted or empty.
+- Run all commands from your own test project and always supply **absolute paths** for the inventory, playbook, vars, schema, and `VARS_FILE_PATH`. Relative paths are intentionally not documented because the playbook and the vars file may live in different directories on a customer's system.

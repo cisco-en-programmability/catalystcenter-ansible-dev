@@ -79,18 +79,26 @@ flowchart TD
 
 ## Step 1: Virtual Env Setup
 
-Run the following from repository root:
+Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
+
+Placeholders used in the examples below (replace each with the actual absolute path on your system):
+
+- `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
+- `/<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml` — the playbook file
+- `/<abs-path-to-vars>/sda_port_assignment_migration_input.yml` — your input vars file
+- `/<abs-path-to-schema>/sda_port_assignment_migration_schema.yml` — the schema file
+- `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
 
 ```bash
 # Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv /<abs-path-to-your-project>/.venv
+source /<abs-path-to-your-project>/.venv/bin/activate
 
 # Upgrade pip tooling
 python -m pip install --upgrade pip setuptools wheel
 
 # Install Python dependencies (includes ansible and catalystcentersdk)
-pip install -r requirements.txt
+pip install -r /<abs-path-to-your-project>/requirements.txt
 
 # Install/upgrade Cisco Catalyst Center Ansible collection
 ansible-galaxy collection install cisco.catalystcenter --force
@@ -102,7 +110,7 @@ You can provide migration inputs in either of these ways:
 
 ### Option A (Simplest CLI): Put inputs in inventory
 
-Add workflow input variables under your inventory host (`inventory/demo_lab/hosts.yaml`):
+Add workflow input variables under your inventory host (`/<abs-path-to-inventory>/hosts.yaml`):
 
 ```yaml
 ---
@@ -136,31 +144,31 @@ port_assignment_migration:
 ### Option B: Keep inputs in a separate vars file
 
 Update:
-- `cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml`
+- `/<abs-path-to-vars>/sda_port_assignment_migration_input.yml`
 
 ## Validate Input (Schema & Vars Validation)
 
-Before running the playbook, validate the input file against the schema using `./tools/schemavalidation.sh` (a wrapper around `yamale`):
+Before running the playbook, validate the input file against the schema using the `schemavalidation.sh` helper (a wrapper around `yamale`). Pass absolute paths for both arguments:
 
-- `-s` : path to the schema file
-- `-v` : path to the vars (input) file
+- `-s` : absolute path to the schema file
+- `-v` : absolute path to the vars (input) file
 
 ```bash
-./tools/schemavalidation.sh \
-  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml \
-  -v cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
+/<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml \
+  -v /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
 ```
 
 Expected output:
 
 ```bash
-(pyats) bash-4.4$ ./tools/schemavalidation.sh \
-  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml \
-  -v cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
-cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml
-cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
-yamale  -s cvp/sda_port_assignment_migration/schema/sda_port_assignment_migration_schema.yml  cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml
-Validating .../cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml...
+(pyats) bash-4.4$ /<abs-path-to-collection>/tools/schemavalidation.sh \
+  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml \
+  -v /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+/<abs-path-to-schema>/sda_port_assignment_migration_schema.yml
+/<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+yamale  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml  /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+Validating /<abs-path-to-vars>/sda_port_assignment_migration_input.yml...
 Validation success! 👍
 ```
 
@@ -172,17 +180,17 @@ pip install yamale
 
 ## Step 3: Setup Env Variables and Run Playbook
 
-The inventory file `inventory/demo_lab/hosts.yaml` reads Catalyst Center connection values from environment variables.
+The inventory file `/<abs-path-to-inventory>/hosts.yaml` reads Catalyst Center connection values from environment variables.
 
 ```bash
 export HOSTIP=<host ip>
 export CATALYST_CENTER_USERNAME=admin
 export CATALYST_CENTER_PASSWORD='your_password'
 # Optional override only (normally not needed):
-# export ANSIBLE_PYTHON_INTERPRETER="$(pwd)/.venv/bin/python"
+# export ANSIBLE_PYTHON_INTERPRETER="/<abs-path-to-your-project>/.venv/bin/python"
 ```
 
-### Inventory File Explained (`inventory/demo_lab/hosts.yaml`)
+### Inventory File Explained (`/<abs-path-to-inventory>/hosts.yaml`)
 
 This workflow runs against host group `catalyst_center_hosts` and expects one Catalyst Center target host (for example `catalyst_center220`).
 
@@ -228,19 +236,23 @@ Input source behavior:
 Run (inventory input mode, no extra vars):
 
 ```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_port_assignment_migration/playbook/sda_port_assignment_migration_playbook.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml \
   -vvvv
 ```
 
-Run (vars file mode, optional):
+Run (vars file mode, with absolute `VARS_FILE_PATH`):
 
 ```bash
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml \
-  ./cvp/sda_port_assignment_migration/playbook/sda_port_assignment_migration_playbook.yml \
-  --extra-vars VARS_FILE_PATH=${PWD}/cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml \
+ansible-playbook \
+  -i /<abs-path-to-inventory>/hosts.yaml \
+  /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml \
+  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_port_assignment_migration_input.yml \
   -vvvv
 ```
+
+> Always pass `VARS_FILE_PATH` as an **absolute path**. The playbook and the vars file may live in different directories in your project, so relative paths are not supported by this documentation.
 
 ## Example Migration Result (Run on March 25, 2026)
 
@@ -308,7 +320,7 @@ Workflow summary from logs:
 
 
 Example Run Logs:
-ansible-playbook -i ./inventory/demo_lab/hosts.yaml ./cvp/sda_port_assignment_migration/playbook/sda_port_assignment_migration_playbook.yml
+ansible-playbook -i /<abs-path-to-inventory>/hosts.yaml /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml
 
 PLAY [Migrate SDA port assignments from source to destination devices] *****************************************************
 
@@ -577,12 +589,13 @@ ok: [catalyst_center220 -> catalyst_center_hosts]
 
 PLAY RECAP *****************************************************************************************************************
 catalyst_center220         : ok=37   changed=1    unreachable=0    failed=0    skipped=14   rescued=0    ignored=0
-## VARS_FILE_PATH Path Resolution
+## VARS_FILE_PATH
 
-Ansible resolves `VARS_FILE_PATH` relative to the playbook directory, not the current working directory.
+Always pass `VARS_FILE_PATH` as an **absolute path**, for example:
 
-Use either of these forms:
+```
+/<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+```
 
-- Relative to the playbook: `../vars/sda_port_assignment_migration_input.yml`
-- Fully resolved from the repo root: `${PWD}/cvp/sda_port_assignment_migration/vars/sda_port_assignment_migration_input.yml`
+Relative paths are intentionally not documented — the playbook and the vars file may live in different directories on a customer's system, so absolute paths are the only supported form.
 
