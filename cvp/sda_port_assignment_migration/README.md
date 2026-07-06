@@ -79,26 +79,38 @@ flowchart TD
 
 ## Step 1: Virtual Env Setup
 
-Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
+Run all commands from **your own test project** (not from inside the collection source tree). Instead of hard-coding paths, define a few environment variables once, then copy-paste the commands below without editing.
 
-Placeholders used in the examples below (replace each with the actual absolute path on your system):
+### Step 0: Define reusable path variables (one time per shell)
 
-- `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
-- `/<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml` — the playbook file
-- `/<abs-path-to-vars>/sda_port_assignment_migration_input.yml` — your input vars file
-- `/<abs-path-to-schema>/sda_port_assignment_migration_schema.yml` — the schema file
-- `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
+Set these once at the top of your shell session. Every command in this guide will use them, so you don't need to edit any paths later.
+
+```bash
+# Root of your test project (change this to your actual project directory)
+export PROJECT_DIR="$HOME/my-catc-project"
+
+# Root of the cisco.catalystcenter collection (contains tools/schemavalidation.sh)
+export COLLECTION_DIR="$HOME/catalystcenter-ansible"
+
+# Workflow input/config files (all resolved from PROJECT_DIR by default)
+export INVENTORY_PATH="$PROJECT_DIR/inventory/hosts.yaml"
+export PLAYBOOK_PATH="$PROJECT_DIR/playbook/sda_port_assignment_migration_playbook.yml"
+export VARS_FILE_PATH="$PROJECT_DIR/vars/sda_port_assignment_migration_input.yml"
+export SCHEMA_FILE_PATH="$PROJECT_DIR/schema/sda_port_assignment_migration_schema.yml"
+```
+
+> Tip: Save these `export` lines in a file like `env.sh` inside your project, then run `source env.sh` at the start of each session.
 
 ```bash
 # Create and activate virtual environment
-python3 -m venv /<abs-path-to-your-project>/.venv
-source /<abs-path-to-your-project>/.venv/bin/activate
+python3 -m venv "$PROJECT_DIR/.venv"
+source "$PROJECT_DIR/.venv/bin/activate"
 
 # Upgrade pip tooling
 python -m pip install --upgrade pip setuptools wheel
 
 # Install Python dependencies (includes ansible and catalystcentersdk)
-pip install -r /<abs-path-to-your-project>/requirements.txt
+pip install -r "$PROJECT_DIR/requirements.txt"
 
 # Install/upgrade Cisco Catalyst Center Ansible collection
 ansible-galaxy collection install cisco.catalystcenter --force
@@ -110,7 +122,7 @@ You can provide migration inputs in either of these ways:
 
 ### Option A (Simplest CLI): Put inputs in inventory
 
-Add workflow input variables under your inventory host (`/<abs-path-to-inventory>/hosts.yaml`):
+Add workflow input variables under your inventory host (`$INVENTORY_PATH`):
 
 ```yaml
 ---
@@ -144,31 +156,31 @@ port_assignment_migration:
 ### Option B: Keep inputs in a separate vars file
 
 Update:
-- `/<abs-path-to-vars>/sda_port_assignment_migration_input.yml`
+- `$VARS_FILE_PATH`
 
 ## Validate Input (Schema & Vars Validation)
 
-Before running the playbook, validate the input file against the schema using the `schemavalidation.sh` helper (a wrapper around `yamale`). Pass absolute paths for both arguments:
+Before running the playbook, validate the input file against the schema using the `schemavalidation.sh` helper (a wrapper around `yamale`). It uses the variables defined in Step 0:
 
-- `-s` : absolute path to the schema file
-- `-v` : absolute path to the vars (input) file
+- `-s` : path to the schema file (`$SCHEMA_FILE_PATH`)
+- `-v` : path to the vars input file (`$VARS_FILE_PATH`)
 
 ```bash
-/<abs-path-to-collection>/tools/schemavalidation.sh \
-  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml \
-  -v /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+"$COLLECTION_DIR/tools/schemavalidation.sh" \
+  -s "$SCHEMA_FILE_PATH" \
+  -v "$VARS_FILE_PATH"
 ```
 
 Expected output:
 
 ```bash
-(pyats) bash-4.4$ /<abs-path-to-collection>/tools/schemavalidation.sh \
-  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml \
-  -v /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
-/<abs-path-to-schema>/sda_port_assignment_migration_schema.yml
-/<abs-path-to-vars>/sda_port_assignment_migration_input.yml
-yamale  -s /<abs-path-to-schema>/sda_port_assignment_migration_schema.yml  /<abs-path-to-vars>/sda_port_assignment_migration_input.yml
-Validating /<abs-path-to-vars>/sda_port_assignment_migration_input.yml...
+(pyats) bash-4.4$ "$COLLECTION_DIR/tools/schemavalidation.sh" \
+  -s "$SCHEMA_FILE_PATH" \
+  -v "$VARS_FILE_PATH"
+$SCHEMA_FILE_PATH
+$VARS_FILE_PATH
+yamale  -s $SCHEMA_FILE_PATH  $VARS_FILE_PATH
+Validating $VARS_FILE_PATH...
 Validation success! 👍
 ```
 
@@ -180,17 +192,17 @@ pip install yamale
 
 ## Step 3: Setup Env Variables and Run Playbook
 
-The inventory file `/<abs-path-to-inventory>/hosts.yaml` reads Catalyst Center connection values from environment variables.
+The inventory file `$INVENTORY_PATH` reads Catalyst Center connection values from environment variables.
 
 ```bash
 export HOSTIP=<host ip>
 export CATALYST_CENTER_USERNAME=admin
 export CATALYST_CENTER_PASSWORD='your_password'
 # Optional override only (normally not needed):
-# export ANSIBLE_PYTHON_INTERPRETER="/<abs-path-to-your-project>/.venv/bin/python"
+# export ANSIBLE_PYTHON_INTERPRETER="$PROJECT_DIR/.venv/bin/python"
 ```
 
-### Inventory File Explained (`/<abs-path-to-inventory>/hosts.yaml`)
+### Inventory File Explained (`$INVENTORY_PATH`)
 
 This workflow runs against host group `catalyst_center_hosts` and expects one Catalyst Center target host (for example `catalyst_center220`).
 
@@ -237,22 +249,22 @@ Run (inventory input mode, no extra vars):
 
 ```bash
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
   -vvvv
 ```
 
-Run (vars file mode, with absolute `VARS_FILE_PATH`):
+Run (vars file mode, with `VARS_FILE_PATH`):
 
 ```bash
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml \
-  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/sda_port_assignment_migration_input.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
+  --extra-vars "VARS_FILE_PATH=$VARS_FILE_PATH" \
   -vvvv
 ```
 
-> Always pass `VARS_FILE_PATH` as an **absolute path**. The playbook and the vars file may live in different directories in your project, so relative paths are not supported by this documentation.
+> The `VARS_FILE_PATH` variable is already an absolute path from Step 0, so no further editing is needed.
 
 ## Example Migration Result (Run on March 25, 2026)
 
@@ -320,7 +332,7 @@ Workflow summary from logs:
 
 
 Example Run Logs:
-ansible-playbook -i /<abs-path-to-inventory>/hosts.yaml /<abs-path-to-playbook>/sda_port_assignment_migration_playbook.yml
+ansible-playbook -i "$INVENTORY_PATH" "$PLAYBOOK_PATH"
 
 PLAY [Migrate SDA port assignments from source to destination devices] *****************************************************
 
@@ -591,11 +603,11 @@ PLAY RECAP *********************************************************************
 catalyst_center220         : ok=37   changed=1    unreachable=0    failed=0    skipped=14   rescued=0    ignored=0
 ## VARS_FILE_PATH
 
-Always pass `VARS_FILE_PATH` as an **absolute path**, for example:
+Always provide `VARS_FILE_PATH` as an **absolute path**. The simplest way is to define it once in [Step 0](#step-0-define-reusable-path-variables-one-time-per-shell), for example:
 
-```
-/<abs-path-to-vars>/sda_port_assignment_migration_input.yml
+```bash
+export VARS_FILE_PATH="$PROJECT_DIR/vars/sda_port_assignment_migration_input.yml"
 ```
 
-Relative paths are intentionally not documented — the playbook and the vars file may live in different directories on a customer's system, so absolute paths are the only supported form.
+Then reference it as `"$VARS_FILE_PATH"` in every command — no manual path editing required.
 

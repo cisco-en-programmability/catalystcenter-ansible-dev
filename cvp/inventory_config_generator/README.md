@@ -113,28 +113,42 @@ flowchart TD
 
 ### Installation and Run
 
-> Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
->
-> Placeholders used in the examples below (replace each with the actual absolute path on your system):
->
-> - `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
-> - `/<abs-path-to-playbook>/inventory_config_generator.yml` — the playbook file
-> - `/<abs-path-to-vars>/inventory_config_inputs.yml` — your input vars file
-> - `/<abs-path-to-schema>/inventory_config_schema.yml` — the schema file
-> - `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
+> Run all commands from **your own test project** (not from inside the collection source tree). Instead of hard-coding paths, define a few environment variables once, then copy-paste the commands below without editing.
 
-1. Create and activate a Python virtual environment, then install dependencies.
+#### Step 0: Define reusable path variables (one time per shell)
+
+Set these once at the top of your shell session. Every command in this guide will use them, so you don't need to edit any paths later.
 
 ```bash
-python3 -m venv /<abs-path-to-your-project>/.venv
-source /<abs-path-to-your-project>/.venv/bin/activate
-pip install -r /<abs-path-to-your-project>/requirements.txt
+# Root of your test project (change this to your actual project directory)
+export PROJECT_DIR="$HOME/my-catc-project"
+
+# Root of the cisco.catalystcenter collection (contains tools/schemavalidation.sh)
+export COLLECTION_DIR="$HOME/catalystcenter-ansible"
+
+# Workflow input/config files (all resolved from PROJECT_DIR by default)
+export INVENTORY_PATH="$PROJECT_DIR/inventory/hosts.yaml"
+export PLAYBOOK_PATH="$PROJECT_DIR/playbook/inventory_config_generator.yml"
+export VARS_FILE_PATH="$PROJECT_DIR/vars/inventory_config_inputs.yml"
+export SCHEMA_FILE_PATH="$PROJECT_DIR/schema/inventory_config_schema.yml"
+```
+
+> Tip: Save these `export` lines in a file like `env.sh` inside your project, then run `source env.sh` at the start of each session.
+
+#### Step 1: Create a Python virtual environment and install dependencies
+
+```bash
+python3 -m venv "$PROJECT_DIR/.venv"
+source "$PROJECT_DIR/.venv/bin/activate"
+pip install -r "$PROJECT_DIR/requirements.txt"
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
-2. Provide workflow inputs in either your inventory file (`/<abs-path-to-inventory>/hosts.yaml`) or your vars input file (`/<abs-path-to-vars>/inventory_config_inputs.yml`).
+#### Step 2: Provide workflow inputs
 
-3. Export Catalyst Center environment variables and run the playbook.
+Edit either your inventory file (`$INVENTORY_PATH`) or your vars input file (`$VARS_FILE_PATH`) to provide the workflow inputs.
+
+#### Step 3: Export Catalyst Center credentials and run the playbook
 
 ```bash
 export HOSTIP=<catalyst-center-ip-or-fqdn>
@@ -142,22 +156,22 @@ export CATALYST_CENTER_USERNAME=<username>
 export CATALYST_CENTER_PASSWORD='<password>'
 
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/inventory_config_generator.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
   -vvvv
 ```
 
-Or pass the vars input file explicitly via `--extra-vars VARS_FILE_PATH=...` (must be an absolute path):
+Or pass the vars input file explicitly via `--extra-vars`:
 
 ```bash
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/inventory_config_generator.yml \
-  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/inventory_config_inputs.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
+  --extra-vars "VARS_FILE_PATH=$VARS_FILE_PATH" \
   -vvvv
 ```
 
-> Always pass `VARS_FILE_PATH` as an **absolute path**. The playbook and the vars file may live in different directories in your project, so relative paths are not supported by this documentation.
+> The `VARS_FILE_PATH` variable is already an absolute path from Step 0, so no further editing is needed.
 
 ---
 
@@ -256,28 +270,28 @@ inventory_config:
 
 ```bash
 #validate
-/<abs-path-to-collection>/tools/schemavalidation.sh \
-  -s /<abs-path-to-schema>/inventory_config_schema.yml \
-  -v /<abs-path-to-vars>/inventory_config_inputs.yml
+"$COLLECTION_DIR/tools/schemavalidation.sh" \
+  -s "$SCHEMA_FILE_PATH" \
+  -v "$VARS_FILE_PATH"
 ```
 
 ```bash
- /<abs-path-to-collection>/tools/schemavalidation.sh \
->   -s /<abs-path-to-schema>/inventory_config_schema.yml \
->   -v /<abs-path-to-vars>/inventory_config_inputs.yml
-/<abs-path-to-schema>/inventory_config_schema.yml
-/<abs-path-to-vars>/inventory_config_inputs.yml
-yamale   -s /<abs-path-to-schema>/inventory_config_schema.yml  /<abs-path-to-vars>/inventory_config_inputs.yml
-Validating /<abs-path-to-vars>/inventory_config_inputs.yml...
+ "$COLLECTION_DIR/tools/schemavalidation.sh" \
+>   -s "$SCHEMA_FILE_PATH" \
+>   -v "$VARS_FILE_PATH"
+$SCHEMA_FILE_PATH
+$VARS_FILE_PATH
+yamale   -s $SCHEMA_FILE_PATH  $VARS_FILE_PATH
+Validating $VARS_FILE_PATH...
 Validation success! 👍
 ```
 
 ```bash
 # Execute
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/inventory_config_generator.yml \
-  --extra-vars VARS_FILE_PATH=/<abs-path-to-vars>/inventory_config_inputs.yml
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
+  --extra-vars "VARS_FILE_PATH=$VARS_FILE_PATH"
 ```
 
 ---
@@ -409,25 +423,25 @@ config:
 
 You can also run this workflow without `VARS_FILE_PATH` by moving the sample workflow data into inventory, `host_vars`, or `group_vars`.
 
-1. Create an inventory vars file such as `/<abs-path-to-inventory>/group_vars/all.yml` or `/<abs-path-to-inventory>/host_vars/<host>.yml`.
-2. Copy the sample workflow data from `/<abs-path-to-vars>/inventory_config_inputs.yml` into that inventory vars file.
+1. Create an inventory vars file such as `$PROJECT_DIR/inventory/group_vars/all.yml` or `$PROJECT_DIR/inventory/host_vars/<host>.yml`.
+2. Copy the sample workflow data from `$VARS_FILE_PATH` into that inventory vars file.
 3. Keep the same top-level variable name in inventory: `inventory_config`.
-4. Run the playbook without `VARS_FILE_PATH` (still using absolute paths):
+4. Run the playbook without `VARS_FILE_PATH`:
 
 ```bash
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/inventory_config_generator.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
   -vvvv
 ```
 
 ## VARS_FILE_PATH
 
-Always pass `VARS_FILE_PATH` as an **absolute path**, for example:
+Always provide `VARS_FILE_PATH` as an **absolute path**. The simplest way is to define it once in [Step 0](#step-0-define-reusable-path-variables-one-time-per-shell), for example:
 
-```
-/<abs-path-to-vars>/inventory_config_inputs.yml
+```bash
+export VARS_FILE_PATH="$PROJECT_DIR/vars/inventory_config_inputs.yml"
 ```
 
-Relative paths are intentionally not documented — the playbook and the vars file may live in different directories on a customer's system, so absolute paths are the only supported form.
+Then reference it as `"$VARS_FILE_PATH"` in every command — no manual path editing required.
 
