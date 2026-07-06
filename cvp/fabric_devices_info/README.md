@@ -139,9 +139,9 @@ export SCHEMA_FILE_PATH="$PROJECT_DIR/schema/fabric_devices_info_schema.yml"
 #### Step 1: Create a Python virtual environment and install dependencies
 
 ```bash
-python3 -m venv "$PROJECT_DIR/.venv"
-source "$PROJECT_DIR/.venv/bin/activate"
-pip install -r "$PROJECT_DIR/requirements.txt"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install catalystcentersdk
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
@@ -210,7 +210,7 @@ pip install yamale
 
 ## Usage Examples
 The UI display (example):
- ![alt text](./images/example_fabric_device_info.png)
+ ![alt text](https://raw.githubusercontent.com/cisco-en-programmability/catalystcenter-ansible/main/cvp/fabric_devices_info/images/example_fabric_device_info.png)
 
 ### Example 1: Retrieve All Information in Fabric Site
 

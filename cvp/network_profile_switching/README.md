@@ -38,7 +38,7 @@ flowchart TD
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install catalystcentersdk
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
@@ -177,7 +177,10 @@ This is the final step where you deploy the configuration to Cisco Catalyst Cent
 3. **Verify Deployment:**
    After executing the playbook, check the Catalyst Center UI to verify switch profile has been created. If *debug_log* is enabled, you can also review the logs for detailed information on operations performed and any updates made.
 
-   ![alt text](images/creation_assignment.png)
+2.  **Verify Deployment:** 
+After executing the playbook, check the Catalyst Center UI to verify switch profile has been created. If *debug_log* is enabled, you can also review the logs for detailed information on operations performed and any updates made.
+
+    ![alt text](https://raw.githubusercontent.com/cisco-en-programmability/catalystcenter-ansible/main/cvp/network_profile_switching/images/creation_assignment.png)
 
 ---
 
