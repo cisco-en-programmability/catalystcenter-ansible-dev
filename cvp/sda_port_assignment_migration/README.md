@@ -10,7 +10,7 @@ It uses:
 
 The following diagram represents the end-to-end functionality performed by this workflow:
 
-![SDA Port Assignment Migration Workflow](./images/port_assignment_migration_workflow.png)
+![SDA Port Assignment Migration Workflow](https://raw.githubusercontent.com/cisco-en-programmability/catalystcenter-ansible/main/cvp/sda_port_assignment_migration/images/port_assignment_migration_workflow.png)
 
 ## Input Data Model
 
@@ -109,8 +109,8 @@ source "$PROJECT_DIR/.venv/bin/activate"
 # Upgrade pip tooling
 python -m pip install --upgrade pip setuptools wheel
 
-# Install Python dependencies (includes ansible and catalystcentersdk)
-pip install -r "$PROJECT_DIR/requirements.txt"
+# Install Cisco Catalyst Center Python SDK
+pip install catalystcentersdk
 
 # Install/upgrade Cisco Catalyst Center Ansible collection
 ansible-galaxy collection install cisco.catalystcenter --force
