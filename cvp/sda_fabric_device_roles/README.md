@@ -184,28 +184,30 @@ fabric_devices_details:
 
 ### Execute the playbook
 
+> The commands below reference environment variables defined in [Step 0](#step-0-define-reusable-path-variables-one-time-per-shell) of the Installation and Run section.
+
 To ensure a successful execution of the playbooks with your specified inputs, follow these steps:
 
 ##### Input Validation:
 
-Before executing the playbook, it is essential to validate the input schema. This step ensures that all required parameters are included and correctly formatted. Run the `schemavalidation.sh` helper using `-s` for the schema path and `-v` (`--vars`) for the vars file path. Pass **absolute paths** for both arguments.
+Before executing the playbook, it is essential to validate the input schema. This step ensures that all required parameters are included and correctly formatted. Run the `schemavalidation.sh` helper using `-s` for the schema path and `-v` (`--vars`) for the vars file path.
 
 ```bash
-  /<abs-path-to-collection>/tools/schemavalidation.sh \
-  -s /<abs-path-to-schema>/sda_fabric_device_roles_schema.yml \
-  -v /<abs-path-to-vars>/sda_fabric_device_roles_input.yml
+  "$COLLECTION_DIR/tools/schemavalidation.sh" \
+  -s "$SCHEMA_FILE_PATH" \
+  -v "$VARS_FILE_PATH"
 ```
 
 ##### Running the Playbook:
 
-Once the input validation is complete and no errors are found, you can run the playbook from **your own test project**. Provide your input file path using `-e VARS_FILE_PATH` (must be an **absolute path**):
+Once the input validation is complete and no errors are found, you can run the playbook from **your own test project**. Provide your input file path using `-e VARS_FILE_PATH`:
 
 ```bash
 
      ansible-playbook \
-       -i /<abs-path-to-inventory>/hosts.yml \
-       /<abs-path-to-playbook>/sda_fabric_device_roles_playbook.yml \
-       -e VARS_FILE_PATH=/<abs-path-to-vars>/sda_fabric_device_roles_input.yml -vvv
+       -i "$INVENTORY_PATH" \
+       "$PLAYBOOK_PATH" \
+       -e "VARS_FILE_PATH=$VARS_FILE_PATH" -vvv
 ```
 
 If there is an error in the input or an issue with the API call during execution, the playbook will halt and display the relevant error details.
@@ -283,9 +285,9 @@ Use the input var file: cvp/sda_fabric_device_roles/vars/jinja_template_sda_fabr
 
 ```bash
     ansible-playbook \
-      -i /<abs-path-to-inventory>/hosts.yml \
-      /<abs-path-to-playbook>/sda_fabric_device_roles_playbook_jinja.yml \
-      -e VARS_FILE_PATH=/<abs-path-to-vars>/jinja_template_sda_fabric_device_roles.yml -vvv
+      -i "$INVENTORY_PATH" \
+      "$JINJA_PLAYBOOK_PATH" \
+      -e "VARS_FILE_PATH=$JINJA_VARS_FILE_PATH" -vvv
 ```
 
 
@@ -306,9 +308,9 @@ fabric_devices_details:
 
 ```bash
     ansible-playbook \
-      -i /<abs-path-to-inventory>/hosts.yml \
-      /<abs-path-to-playbook>/delete_sda_fabric_device_roles_playbook.yml \
-      -e VARS_FILE_PATH=/<abs-path-to-vars>/delete_sda_fabric_device_roles_input.yml -vvv
+      -i "$INVENTORY_PATH" \
+      "$DELETE_PLAYBOOK_PATH" \
+      -e "VARS_FILE_PATH=$DELETE_VARS_FILE_PATH" -vvv
 ```
 
 #### Delete SDA Fabric Device Roles
@@ -336,9 +338,9 @@ fabric_devices_details:
 
 ```bash
     ansible-playbook \
-      -i /<abs-path-to-inventory>/hosts.yml \
-      /<abs-path-to-playbook>/delete_sda_fabric_device_roles_playbook.yml \
-      -e VARS_FILE_PATH=/<abs-path-to-vars>/delete_sda_fabric_device_roles_input.yml -vvv
+      -i "$INVENTORY_PATH" \
+      "$DELETE_PLAYBOOK_PATH" \
+      -e "VARS_FILE_PATH=$DELETE_VARS_FILE_PATH" -vvv
 ```
 ## Workflow Steps
 ## User Flow (3 Steps)
@@ -359,28 +361,48 @@ flowchart TD
 
 ### Installation and Run
 
-> Run all commands from **your own test project** (not from inside the collection source tree). Every file path below must be an **absolute path** on your machine. The playbook, inventory, vars, and schema files can live in different directories — always pass each one as a full absolute path.
->
-> Placeholders used in the examples below (replace each with the actual absolute path on your system):
->
-> - `/<abs-path-to-inventory>/hosts.yaml` — your inventory file
-> - `/<abs-path-to-playbook>/sda_fabric_device_roles_playbook.yml` — the playbook file
-> - `/<abs-path-to-vars>/sda_fabric_device_roles_input.yml` — your input vars file
-> - `/<abs-path-to-schema>/sda_fabric_device_roles_schema.yml` — the schema file
-> - `/<abs-path-to-collection>/tools/schemavalidation.sh` — schema validation helper
+> Run all commands from **your own test project** (not from inside the collection source tree). Instead of hard-coding paths, define a few environment variables once, then copy-paste the commands below without editing.
 
-1. Create and activate a Python virtual environment, then install dependencies.
+#### Step 0: Define reusable path variables (one time per shell)
+
+Set these once at the top of your shell session. Every command in this guide will use them, so you don't need to edit any paths later.
 
 ```bash
-python3 -m venv /<abs-path-to-your-project>/.venv
-source /<abs-path-to-your-project>/.venv/bin/activate
-pip install -r /<abs-path-to-your-project>/requirements.txt
+# Root of your test project (change this to your actual project directory)
+export PROJECT_DIR="$HOME/my-catc-project"
+
+# Root of the cisco.catalystcenter collection (contains tools/schemavalidation.sh)
+export COLLECTION_DIR="$HOME/catalystcenter-ansible"
+
+# Workflow input/config files (all resolved from PROJECT_DIR by default)
+export INVENTORY_PATH="$PROJECT_DIR/inventory/hosts.yaml"
+export PLAYBOOK_PATH="$PROJECT_DIR/playbook/sda_fabric_device_roles_playbook.yml"
+export VARS_FILE_PATH="$PROJECT_DIR/vars/sda_fabric_device_roles_input.yml"
+export SCHEMA_FILE_PATH="$PROJECT_DIR/schema/sda_fabric_device_roles_schema.yml"
+
+# Additional playbooks/vars used in the Jinja and Delete flows above
+export DELETE_PLAYBOOK_PATH="$PROJECT_DIR/playbook/delete_sda_fabric_device_roles_playbook.yml"
+export JINJA_PLAYBOOK_PATH="$PROJECT_DIR/playbook/sda_fabric_device_roles_playbook_jinja.yml"
+export JINJA_VARS_FILE_PATH="$PROJECT_DIR/vars/jinja_template_sda_fabric_device_roles.yml"
+export DELETE_VARS_FILE_PATH="$PROJECT_DIR/vars/delete_sda_fabric_device_roles_input.yml"
+```
+
+> Tip: Save these `export` lines in a file like `env.sh` inside your project, then run `source env.sh` at the start of each session.
+
+#### Step 1: Create a Python virtual environment and install dependencies
+
+```bash
+python3 -m venv "$PROJECT_DIR/.venv"
+source "$PROJECT_DIR/.venv/bin/activate"
+pip install -r "$PROJECT_DIR/requirements.txt"
 ansible-galaxy collection install cisco.catalystcenter --force
 ```
 
-2. Provide workflow inputs in either your inventory file (`/<abs-path-to-inventory>/hosts.yaml`) or your vars input file (`/<abs-path-to-vars>/sda_fabric_device_roles_input.yml`).
+#### Step 2: Provide workflow inputs
 
-3. Export Catalyst Center environment variables and run the playbook.
+Edit either your inventory file (`$INVENTORY_PATH`) or your vars input file (`$VARS_FILE_PATH`) to provide the workflow inputs.
+
+#### Step 3: Export Catalyst Center credentials and run the playbook
 
 ```bash
 export HOSTIP=<catalyst-center-ip-or-fqdn>
@@ -388,33 +410,45 @@ export CATALYST_CENTER_USERNAME=<username>
 export CATALYST_CENTER_PASSWORD='<password>'
 
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/sda_fabric_device_roles_playbook.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
   -vvvv
 ```
+
+Or pass the vars input file explicitly via `--extra-vars`:
+
+```bash
+ansible-playbook \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
+  --extra-vars "VARS_FILE_PATH=$VARS_FILE_PATH" \
+  -vvvv
+```
+
+> The `VARS_FILE_PATH` variable is already an absolute path from Step 0, so no further editing is needed.
 
 ## Inventory / group_vars Example
 
 You can also run this workflow without `VARS_FILE_PATH` by moving the sample workflow data into inventory, `host_vars`, or `group_vars`.
 
-1. Create an inventory vars file such as `/<abs-path-to-inventory>/group_vars/all.yml` or `/<abs-path-to-inventory>/host_vars/<host>.yml`.
-2. Copy the sample workflow data from `/<abs-path-to-vars>/sda_fabric_device_roles_input.yml` into that inventory vars file.
+1. Create an inventory vars file such as `$PROJECT_DIR/inventory/group_vars/all.yml` or `$PROJECT_DIR/inventory/host_vars/<host>.yml`.
+2. Copy the sample workflow data from `$VARS_FILE_PATH` into that inventory vars file.
 3. Keep the same top-level variable name in inventory: `fabric_devices_details`.
-4. Run the playbook without `VARS_FILE_PATH` (still using absolute paths):
+4. Run the playbook without `VARS_FILE_PATH`:
 
 ```bash
 ansible-playbook \
-  -i /<abs-path-to-inventory>/hosts.yaml \
-  /<abs-path-to-playbook>/sda_fabric_device_roles_playbook.yml \
+  -i "$INVENTORY_PATH" \
+  "$PLAYBOOK_PATH" \
   -vvvv
 ```
 
 ## VARS_FILE_PATH
 
-Always pass `VARS_FILE_PATH` as an **absolute path**, for example:
+Always provide `VARS_FILE_PATH` as an **absolute path**. The simplest way is to define it once in [Step 0](#step-0-define-reusable-path-variables-one-time-per-shell), for example:
 
-```
-/<abs-path-to-vars>/sda_fabric_device_roles_input.yml
+```bash
+export VARS_FILE_PATH="$PROJECT_DIR/vars/sda_fabric_device_roles_input.yml"
 ```
 
-Relative paths are intentionally not documented — the playbook and the vars file may live in different directories on a customer's system, so absolute paths are the only supported form.
+Then reference it as `"$VARS_FILE_PATH"` in every command — no manual path editing required.
