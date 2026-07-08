@@ -218,6 +218,77 @@ stack member serial number** in `user_sudi_serial_nos` (sent to the API as
               - FJC271925Q3
 ```
 
+### Example 4: Add and Claim a CatalystWLC
+
+```yaml
+- hosts: localhost
+  roles:
+    - role: pnp
+      vars:
+        catalystcenter_host: "{{ vault_catalystcenter_host }}"
+        catalystcenter_username: "{{ vault_catalystcenter_username }}"
+        catalystcenter_password: "{{ vault_catalystcenter_password }}"
+        pnp_state: "merged"
+        pnp_config:
+          - site_name: Global/USA/SAN-FRANCISCO/BGL_18
+            pnp_type: CatalystWLC
+            template_name: "PnP_EWLC_Template"
+            project_name: Onboarding Configuration
+            image_name: C9800-40-universalk9_wlc.17.12.05.SPA.bin
+            golden_image: true
+            static_ip: 204.192.101.10
+            subnet_mask: 255.255.255.0
+            gateway: 204.192.101.1
+            vlan_id: "1101"
+            ip_interface_name: TenGigabitEthernet0/0/0
+            device_info:
+              - serial_number: FOX2639PAY7
+                hostname: SF-EWLC-1
+                state: Unclaimed
+                pid: C9800-CL-K9
+```
+
+### Example 5: Add and Claim an AccessPoint
+
+> **Note:** `site_name` must be a floor-level site (not building).
+
+```yaml
+- hosts: localhost
+  roles:
+    - role: pnp
+      vars:
+        catalystcenter_host: "{{ vault_catalystcenter_host }}"
+        catalystcenter_username: "{{ vault_catalystcenter_username }}"
+        catalystcenter_password: "{{ vault_catalystcenter_password }}"
+        pnp_state: "merged"
+        pnp_config:
+          - site_name: Global/USA/SAN-FRANCISCO/BGL_18/Floor-1
+            pnp_type: AccessPoint
+            rf_profile: HIGH
+            device_info:
+              - serial_number: FGL2331P001
+                hostname: SF-AP-1
+                state: Unclaimed
+                pid: C9130AXI-B
+```
+
+### Example 6: Delete Devices
+
+```yaml
+- hosts: localhost
+  roles:
+    - role: pnp
+      vars:
+        catalystcenter_host: "{{ vault_catalystcenter_host }}"
+        catalystcenter_username: "{{ vault_catalystcenter_username }}"
+        catalystcenter_password: "{{ vault_catalystcenter_password }}"
+        pnp_state: "deleted"
+        pnp_config:
+          - device_info:
+              - serial_number: FOX2639PAY7
+              - serial_number: FGL2331P001
+```
+
 <!-- END WORKFLOW README ENHANCEMENTS -->
 
 ## License
