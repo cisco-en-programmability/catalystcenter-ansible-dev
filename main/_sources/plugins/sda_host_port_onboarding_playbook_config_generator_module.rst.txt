@@ -892,7 +892,7 @@ Parameters
 
       Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).
 
-      Extracts port assignments for all devices within specified fabric sites.
+      Extracts port assignments for all devices within specified fabric sites and descendant fabric zones.
 
       For example, "Global/USA/San Jose/Building1"
 
@@ -1117,7 +1117,7 @@ Parameters
 
       Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).
 
-      Extracts port channel configurations for all devices within specified fabric sites.
+      Extracts port channel configurations for all devices within specified fabric sites and descendant fabric zones.
 
       For example, "Global/USA/San Jose/Building1"
 
@@ -1250,7 +1250,7 @@ Parameters
 
       Each list entry targets one or more fabric sites for wireless SSID to VLAN mapping extraction.
 
-      Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies.
+      Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies. Fabric zones are not supported for wireless SSID extraction.
 
       Fabric site names must be full hierarchical paths (case-sensitive).
 
@@ -1293,6 +1293,8 @@ Parameters
       Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).
 
       Extracts VLAN to SSID mappings for specified fabric sites.
+
+      Fabric zones are skipped because wireless SSID extraction is supported only for fabric sites.
 
       For example, ["Global/USA/San Jose/Building1", "Global/USA/RTP/Building2"]
 

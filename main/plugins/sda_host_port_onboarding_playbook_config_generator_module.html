@@ -1475,7 +1475,7 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Fabric site hierarchical paths to extract port assignments.</p>
 <p>Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).</p>
-<p>Extracts port assignments for all devices within specified fabric sites.</p>
+<p>Extracts port assignments for all devices within specified fabric sites and descendant fabric zones.</p>
 <p>For example, &quot;Global/USA/San Jose/Building1&quot;</p>
 </div></td>
 </tr>
@@ -1537,7 +1537,7 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Fabric site hierarchical paths to extract port channels.</p>
 <p>Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).</p>
-<p>Extracts port channel configurations for all devices within specified fabric sites.</p>
+<p>Extracts port channel configurations for all devices within specified fabric sites and descendant fabric zones.</p>
 <p>For example, &quot;Global/USA/San Jose/Building1&quot;</p>
 </div></td>
 </tr>
@@ -1573,7 +1573,7 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Filters for wireless SSID configuration extraction.</p>
 <p>Each list entry targets one or more fabric sites for wireless SSID to VLAN mapping extraction.</p>
-<p>Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies.</p>
+<p>Extracts only wireless SSID to VLAN mappings for specified fabric site hierarchies. Fabric zones are not supported for wireless SSID extraction.</p>
 <p>Fabric site names must be full hierarchical paths (case-sensitive).</p>
 <p>If not specified when component included in components_list, extracts all wireless SSID mappings across all fabric sites.</p>
 </div></td>
@@ -1585,6 +1585,7 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>List of fabric site hierarchical paths to extract wireless SSID mappings.</p>
 <p>Site names must match exact hierarchical paths in Catalyst Center (case-sensitive).</p>
 <p>Extracts VLAN to SSID mappings for specified fabric sites.</p>
+<p>Fabric zones are skipped because wireless SSID extraction is supported only for fabric sites.</p>
 <p>For example, [&quot;Global/USA/San Jose/Building1&quot;, &quot;Global/USA/RTP/Building2&quot;]</p>
 </div></td>
 </tr>
