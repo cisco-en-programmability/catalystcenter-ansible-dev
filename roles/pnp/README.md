@@ -220,6 +220,12 @@ stack member serial number** in `user_sudi_serial_nos` (sent to the API as
 
 ### Example 4: Add and Claim a CatalystWLC
 
+Use this example to onboard a Cisco Catalyst 9800 Wireless LAN Controller.
+WLC claiming requires static IP configuration (`static_ip`, `subnet_mask`,
+`gateway`, `vlan_id`, `ip_interface_name`) so the controller is reachable
+after provisioning. Specify `golden_image: true` to mark the image as the
+preferred version for the device family.
+
 ```yaml
 - hosts: localhost
   roles:
@@ -250,7 +256,13 @@ stack member serial number** in `user_sudi_serial_nos` (sent to the API as
 
 ### Example 5: Add and Claim an AccessPoint
 
-> **Note:** `site_name` must be a floor-level site (not building).
+Use this example to onboard Access Points. APs are assigned to a **floor-level**
+site (not a building) because Catalyst Center uses the floor map for RF planning
+and location tracking. The `rf_profile` field (`LOW`, `TYPICAL`, or `HIGH`)
+controls transmit power and channel width for the AP.
+
+> **Note:** `site_name` must be a floor-level site (e.g.,
+> `Global/USA/SAN-FRANCISCO/BGL_18/Floor-1`), not a building.
 
 ```yaml
 - hosts: localhost
@@ -273,6 +285,12 @@ stack member serial number** in `user_sudi_serial_nos` (sent to the API as
 ```
 
 ### Example 6: Delete Devices
+
+Use this example to remove devices from the PnP device list. Set
+`pnp_state: "deleted"` and provide the serial numbers of the devices to
+remove. No site or template information is needed — only `device_info` with
+the serial numbers. This is useful for cleaning up devices that were added
+by mistake or are no longer planned for onboarding.
 
 ```yaml
 - hosts: localhost
