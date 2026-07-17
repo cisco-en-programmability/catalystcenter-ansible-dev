@@ -291,7 +291,6 @@ from ansible_collections.cisco.catalystcenter.plugins.module_utils.brownfield_he
 )
 from ansible_collections.cisco.catalystcenter.plugins.module_utils.catalystcenter import (
     CatalystCenterBase,
-    validate_list_of_dicts,
 )
 import time
 try:
@@ -397,18 +396,12 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
         }
 
         self.log("Validating invalid parameters against provided config", "DEBUG")
-        for config_item in self.config:
-            self.validate_invalid_params(config_item, temp_spec.keys())
+        self.validate_invalid_params(self.config, temp_spec.keys())
 
         self.log("Validating configuration parameters with schema - config: {0} and temp_spec: {1}".format(self.config, temp_spec), "DEBUG")
 
         # Validate params
-        valid_temp, invalid_params = validate_list_of_dicts(self.config, temp_spec)
-
-        if invalid_params:
-            self.msg = "Invalid parameters in playbook: {0}".format(invalid_params)
-            self.set_operation_result("failed", False, self.msg, "ERROR")
-            return self
+        valid_temp = self.validate_config_dict(self.config, temp_spec)
 
         # Set the validated configuration and update the result with success status
         self.validated_config = valid_temp
