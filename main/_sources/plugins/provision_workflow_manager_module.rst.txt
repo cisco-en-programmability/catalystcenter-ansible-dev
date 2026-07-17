@@ -1693,12 +1693,12 @@ Parameters
 
       - Specifies whether the user intends to perform
             site assignment only or full provisioning
-            for a wired device.
+            for a wired or wireless device.
           - Set to 'false' to carry out site assignment
             only.
           - Set to 'true' to proceed with provisioning
             to a site.
-          - only applicable for wired devices.
+          - Applicable for both wired and wireless devices.
           
 
 
@@ -2518,7 +2518,11 @@ Common return values are documented :ref:`here <common_return_values>`, the foll
 Authors
 ~~~~~~~
 
-- Abinash Mishra (@abimishr) Madhan Sankaranarayanan (@madhansansel) Syed Khadeer Ahmed(@syed-khadeerahmed) Ajith Andrew J (@ajithandrewj)
+- Abinash Mishra (@abimishr)
+- Madhan Sankaranarayanan (@madhansansel)
+- Syed Khadeer Ahmed (@syed-khadeerahmed)
+- Ajith Andrew J (@ajithandrewj)
+- Sunil Shatagopa (@shatagopasunil)
 
 
 
