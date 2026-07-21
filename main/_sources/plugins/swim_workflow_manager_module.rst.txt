@@ -2931,7 +2931,7 @@ Parameters
           To replace an existing golden tag for a specific role:
           - \*\*Unassign\*\* the tag from the current role (e.g., \`ACCESS\`).
           - \*\*Assign\*\* the tag to the new role (e.g., \`CORE\`).
-          Idempotency (per-role check, Catalyst Center \> 2.3.7.9):
+          Idempotency (per-role check, Catalyst Center \>= 3.1.3.0):
           - Tagging is evaluated per role. If the image is already golden for 'ACCESS' and you
             request tagging for 'CORE', the module tags 'CORE' (changed=True). Previously this
             was silently skipped.
