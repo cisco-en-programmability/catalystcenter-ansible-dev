@@ -1,13 +1,11 @@
 {
-    "playbook_generate_all_configurations": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflows"
-                ]
-            }
+    "playbook_generate_all_configurations": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflows"
+            ]
         }
-    ],
+    },
     "response1": {
         "response": [
             {
@@ -99,15 +97,13 @@
         ],
         "version": "1.0"
     },
-    "playbook_component_filters": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflows"
-                ]
-            }
+    "playbook_component_filters": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflows"
+            ]
         }
-    ],
+    },
     "response5": {
         "response": [
             {
@@ -199,23 +195,21 @@
         ],
         "version": "1.0"
     },
-    "playbook_specifc_filters": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflows"
-                ],
-                "device_replacement_workflows": [
-                    {
-                        "faulty_device_serial_number": "9HHVY74U6BJ"
-                    },
-                    {
-                        "replacement_status": "REPLACED"
-                    }
-                ]
-            }
+    "playbook_specifc_filters": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflows"
+            ],
+            "device_replacement_workflows": [
+                {
+                    "faulty_device_serial_number": "9HHVY74U6BJ"
+                },
+                {
+                    "replacement_status": "REPLACED"
+                }
+            ]
         }
-    ],
+    },
     "response9": {
         "response": [
             {
@@ -307,20 +301,18 @@
         ],
         "version": "1.0"
     },
-    "playbook_no_device_found": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflows"
-                ],
-                "device_replacement_workflows": [
-                    {
-                        "faulty_device_serial_number": "9HHVY74J"
-                    }
-                ]
-            }
+    "playbook_no_device_found": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflows"
+            ],
+            "device_replacement_workflows": [
+                {
+                    "faulty_device_serial_number": "9HHVY74J"
+                }
+            ]
         }
-    ],
+    },
     "response10": {
         "response": [
             {
@@ -344,23 +336,21 @@
         ],
         "version": "1.0"
     },
-    "playbook_component_specific_filters1": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflows"
-                ],
-                "device_replacement_workflows": [
-                    {
-                        "replacement_device_serial_number": "9TRQFABSFR2"
-                    },
-                    {
-                        "replacement_status": "REPLACED"
-                    }
-                ]
-            }
+    "playbook_component_specific_filters1": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflows"
+            ],
+            "device_replacement_workflows": [
+                {
+                    "replacement_device_serial_number": "9TRQFABSFR2"
+                },
+                {
+                    "replacement_status": "REPLACED"
+                }
+            ]
         }
-    ],
+    },
     "response14": {
         "response": [
             {
@@ -384,21 +374,19 @@
         ],
         "version": "1.0"
     },
-    "playbook_negative_scenario1": [
-        {
-            "component_specific_filters": {
-                "components_list": [
-                    "device_replacement_workflow"
-                ],
-                "device_replacement_workflows": [
-                    {
-                        "replacement_device_serial_number": "9TRQFABSFR2"
-                    },
-                    {
-                        "replacement_status": "REPLACED"
-                    }
-                ]
-            }
+    "playbook_negative_scenario1": {
+        "component_specific_filters": {
+            "components_list": [
+                "device_replacement_workflow"
+            ],
+            "device_replacement_workflows": [
+                {
+                    "replacement_device_serial_number": "9TRQFABSFR2"
+                },
+                {
+                    "replacement_status": "REPLACED"
+                }
+            ]
         }
-    ]
+    }
 }

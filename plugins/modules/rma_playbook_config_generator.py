@@ -69,13 +69,10 @@ options:
     choices: [overwrite, append]
   config:
     description:
-    - A list of configuration filters for generating YAML
+    - A dictionary of configuration filters for generating YAML
       playbooks compatible with the C(rma_workflow_manager) module.
-    - Each configuration entry can include component filters.
-    - Multiple configuration entries can be provided to generate
-      separate playbooks with different filter criteria.
-    type: list
-    elements: dict
+    - The configuration entry can include component filters.
+    type: dict
     required: false
     suboptions:
       component_specific_filters:
@@ -196,8 +193,8 @@ EXAMPLES = r"""
     state: gathered
     file_path: "/tmp/rma_workflows_config.yaml"
     config:
-      - component_specific_filters:
-          components_list: ["device_replacement_workflows"]
+      component_specific_filters:
+        components_list: ["device_replacement_workflows"]
 
 - name: Generate YAML Configuration for specific device replacement workflows
   cisco.catalystcenter.rma_playbook_config_generator:
@@ -213,11 +210,11 @@ EXAMPLES = r"""
     state: gathered
     file_path: "/tmp/rma_specific_workflows.yaml"
     config:
-      - component_specific_filters:
-          components_list: ["device_replacement_workflows"]
-          device_replacement_workflows:
-            - faulty_device_serial_number: "FJC2327U0S2"
-            - replacement_status: "READY-FOR-REPLACEMENT"
+      component_specific_filters:
+        components_list: ["device_replacement_workflows"]
+        device_replacement_workflows:
+          - faulty_device_serial_number: "FJC2327U0S2"
+          - replacement_status: "READY-FOR-REPLACEMENT"
 
 - name: Generate YAML Configuration for device replacement workflows by replacement device
   cisco.catalystcenter.rma_playbook_config_generator:
@@ -233,10 +230,10 @@ EXAMPLES = r"""
     state: gathered
     file_path: "/tmp/rma_replacement_device_workflows.yaml"
     config:
-      - component_specific_filters:
-          components_list: ["device_replacement_workflows"]
-          device_replacement_workflows:
-            - replacement_device_serial_number: "FCW2225C020"
+      component_specific_filters:
+        components_list: ["device_replacement_workflows"]
+        device_replacement_workflows:
+          - replacement_device_serial_number: "FCW2225C020"
 """
 
 RETURN = r"""
@@ -371,7 +368,7 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
             object: Self instance with updated attributes:
                 - self.msg (str): Message describing the validation result.
                 - self.status (str): Status of validation ("success" or "failed").
-                - self.validated_config (list): Validated configuration parameters if successful.
+                - self.validated_config (dict): Validated configuration parameters if successful.
         """
         self.log("Starting validation of input configuration parameters.", "DEBUG")
 
@@ -1760,8 +1757,7 @@ def main():
         # ============================================
         "config": {
             "required": False,
-            "type": "list",
-            "elements": "dict"
+            "type": "dict"
         },
         "file_path": {"required": False, "type": "str"},
         "file_mode": {
@@ -1811,7 +1807,7 @@ def main():
             module.params.get("catalystcenter_verify"),
             module.params.get("catalystcenter_version"),
             module.params.get("state"),
-            len(module.params.get("config") or [])
+            len(module.params.get("config") or {})
         ),
         "DEBUG"
     )
@@ -1914,18 +1910,15 @@ def main():
     # ============================================
     # Configuration Processing
     # ============================================
-    config_list = ccc_rma_playbook_generator.validated_config
+    config = ccc_rma_playbook_generator.validated_config
 
     ccc_rma_playbook_generator.log(
-        "Processing {0} configuration item(s) for state '{1}'".format(
-            len(config_list), state
-        ),
+        "Processing configuration for state '{0}'".format(state),
         "INFO"
     )
 
-    for config_item in config_list:
-        ccc_rma_playbook_generator.get_want(config_item, state).check_return_status()
-        ccc_rma_playbook_generator.get_diff_state_apply[state]().check_return_status()
+    ccc_rma_playbook_generator.get_want(config, state).check_return_status()
+    ccc_rma_playbook_generator.get_diff_state_apply[state]().check_return_status()
 
     # ============================================
     # Module Completion and Exit
