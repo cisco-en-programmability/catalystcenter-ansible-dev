@@ -223,8 +223,7 @@ stack member serial number** in `user_sudi_serial_nos` (sent to the API as
 Use this example to onboard a Cisco Catalyst 9800 Wireless LAN Controller.
 WLC claiming requires static IP configuration (`static_ip`, `subnet_mask`,
 `gateway`, `vlan_id`, `ip_interface_name`) so the controller is reachable
-after provisioning. Specify `golden_image: true` to mark the image as the
-preferred version for the device family.
+after provisioning. Set `golden_image: true` to select an image that is already tagged as Golden in Catalyst Center.
 
 ```yaml
 - hosts: localhost
@@ -251,7 +250,7 @@ preferred version for the device family.
               - serial_number: FOX2639PAY7
                 hostname: SF-EWLC-1
                 state: Unclaimed
-                pid: C9800-CL-K9
+                pid: C9800-40-K9
 ```
 
 ### Example 5: Add and Claim an AccessPoint
