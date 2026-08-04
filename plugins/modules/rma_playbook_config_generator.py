@@ -1296,7 +1296,8 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
         else:
             self.log("Using user-provided file_path: {0}".format(file_path), "DEBUG")
 
-        self.log("File path determined: {0}".format(file_path), "DEBUG")
+        file_mode = self.params.get("file_mode")
+        self.log("File path determined: {0}, file_mode: {1}".format(file_path, file_mode), "DEBUG")
 
         component_specific_filters = (
             yaml_config_generator.get("component_specific_filters") or {}
@@ -1419,33 +1420,42 @@ class RMAPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
         final_dict = {"config": config_list}
         self.log("Final dictionary created with {0} device replacement workflow configurations".format(len(config_list)), "DEBUG")
 
-        if self.write_dict_to_yaml(final_dict, file_path):
-            success_message = "YAML configuration file generated successfully for module '{0}'".format(self.module_name)
+        if self.write_dict_to_yaml(final_dict, file_path, file_mode):
+            if self.status != "failed":
+                success_message = "YAML configuration file generated successfully for module '{0}'".format(self.module_name)
 
-            response_data = {
-                "components_processed": components_processed,
-                "components_skipped": components_skipped,
-                "configurations_count": total_configurations,
-                "file_path": file_path,
-                "message": success_message,
-                "status": "success"
-            }
+                response_data = {
+                    "components_processed": components_processed,
+                    "components_skipped": components_skipped,
+                    "configurations_count": total_configurations,
+                    "file_path": file_path,
+                    "message": success_message,
+                    "status": "success"
+                }
 
-            self.set_operation_result("success", True, success_message, "INFO")
+                self.set_operation_result("success", True, success_message, "INFO")
 
-            self.msg = response_data
-            self.result["response"] = response_data
+                self.msg = response_data
+                self.result["response"] = response_data
         else:
-            error_message = "Failed to write YAML configuration to file: {0}".format(file_path)
+            if self.status != "failed":
+                unchanged_message = (
+                    "YAML configuration file already up-to-date for module '{0}'. "
+                    "No changes written to '{1}'.".format(self.module_name, file_path)
+                )
 
-            response_data = {
-                "message": error_message,
-                "status": "failed"
-            }
+                response_data = {
+                    "components_processed": components_processed,
+                    "components_skipped": components_skipped,
+                    "configurations_count": total_configurations,
+                    "file_path": file_path,
+                    "message": unchanged_message,
+                    "status": "success"
+                }
 
-            self.set_operation_result("failed", False, error_message, "ERROR")
-            self.msg = response_data
-            self.result["response"] = response_data
+                self.set_operation_result("success", False, unchanged_message, "INFO")
+                self.msg = response_data
+                self.result["response"] = response_data
 
         return self
 
