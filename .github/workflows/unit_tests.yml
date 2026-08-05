@@ -81,3 +81,13 @@ jobs:
             echo "All tests passed successfully :)"
             echo "::notice::Tests passed"
           fi
+
+      - name: Run switch refresh offline role tests
+        shell: bash
+        run: |
+          source venv/bin/activate
+          ANSIBLE_COLLECTIONS_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/ansible_collections
+          ANSIBLE_COLLECTIONS_PATH="$ANSIBLE_COLLECTIONS_PATH" \
+            ansible-playbook \
+              -i roles/switch_refresh/tests/inventory \
+              roles/switch_refresh/tests/test_batch_plan.yml

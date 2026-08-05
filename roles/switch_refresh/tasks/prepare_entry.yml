@@ -1,0 +1,8 @@
+---
+- name: Prepare replacement switch batch
+  ansible.builtin.include_tasks: prepare_batch.yml
+  when: refresh_item.new_devices is defined
+
+- name: Prepare legacy replacement switch entry
+  ansible.builtin.include_tasks: prepare_one.yml
+  when: refresh_item.new_devices is not defined

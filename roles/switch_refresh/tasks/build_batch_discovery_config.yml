@@ -1,0 +1,33 @@
+---
+- name: Add generated discovery configuration for batch chunk
+  ansible.builtin.set_fact:
+    switch_refresh_batch_discovery_config: >-
+      {{
+        switch_refresh_batch_discovery_config + [
+          {
+            'discovery_name':
+              (
+                switch_refresh_batch_new_devices.discovery_name |
+                default('switch-refresh-' ~ switch_refresh_batch_file_safe_name)
+              )
+              if (switch_refresh_batch_device_ips | length <= 8)
+              else
+              (
+                switch_refresh_batch_new_devices.discovery_name |
+                default('switch-refresh-' ~ switch_refresh_batch_file_safe_name)
+              ) ~ '-' ~
+              (((switch_refresh_discovery_chunk_index | int) + 1) | string),
+            'discovery_type':
+              'SINGLE'
+              if (switch_refresh_batch_device_ips | length == 1)
+              else 'MULTI RANGE',
+            'ip_address_list': switch_refresh_discovery_chunk | map('string') | list,
+            'protocol_order':
+              switch_refresh_batch_new_devices.protocol_order | default('ssh'),
+            'retry':
+              switch_refresh_batch_new_devices.discovery_retry | default(2),
+            'use_global_credentials':
+              switch_refresh_batch_new_devices.use_global_credentials | default(true)
+          }
+        ]
+      }}

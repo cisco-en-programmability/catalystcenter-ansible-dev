@@ -1,0 +1,8 @@
+---
+- name: Clean up old switches from batch input
+  ansible.builtin.include_tasks: cleanup_batch.yml
+  when: refresh_item.new_devices is defined
+
+- name: Clean up old switch from legacy input
+  ansible.builtin.include_tasks: cleanup_one.yml
+  when: refresh_item.new_devices is not defined

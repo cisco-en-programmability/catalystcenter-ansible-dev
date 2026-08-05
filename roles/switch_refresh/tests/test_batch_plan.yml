@@ -1,0 +1,533 @@
+---
+- name: Validate switch refresh batch plan generation offline
+  hosts: localhost
+  gather_facts: false
+  vars:
+    switch_refresh_onboarding_method: discovery
+    switch_refresh_work_dir: /tmp/catalystcenter_switch_refresh
+    switch_refresh_inventory_credentials:
+      username: test-user
+      password: test-password
+      enable_password: test-enable-password
+      cli_transport: ssh
+      type: NETWORK_DEVICE
+    switch_refresh_inventory_enabled: true
+    switch_refresh_inventory_role_update_enabled: true
+    switch_refresh_provision_enabled: true
+    switch_refresh_fabric_add_enabled: true
+    switch_refresh_host_onboarding_enabled: true
+    switch_refresh_lan_automation_enabled: true
+    switch_refresh_device_info_lookup_enabled: true
+  tasks:
+    - name: Set minimal discovery batch input
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: two-device-discovery
+          fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - 192.0.2.20
+              - 192.0.2.21
+          device_mapping:
+            - old_device_hostname: old-edge-01.example.test
+              new_device_management_ip: 192.0.2.20
+              interface_mappings: []
+            - old_device_serial_number: OLD00000002
+              new_device_management_ip: 192.0.2.21
+              interface_mappings:
+                - source_interface_name: GigabitEthernet1/0/1
+                  destination_interface_name: GigabitEthernet1/0/2
+
+    - name: Build minimal discovery batch plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify minimal discovery batch plan
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_batch_device_ips == ['192.0.2.20', '192.0.2.21']
+          - switch_refresh_batch_discovery_config | length == 1
+          - switch_refresh_batch_discovery_config[0].discovery_type == 'MULTI RANGE'
+          - >-
+            switch_refresh_batch_discovery_config[0].ip_address_list ==
+            switch_refresh_batch_device_ips
+          - switch_refresh_batch_inventory_config | length == 1
+          - switch_refresh_batch_inventory_execution_config | length == 2
+          - >-
+            switch_refresh_batch_inventory_config[0].ip_address_list ==
+            switch_refresh_batch_device_ips
+          - >-
+            switch_refresh_batch_inventory_execution_config[1].role == 'ACCESS'
+          - switch_refresh_batch_provision_config | length == 2
+          - >-
+            switch_refresh_batch_provision_config |
+            map(attribute='management_ip_address') |
+            list == switch_refresh_batch_device_ips
+          - switch_refresh_batch_fabric_devices_config | length == 1
+          - >-
+            switch_refresh_batch_fabric_devices_config[0].fabric_devices.device_config |
+            map(attribute='device_ip') |
+            list == switch_refresh_batch_device_ips
+          - switch_refresh_batch_device_mappings | length == 2
+          - switch_refresh_batch_mapping_new_ips == switch_refresh_batch_device_ips
+
+    - name: Verify ambiguous old-device lookup fails per mapping
+      block:
+        - name: Set ambiguous old-device inventory records
+          ansible.builtin.set_fact:
+            switch_refresh_batch_old_device_info_entries:
+              - device_ip: 198.51.100.20
+                device_details:
+                  - hostname: duplicate-old.example.test
+              - device_ip: 198.51.100.21
+                device_details:
+                  - hostname: duplicate-old.example.test
+            switch_refresh_batch_resolved_mappings: []
+            switch_refresh_resolve_mapping:
+              old:
+                hostname: duplicate-old.example.test
+              new_device_management_ip: 192.0.2.20
+
+        - name: Resolve ambiguous old-device mapping
+          ansible.builtin.include_tasks: ../tasks/resolve_batch_mapping.yml
+
+        - name: Fail when ambiguous old-device mapping was accepted
+          ansible.builtin.fail:
+            msg: Ambiguous old-device mapping unexpectedly passed validation.
+
+      rescue:
+        - name: Confirm ambiguous old-device lookup failed as expected
+          ansible.builtin.assert:
+            that:
+              - >-
+                'Expected exactly one old inventory device' in
+                ansible_failed_result.msg
+
+    - name: Set stacked old-device serial inventory record
+      ansible.builtin.set_fact:
+        switch_refresh_batch_old_device_info_entries:
+          - device_ip: 198.51.100.22
+            device_details:
+              - serialNumber: OLDSTACK01, OLDSTACK02
+        switch_refresh_batch_resolved_mappings: []
+        switch_refresh_resolve_mapping:
+          old:
+            serial_number: OLDSTACK02
+          new_device_management_ip: 192.0.2.21
+
+    - name: Resolve stacked old-device serial mapping
+      ansible.builtin.include_tasks: ../tasks/resolve_batch_mapping.yml
+
+    - name: Verify stacked old-device serial mapping
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_batch_resolved_mappings | length == 1
+          - >-
+            switch_refresh_batch_resolved_mappings[0].old_management_ip ==
+            '198.51.100.22'
+
+    - name: Set LAN Automation batch input
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: two-device-lan-automation
+          fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+          onboarding_method: lan_automation
+          new_devices:
+            device_ips:
+              - 192.0.2.30
+              - 192.0.2.31
+            lan_automation_config:
+              - lan_automation:
+                  primary_device_management_ip_address: 192.0.2.1
+                  primary_device_interface_names:
+                    - GigabitEthernet1/0/1
+                  ip_pools:
+                    - ip_pool_name: LAN_AUTO_MAIN
+                      ip_pool_role: MAIN_POOL
+                  discovery_devices:
+                    - device_serial_number: NEW00000001
+                      device_host_name: new-edge-01
+                      device_site_name_hierarchy: Global/USA/San Jose/BLDG23
+                      device_management_ip_address: 192.0.2.30
+                    - device_serial_number: NEW00000002
+                      device_host_name: new-edge-02
+                      device_site_name_hierarchy: Global/USA/San Jose/BLDG23
+                      device_management_ip_address: 192.0.2.31
+                  launch_and_wait: true
+          device_mapping:
+            - old:
+                management_ip: 198.51.100.30
+              new_device_management_ip: 192.0.2.30
+            - old:
+                mac_address: 00:11:22:33:44:55
+              new_device_management_ip: 192.0.2.31
+
+    - name: Build LAN Automation batch plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify LAN Automation batch plan
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_batch_onboarding_method == 'lan_automation'
+          - switch_refresh_batch_lan_automation_target_ips == switch_refresh_batch_device_ips
+          - switch_refresh_batch_device_mappings | length == 2
+          - switch_refresh_batch_mapping_old_keys | length == 2
+          - switch_refresh_batch_mapping_new_ips == switch_refresh_batch_device_ips
+
+    - name: Set custom workflow batch input
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: custom-workflow-batch
+          fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - 192.0.2.40
+              - 192.0.2.41
+            discovery_config:
+              - discovery_name: custom-discovery
+                discovery_type: MULTI RANGE
+                ip_address_list:
+                  - 192.0.2.40
+                  - 192.0.2.41
+                protocol_order: ssh
+                use_global_credentials: true
+            inventory_config:
+              - ip_address_list:
+                  - 192.0.2.40
+                  - 192.0.2.41
+                username: custom-user
+                password: custom-password
+                type: NETWORK_DEVICE
+            provision_config:
+              - site_name_hierarchy: Global/USA/San Jose/BLDG23
+                management_ip_address: 192.0.2.40
+              - site_name_hierarchy: Global/USA/San Jose/BLDG23
+                management_ip_address: 192.0.2.41
+            fabric_devices_config:
+              - fabric_devices:
+                  fabric_name: Global/USA/San Jose/BLDG23
+                  device_config:
+                    - device_ip: 192.0.2.40
+                      device_roles:
+                        - EDGE_NODE
+                    - device_ip: 192.0.2.41
+                      device_roles:
+                        - EDGE_NODE
+          device_mapping:
+            - old_device_management_ip: 198.51.100.40
+              new_device_management_ip: 192.0.2.40
+            - old_device_management_ip: 198.51.100.41
+              new_device_management_ip: 192.0.2.41
+
+    - name: Build custom workflow batch plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify complete custom workflow replacements
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_batch_discovery_config ==
+            refresh_item.new_devices.discovery_config
+          - >-
+            switch_refresh_batch_inventory_config ==
+            refresh_item.new_devices.inventory_config
+          - >-
+            switch_refresh_batch_provision_config ==
+            refresh_item.new_devices.provision_config
+          - >-
+            switch_refresh_batch_fabric_devices_config ==
+            refresh_item.new_devices.fabric_devices_config
+
+    - name: Verify mismatched custom workflow targets fail preflight
+      block:
+        - name: Set mismatched custom inventory input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-custom-inventory
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - 192.0.2.50
+                inventory_config:
+                  - ip_address_list:
+                      - 192.0.2.51
+                    username: custom-user
+                    password: custom-password
+              device_mapping:
+                - old_device_management_ip: 198.51.100.50
+                  new_device_management_ip: 192.0.2.50
+
+        - name: Build invalid custom workflow batch plan
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when invalid custom workflow batch was accepted
+          ansible.builtin.fail:
+            msg: Invalid custom workflow batch unexpectedly passed validation.
+
+      rescue:
+        - name: Confirm invalid custom workflow batch failed as expected
+          ansible.builtin.assert:
+            that:
+              - >-
+                'Custom inventory_config IPs must exactly match' in
+                ansible_failed_result.msg
+
+    - name: Verify mismatched custom Discovery targets fail preflight
+      block:
+        - name: Set mismatched custom Discovery input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-custom-discovery
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - 192.0.2.52
+                discovery_config:
+                  - discovery_name: wrong-switch
+                    discovery_type: SINGLE
+                    ip_address_list:
+                      - 192.0.2.53
+                    use_global_credentials: true
+              device_mapping:
+                - old_device_management_ip: 198.51.100.52
+                  new_device_management_ip: 192.0.2.52
+
+        - name: Build invalid custom Discovery batch plan
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when invalid custom Discovery batch was accepted
+          ansible.builtin.fail:
+            msg: Invalid custom Discovery batch unexpectedly passed validation.
+
+      rescue:
+        - name: Confirm invalid custom Discovery batch failed as expected
+          ansible.builtin.assert:
+            that:
+              - >-
+                'Custom discovery_config IPs must exactly match' in
+                ansible_failed_result.msg
+
+- name: Validate generated Discovery chunking offline
+  hosts: chunk_test
+  gather_facts: false
+  vars:
+    switch_refresh_onboarding_method: discovery
+    switch_refresh_work_dir: /tmp/catalystcenter_switch_refresh
+    switch_refresh_inventory_credentials:
+      username: test-user
+      password: test-password
+    switch_refresh_inventory_enabled: true
+    switch_refresh_inventory_role_update_enabled: true
+    switch_refresh_provision_enabled: true
+    switch_refresh_fabric_add_enabled: true
+    switch_refresh_host_onboarding_enabled: false
+    refresh_item:
+      name: nine-device-discovery
+      fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+      onboarding_method: discovery
+      new_devices:
+        discovery_name: custom-batch-discovery
+        device_ips:
+          - 192.0.2.101
+          - 192.0.2.102
+          - 192.0.2.103
+          - 192.0.2.104
+          - 192.0.2.105
+          - 192.0.2.106
+          - 192.0.2.107
+          - 192.0.2.108
+          - 192.0.2.109
+  tasks:
+    - name: Build chunked discovery batch plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify discovery manager chunks and names
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_batch_discovery_config | length == 2
+          - switch_refresh_batch_discovery_config[0].ip_address_list | length == 8
+          - switch_refresh_batch_discovery_config[1].ip_address_list | length == 1
+          - >-
+            switch_refresh_batch_discovery_config |
+            map(attribute='discovery_name') |
+            unique |
+            list |
+            length == 2
+          - >-
+            switch_refresh_batch_discovery_config[0].discovery_name ==
+            'custom-batch-discovery-1'
+          - >-
+            switch_refresh_batch_discovery_config[1].discovery_name ==
+            'custom-batch-discovery-2'
+
+    - name: Verify fabric warning text cannot satisfy batch coverage
+      block:
+        - name: Set partial fabric response containing missing IP warning
+          ansible.builtin.set_fact:
+            switch_refresh_batch_device_ips:
+              - 192.0.2.101
+              - 192.0.2.102
+            fabric_devices_info_result:
+              response:
+                - >-
+                  No managed devices found for the following identifiers:
+                  IP(s) not found: 192.0.2.102.
+                - - fabric_info:
+                      - device_ip: 192.0.2.101
+                        fabric_details:
+                          - deviceRoles:
+                              - EDGE_NODE
+
+        - name: Validate partial fabric response
+          ansible.builtin.include_tasks: ../tasks/validate_batch_fabric_result.yml
+
+        - name: Fail when warning text satisfied fabric validation
+          ansible.builtin.fail:
+            msg: Partial fabric response unexpectedly passed validation.
+
+      rescue:
+        - name: Confirm partial fabric response failed as expected
+          ansible.builtin.assert:
+            that:
+              - >-
+                'Not every replacement switch was found' in
+                ansible_failed_result.msg
+
+    - name: Set complete fabric response
+      ansible.builtin.set_fact:
+        fabric_devices_info_result:
+          response:
+            - The fabric devices filtered from the network devices are complete.
+            - - fabric_info:
+                  - device_ip: 192.0.2.101
+                    fabric_details:
+                      - deviceRoles:
+                          - EDGE_NODE
+                  - device_ip: 192.0.2.102
+                    fabric_details:
+                      - deviceRoles:
+                          - EDGE_NODE
+
+    - name: Validate complete fabric response
+      ansible.builtin.include_tasks: ../tasks/validate_batch_fabric_result.yml
+
+- name: Validate IP-only batch role dispatch offline
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_remote_tmp: /tmp/codex-switch-refresh-ansible-remote
+    catalystcenter_host: unused.example.test
+    catalystcenter_username: unused
+    catalystcenter_password: unused
+    switch_refresh_phase: prepare
+    switch_refresh_work_dir: /tmp/catalystcenter_switch_refresh-offline-test
+    switch_refresh_devices:
+      - name: ip-only-dispatch
+        fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+        onboarding_method: discovery
+        new_devices:
+          device_ips:
+            - 192.0.2.60
+            - 192.0.2.61
+      - name: separate-batch-dispatch
+        fabric_site_name_hierarchy: Global/USA/San Jose/BLDG24
+        onboarding_method: discovery
+        new_devices:
+          device_ips:
+            - 192.0.2.62
+    switch_refresh_discovery_enabled: false
+    switch_refresh_inventory_enabled: false
+    switch_refresh_inventory_role_update_enabled: false
+    switch_refresh_device_info_lookup_enabled: false
+    switch_refresh_provision_enabled: false
+    switch_refresh_fabric_add_enabled: false
+    switch_refresh_fabric_validation_enabled: false
+    switch_refresh_host_onboarding_enabled: false
+  roles:
+    - role: cisco.catalystcenter.switch_refresh
+
+  post_tasks:
+    - name: Verify IP-only batch dispatch result
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_prepare_results | length == 2
+          - switch_refresh_prepare_results[0].name == 'ip-only-dispatch'
+          - >-
+            switch_refresh_prepare_results[0].device_ips ==
+            ['192.0.2.60', '192.0.2.61']
+          - switch_refresh_prepare_results[1].name == 'separate-batch-dispatch'
+          - switch_refresh_prepare_results[1].device_ips == ['192.0.2.62']
+          - switch_refresh_prepare_results[1].devices | length == 1
+
+- name: Validate batch cleanup normalization offline
+  hosts: cleanup_test
+  gather_facts: false
+  vars:
+    ansible_remote_tmp: /tmp/codex-switch-refresh-cleanup-remote
+    switch_refresh_phase: cleanup_old
+    switch_refresh_cleanup_old: true
+    switch_refresh_work_dir: /tmp/catalystcenter_switch_refresh-cleanup-test
+    switch_refresh_device_info_lookup_enabled: false
+    switch_refresh_cleanup_host_onboarding_enabled: false
+    switch_refresh_cleanup_fabric_enabled: false
+    switch_refresh_cleanup_unprovision_enabled: false
+    switch_refresh_cleanup_inventory_enabled: false
+    switch_refresh_fabric_validation_enabled: false
+    switch_refresh_devices:
+      - name: cleanup-batch
+        fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+        new_devices:
+          device_ips:
+            - 192.0.2.70
+            - 192.0.2.71
+        device_mapping:
+          - old_device_management_ip: 198.51.100.70
+            new_device_management_ip: 192.0.2.70
+          - old:
+              management_ip: 198.51.100.71
+            new_device_management_ip: 192.0.2.71
+  roles:
+    - role: cisco.catalystcenter.switch_refresh
+
+  post_tasks:
+    - name: Verify batch cleanup dispatch results
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_cleanup_results | length == 2
+          - >-
+            switch_refresh_cleanup_results |
+            map(attribute='old_management_ip') |
+            list == ['198.51.100.70', '198.51.100.71']
+
+    - name: Verify ambiguous cleanup mapping fails preflight
+      block:
+        - name: Set ambiguous cleanup mapping
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-cleanup-batch
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              new_devices:
+                device_ips:
+                  - 192.0.2.72
+              device_mapping:
+                - old:
+                    management_ip: 198.51.100.72
+                  old_device_hostname: ambiguous-old.example.test
+                  new_device_management_ip: 192.0.2.72
+
+        - name: Build invalid cleanup batch
+          ansible.builtin.include_tasks: ../tasks/cleanup_batch.yml
+
+        - name: Fail when ambiguous cleanup mapping was accepted
+          ansible.builtin.fail:
+            msg: Ambiguous cleanup mapping unexpectedly passed validation.
+
+      rescue:
+        - name: Confirm ambiguous cleanup mapping failed as expected
+          ansible.builtin.assert:
+            that:
+              - >-
+                'one non-empty old device' in ansible_failed_result.msg

@@ -30,48 +30,36 @@ switch_refresh_sda_fabric_devices_config_verify: true
 switch_refresh_provision_config_verify: true
 
 switch_refresh_devices:
-  - name: sjc-edge-01-refresh
-
-    # Required topology input.
+  - name: sjc-bldg23-edge-refresh
     fabric_site_name_hierarchy: Global/USA/SAN-JOSE/BLDG23
     onboarding_method: discovery
 
-    # Minimal old-switch input: provide any one of management_ip, hostname,
-    # serial_number, or mac_address. The role resolves management IP with
-    # network_devices_info.
-    old:
-      hostname: SJ-EDGE-OLD.cisco.local
+    # Authoritative replacement-device set. Without custom stage configs, the
+    # role generates one multi-device payload for each workflow manager.
+    new_devices:
+      device_ips:
+        - 10.10.10.20
+        - 10.10.10.21
 
-    # Minimal new-switch input. The role auto-builds SINGLE discovery config
-    # using Catalyst Center global credentials, then auto-builds provision_config.
-    new:
-      management_ip: 10.10.10.20
-
-      # Optional discovery overrides.
-      # discovery_name: switch-refresh-sjc-edge-01
+      # Optional generated-discovery overrides.
+      # discovery_name: switch-refresh-sjc-bldg23
       # protocol_order: ssh
       # discovery_retry: 2
       # use_global_credentials: true
 
-      # Optional. Pass full discovery_config only when you need custom discovery
-      # credentials or a non-SINGLE discovery type.
+      # Optional complete Discovery workflow replacement. Use the flat list
+      # accepted by discovery_workflow_manager.
       # discovery_config:
-      #   single:
-      #     - discovery_name: switch-refresh-sjc-edge-01
-      #       discovery_type: SINGLE
-      #       ip_address_list:
-      #         - 10.10.10.20
-      #       protocol_order: ssh
-      #       retry: 2
-      #       discovery_specific_credentials:
-      #         cli_credentials_list:
-      #           - username: "<switch-cli-username>"
-      #             password: "<switch-cli-password>"
-      #             enable_password: "<switch-enable-password>"
+      #   - discovery_name: switch-refresh-sjc-bldg23
+      #     discovery_type: MULTI RANGE
+      #     ip_address_list:
+      #       - 10.10.10.20
+      #       - 10.10.10.21
+      #     protocol_order: ssh
+      #     retry: 2
+      #     use_global_credentials: true
 
-      # Optional per-device inventory credential override. By default, the role
-      # uses switch_refresh_inventory_credentials and adds management_ip to the
-      # inventory payload automatically.
+      # Optional batch inventory credential override.
       # inventory_credentials:
       #   username: "<switch-cli-username>"
       #   password: "<switch-cli-password>"
@@ -79,10 +67,12 @@ switch_refresh_devices:
       #   cli_transport: ssh
       #   type: NETWORK_DEVICE
 
-      # Optional complete inventory payload override.
+      # Optional complete inventory payload replacement. Its IP set must match
+      # device_ips.
       # inventory_config:
       #   - ip_address_list:
       #       - 10.10.10.20
+      #       - 10.10.10.21
       #     username: "<switch-cli-username>"
       #     password: "<switch-cli-password>"
       #     enable_password: "<switch-enable-password>"
@@ -93,10 +83,12 @@ switch_refresh_devices:
       # device_roles:
       #   - EDGE_NODE
 
-      # Optional. Only use when you need a custom provision payload.
+      # Optional complete provision payload replacement.
       # provision_config:
       #   - site_name_hierarchy: Global/USA/SAN-JOSE/BLDG23
       #     management_ip_address: 10.10.10.20
+      #   - site_name_hierarchy: Global/USA/SAN-JOSE/BLDG23
+      #     management_ip_address: 10.10.10.21
 
       # Optional. Only use when you need a custom fabric device payload.
       # fabric_devices_config:
@@ -106,45 +98,36 @@ switch_refresh_devices:
       #         - device_ip: 10.10.10.20
       #           device_roles:
       #             - EDGE_NODE
+      #         - device_ip: 10.10.10.21
+      #           device_roles:
+      #             - EDGE_NODE
 
-    # Provide mappings only when the new switch uses different interface names
-    # or a different port layout. Unmapped source interfaces are migrated 1:1.
-    interface_mappings:
-      - source_interface_name: GigabitEthernet1/0/1
-        destination_interface_name: TenGigabitEthernet1/0/1
-      - source_interface_name: GigabitEthernet1/0/2
-        destination_interface_name: TenGigabitEthernet1/0/2
-      - source_interface_name: GigabitEthernet1/0/47
-        destination_interface_name: TenGigabitEthernet1/1/1
-      - source_interface_name: GigabitEthernet1/0/48
-        destination_interface_name: TenGigabitEthernet1/1/2
-
-  - name: sjc-edge-02-refresh-1-to-1
-    fabric_site_name_hierarchy: Global/USA/SAN-JOSE/BLDG23
-    onboarding_method: discovery
-    old:
-      serial_number: FOC1234ABCD
-    new:
-      management_ip: 10.10.10.21
-
-    # Empty mapping means the generator keeps old interface names as-is.
-    interface_mappings: []
+    # Old-device information is resolved only after new-device fabric
+    # validation, immediately before migration generation and host onboarding.
+    device_mapping:
+      - old_device_hostname: SJ-EDGE-OLD-01.cisco.local
+        new_device_management_ip: 10.10.10.20
+        interface_mappings:
+          - source_interface_name: GigabitEthernet1/0/1
+            destination_interface_name: TenGigabitEthernet1/0/1
+      - old:
+          serial_number: FOC1234ABCD
+        new_device_management_ip: 10.10.10.21
+        interface_mappings: []
 
   # LAN Automation onboarding option.
   # Use this instead of discovery when the replacement switch should be
-  # onboarded through Catalyst Center LAN Automation. Keep new.management_ip set
-  # to the expected management IP after LAN Automation so later steps can find
-  # the switch in inventory. launch_and_wait must be the boolean true. The
-  # discovery_timeout below is in minutes; the completion timeout above is in
-  # seconds.
+  # onboarded through Catalyst Center LAN Automation. Keep device_ips aligned
+  # with discovery_devices management IPs so later stages can find the devices.
+  # launch_and_wait must be the boolean true. The discovery_timeout below is in
+  # minutes; the completion timeout above is in seconds.
   #
   # - name: sjc-edge-03-refresh-lan-auto
   #   fabric_site_name_hierarchy: Global/USA/SAN-JOSE/BLDG23
   #   onboarding_method: lan_automation
-  #   old:
-  #     hostname: SJ-EDGE-OLD-03.cisco.local
-  #   new:
-  #     management_ip: 204.1.1.13
+  #   new_devices:
+  #     device_ips:
+  #       - 204.1.1.13
   #     lan_automation_config:
   #       - lan_automation:
   #           discovered_device_site_name_hierarchy: Global/USA/SAN JOSE
@@ -160,7 +143,7 @@ switch_refresh_devices:
   #           multicast_enabled: true
   #           redistribute_isis_to_bgp: true
   #           host_name_prefix: San-Jose
-  #           isis_domain_pwd: cisco
+  #           isis_domain_pwd: "<isis-domain-password>"
   #           discovery_level: 5
   #           discovery_timeout: 40
   #           discovery_devices:
@@ -170,6 +153,9 @@ switch_refresh_devices:
   #               device_management_ip_address: 204.1.1.13
   #           launch_and_wait: true
   #           pnp_authorization: false
-  #   interface_mappings:
-  #     - source_interface_name: GigabitEthernet1/0/1
-  #       destination_interface_name: TenGigabitEthernet1/0/1
+  #   device_mapping:
+  #     - old_device_hostname: SJ-EDGE-OLD-03.cisco.local
+  #       new_device_management_ip: 204.1.1.13
+  #       interface_mappings:
+  #         - source_interface_name: GigabitEthernet1/0/1
+  #           destination_interface_name: TenGigabitEthernet1/0/1

@@ -1,0 +1,91 @@
+---
+- name: Validate batch device mapping structure
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_input_mapping is mapping
+    fail_msg: Each device_mapping entry must be a mapping.
+
+- name: Derive old device identifier for batch mapping
+  ansible.builtin.set_fact:
+    switch_refresh_mapping_old_identifier: >-
+      {{
+        switch_refresh_input_mapping.old
+        if (switch_refresh_input_mapping.old is defined)
+        else {'management_ip': switch_refresh_input_mapping.old_device_management_ip}
+        if (switch_refresh_input_mapping.old_device_management_ip is defined)
+        else {'hostname': switch_refresh_input_mapping.old_device_hostname}
+        if (switch_refresh_input_mapping.old_device_hostname is defined)
+        else {'serial_number': switch_refresh_input_mapping.old_device_serial_number}
+        if (switch_refresh_input_mapping.old_device_serial_number is defined)
+        else {'mac_address': switch_refresh_input_mapping.old_device_mac_address}
+        if (switch_refresh_input_mapping.old_device_mac_address is defined)
+        else {}
+      }}
+
+- name: Validate batch device mapping
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_input_mapping.new_device_management_ip is defined
+      - switch_refresh_input_mapping.new_device_management_ip | string | trim | length > 0
+      - switch_refresh_input_mapping.new_device_management_ip | string in switch_refresh_batch_device_ips
+      - >-
+        (
+          [
+            switch_refresh_input_mapping.old is defined,
+            switch_refresh_input_mapping.old_device_management_ip is defined,
+            switch_refresh_input_mapping.old_device_hostname is defined,
+            switch_refresh_input_mapping.old_device_serial_number is defined,
+            switch_refresh_input_mapping.old_device_mac_address is defined
+          ] |
+          select('equalto', true) |
+          list |
+          length
+        ) == 1
+      - switch_refresh_mapping_old_identifier is mapping
+      - >-
+        (
+          [
+            switch_refresh_mapping_old_identifier.management_ip is defined,
+            switch_refresh_mapping_old_identifier.hostname is defined,
+            switch_refresh_mapping_old_identifier.serial_number is defined,
+            switch_refresh_mapping_old_identifier.mac_address is defined
+          ] |
+          select('equalto', true) |
+          list |
+          length
+        ) == 1
+      - >-
+        switch_refresh_mapping_old_identifier.values() |
+        first |
+        default('') |
+        string |
+        trim |
+        length > 0
+      - (switch_refresh_input_mapping.interface_mappings | default([]) | type_debug) == 'list'
+      - (switch_refresh_input_mapping.port_assignment_interface_mappings | default([]) | type_debug) == 'list'
+      - (switch_refresh_input_mapping.port_channel_interface_mappings | default([]) | type_debug) == 'list'
+    fail_msg: >-
+      Each device_mapping entry must target one IP from new_devices.device_ips,
+      identify one non-empty old device with either the nested old mapping or
+      one old_device_* alias, and use lists for interface mappings. The nested
+      old mapping must contain exactly one of management_ip, hostname,
+      serial_number, or mac_address.
+
+- name: Add normalized batch device mapping
+  ansible.builtin.set_fact:
+    switch_refresh_batch_device_mappings: >-
+      {{
+        switch_refresh_batch_device_mappings + [
+          {
+            'new_device_management_ip': switch_refresh_input_mapping.new_device_management_ip | string,
+            'old': switch_refresh_mapping_old_identifier,
+            'interface_mappings': switch_refresh_input_mapping.interface_mappings | default([]),
+            'port_assignment_interface_mappings':
+              switch_refresh_input_mapping.port_assignment_interface_mappings |
+              default(switch_refresh_input_mapping.interface_mappings | default([])),
+            'port_channel_interface_mappings':
+              switch_refresh_input_mapping.port_channel_interface_mappings |
+              default(switch_refresh_input_mapping.interface_mappings | default([]))
+          }
+        ]
+      }}
