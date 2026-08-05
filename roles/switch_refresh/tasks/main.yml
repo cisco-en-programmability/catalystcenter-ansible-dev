@@ -24,14 +24,16 @@
 
 - name: Prepare replacement switches
   ansible.builtin.include_tasks:
-    file: prepare_one.yml
+    file: prepare_entry.yml
     apply:
       tags:
         - switch_refresh_prepare
+  vars:
+    refresh_item: "{{ switch_refresh_entry }}"
   loop: "{{ switch_refresh_devices }}"
   loop_control:
-    loop_var: refresh_item
-    label: "{{ refresh_item.name | default(refresh_item.new.hostname | default(refresh_item.new.management_ip | default('switch-refresh'))) }}"
+    loop_var: switch_refresh_entry
+    label: "{{ switch_refresh_entry.name | default('switch-refresh') }}"
   when: switch_refresh_phase in ['prepare', 'all']
   tags:
     - switch_refresh_prepare
@@ -49,14 +51,16 @@
 
 - name: Clean up old switches
   ansible.builtin.include_tasks:
-    file: cleanup_one.yml
+    file: cleanup_entry.yml
     apply:
       tags:
         - switch_refresh_cleanup_old
+  vars:
+    refresh_item: "{{ switch_refresh_entry }}"
   loop: "{{ switch_refresh_devices }}"
   loop_control:
-    loop_var: refresh_item
-    label: "{{ refresh_item.name | default(refresh_item.old.hostname | default(refresh_item.old.management_ip | default('switch-refresh'))) }}"
+    loop_var: switch_refresh_entry
+    label: "{{ switch_refresh_entry.name | default('switch-refresh') }}"
   when:
     - switch_refresh_phase in ['cleanup_old', 'all']
     - switch_refresh_cleanup_old | bool

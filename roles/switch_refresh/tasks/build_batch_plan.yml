@@ -1,0 +1,648 @@
+---
+- name: Validate switch refresh batch structure
+  ansible.builtin.assert:
+    that:
+      - refresh_item is mapping
+      - refresh_item.name is defined
+      - refresh_item.name | string | trim | length > 0
+      - refresh_item.fabric_site_name_hierarchy is defined
+      - refresh_item.fabric_site_name_hierarchy | string | trim | length > 0
+      - refresh_item.new is not defined
+      - refresh_item.new_devices is defined
+      - refresh_item.new_devices is mapping
+    fail_msg: >-
+      A batch switch refresh entry requires a non-empty name,
+      fabric_site_name_hierarchy, and a new_devices mapping. Do not define both
+      new and new_devices on the same entry.
+
+- name: Initialize switch refresh batch context
+  ansible.builtin.set_fact:
+    switch_refresh_batch_name: "{{ refresh_item.name | string }}"
+    switch_refresh_batch_file_safe_name: >-
+      {{ refresh_item.name | string | regex_replace('[^A-Za-z0-9_.-]', '_') }}
+    switch_refresh_batch_new_devices: "{{ refresh_item.new_devices }}"
+    switch_refresh_batch_device_ips: >-
+      {{
+        refresh_item.new_devices.device_ips |
+        default([]) |
+        map('string') |
+        list
+      }}
+    switch_refresh_batch_onboarding_method: >-
+      {{ refresh_item.onboarding_method | default(switch_refresh_onboarding_method) }}
+    switch_refresh_batch_device_mappings: []
+    switch_refresh_batch_resolved_mappings: []
+    switch_refresh_batch_mapping_new_ips: []
+    switch_refresh_batch_mapping_old_keys: []
+    switch_refresh_batch_device_results: []
+  no_log: true
+
+- name: Validate switch refresh batch inputs
+  ansible.builtin.assert:
+    that:
+      - (switch_refresh_batch_new_devices.device_ips | default([]) | type_debug) == 'list'
+      - switch_refresh_batch_device_ips | length > 0
+      - switch_refresh_batch_device_ips | reject('equalto', '') | list | length == switch_refresh_batch_device_ips | length
+      - switch_refresh_batch_device_ips | unique | length == switch_refresh_batch_device_ips | length
+      - switch_refresh_batch_onboarding_method in ['discovery', 'lan_automation']
+      - (refresh_item.device_mapping | default([]) | type_debug) == 'list'
+      - >-
+        not (switch_refresh_host_onboarding_enabled | bool) or
+        (refresh_item.device_mapping | default([]) | length > 0)
+      - >-
+        switch_refresh_batch_new_devices.discovery_config is not defined or
+        (
+          (switch_refresh_batch_new_devices.discovery_config | type_debug) == 'list' and
+          switch_refresh_batch_new_devices.discovery_config | length > 0
+        )
+      - >-
+        switch_refresh_batch_new_devices.lan_automation_config is not defined or
+        (switch_refresh_batch_new_devices.lan_automation_config | type_debug) == 'list'
+      - >-
+        switch_refresh_batch_new_devices.inventory_config is not defined or
+        (
+          (switch_refresh_batch_new_devices.inventory_config | type_debug) == 'list' and
+          switch_refresh_batch_new_devices.inventory_config | length > 0
+        )
+      - >-
+        switch_refresh_batch_new_devices.provision_config is not defined or
+        (
+          (switch_refresh_batch_new_devices.provision_config | type_debug) == 'list' and
+          switch_refresh_batch_new_devices.provision_config | length > 0
+        )
+      - >-
+        switch_refresh_batch_new_devices.fabric_devices_config is not defined or
+        (
+          (switch_refresh_batch_new_devices.fabric_devices_config | type_debug) == 'list' and
+          switch_refresh_batch_new_devices.fabric_devices_config | length > 0
+        )
+    fail_msg: >-
+      new_devices.device_ips must be a non-empty list of unique values,
+      onboarding_method must be discovery or lan_automation, custom workflow
+      configurations must be lists, and device_mapping is required when host
+      onboarding is enabled.
+
+- name: Normalize switch refresh batch mappings
+  ansible.builtin.include_tasks: normalize_batch_mapping.yml
+  loop: "{{ refresh_item.device_mapping | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_input_mapping
+    label: >-
+      {{
+        switch_refresh_input_mapping.new_device_management_ip |
+        default('device-mapping')
+      }}
+
+- name: Derive switch refresh batch mapping keys
+  ansible.builtin.set_fact:
+    switch_refresh_batch_mapping_new_ips: >-
+      {{
+        switch_refresh_batch_device_mappings |
+        map(attribute='new_device_management_ip') |
+        list
+      }}
+    switch_refresh_batch_mapping_old_keys: >-
+      {{
+        (switch_refresh_batch_mapping_old_keys | default([])) + [
+          ('management_ip:' ~ (switch_refresh_mapping_item.old.management_ip | string | lower))
+          if (switch_refresh_mapping_item.old.management_ip is defined)
+          else ('hostname:' ~ (switch_refresh_mapping_item.old.hostname | string | lower))
+          if (switch_refresh_mapping_item.old.hostname is defined)
+          else ('serial_number:' ~ (switch_refresh_mapping_item.old.serial_number | string | lower))
+          if (switch_refresh_mapping_item.old.serial_number is defined)
+          else ('mac_address:' ~ (switch_refresh_mapping_item.old.mac_address | string | lower))
+        ]
+      }}
+  loop: "{{ switch_refresh_batch_device_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_mapping_item
+    label: "{{ switch_refresh_mapping_item.new_device_management_ip }}"
+
+- name: Validate switch refresh batch mapping coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_batch_mapping_new_ips | unique | length ==
+        switch_refresh_batch_mapping_new_ips | length
+      - >-
+        switch_refresh_batch_mapping_old_keys | unique | length ==
+        switch_refresh_batch_mapping_old_keys | length
+      - >-
+        not (switch_refresh_host_onboarding_enabled | bool) or
+        (switch_refresh_batch_mapping_new_ips | sort == switch_refresh_batch_device_ips | sort)
+    fail_msg: >-
+      device_mapping must contain unique old and new devices. When host
+      onboarding is enabled, its new-device IP set must exactly match
+      new_devices.device_ips.
+
+- name: Validate LAN Automation batch configuration
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_lan_automation_enabled | bool
+      - >-
+        (switch_refresh_batch_new_devices.lan_automation_state | default('merged'))
+        == 'merged'
+      - switch_refresh_batch_new_devices.lan_automation_config is defined
+      - switch_refresh_batch_new_devices.lan_automation_config | length == 1
+      - switch_refresh_batch_new_devices.lan_automation_config[0] is mapping
+      - >-
+        (switch_refresh_batch_new_devices.lan_automation_config[0].keys() | list | sort)
+        == ['lan_automation']
+      - switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation is mapping
+      - >-
+        switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.launch_and_wait
+        is defined
+      - >-
+        (
+          switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.launch_and_wait |
+          type_debug
+        ) == 'bool'
+      - >-
+        switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.launch_and_wait |
+        bool
+      - >-
+        (
+          switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+          default([]) |
+          type_debug
+        ) == 'list'
+      - >-
+        switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) |
+        length > 0
+      - >-
+        switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) |
+        length <= 50
+    fail_msg: >-
+      LAN Automation batch onboarding requires one launch-only
+      new_devices.lan_automation_config entry with launch_and_wait: true and a
+      discovery_devices list containing between 1 and 50 devices.
+  when: switch_refresh_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation batch discovery devices
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_lan_automation_device is mapping
+      - switch_refresh_lan_automation_device.device_serial_number is defined
+      - >-
+        switch_refresh_lan_automation_device.device_serial_number |
+        string |
+        trim |
+        length > 0
+      - >-
+        switch_refresh_lan_automation_device.device_management_ip_address is defined
+      - >-
+        switch_refresh_lan_automation_device.device_management_ip_address |
+        string |
+        trim |
+        length > 0
+    fail_msg: >-
+      Every LAN Automation discovery device must contain a non-empty
+      device_serial_number and device_management_ip_address.
+  loop: >-
+    {{
+      switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_lan_automation_device
+    label: >-
+      {{
+        switch_refresh_lan_automation_device.device_management_ip_address |
+        default('lan-automation-device')
+      }}
+  when: switch_refresh_batch_onboarding_method == 'lan_automation'
+
+- name: Derive LAN Automation batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_batch_lan_automation_target_ips: >-
+      {{
+        switch_refresh_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        map(attribute='device_management_ip_address') |
+        map('string') |
+        list
+      }}
+  when: switch_refresh_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation batch target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_batch_lan_automation_target_ips | unique | length ==
+        switch_refresh_batch_lan_automation_target_ips | length
+      - >-
+        switch_refresh_batch_lan_automation_target_ips | sort ==
+        switch_refresh_batch_device_ips | sort
+    fail_msg: >-
+      LAN Automation discovery_devices management IPs must be unique and
+      exactly match new_devices.device_ips.
+  when: switch_refresh_batch_onboarding_method == 'lan_automation'
+
+- name: Initialize generated discovery batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_discovery_config: []
+  when:
+    - switch_refresh_batch_onboarding_method == 'discovery'
+    - switch_refresh_batch_new_devices.discovery_config is not defined
+
+- name: Build generated discovery batch configuration
+  ansible.builtin.include_tasks: build_batch_discovery_config.yml
+  loop: "{{ switch_refresh_batch_device_ips | batch(8) | list }}"
+  loop_control:
+    loop_var: switch_refresh_discovery_chunk
+    index_var: switch_refresh_discovery_chunk_index
+    label: "{{ switch_refresh_discovery_chunk_index + 1 }}"
+  when:
+    - switch_refresh_batch_onboarding_method == 'discovery'
+    - switch_refresh_batch_new_devices.discovery_config is not defined
+
+- name: Use custom discovery batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_discovery_config: >-
+      {{ switch_refresh_batch_new_devices.discovery_config }}
+  when:
+    - switch_refresh_batch_onboarding_method == 'discovery'
+    - switch_refresh_batch_new_devices.discovery_config is defined
+  no_log: true
+
+- name: Validate custom discovery batch entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_custom_discovery_item is mapping
+      - switch_refresh_custom_discovery_item.discovery_name is defined
+      - >-
+        switch_refresh_custom_discovery_item.discovery_name |
+        string |
+        trim |
+        length > 0
+      - switch_refresh_custom_discovery_item.discovery_type is defined
+      - >-
+        switch_refresh_custom_discovery_item.discovery_type in
+        ['SINGLE', 'RANGE', 'MULTI RANGE']
+      - switch_refresh_custom_discovery_item.ip_address_list is defined
+      - >-
+        (switch_refresh_custom_discovery_item.ip_address_list | type_debug) ==
+        'list'
+      - switch_refresh_custom_discovery_item.ip_address_list | length > 0
+      - >-
+        switch_refresh_custom_discovery_item.discovery_type == 'MULTI RANGE' or
+        switch_refresh_custom_discovery_item.ip_address_list | length == 1
+      - >-
+        switch_refresh_custom_discovery_item.discovery_type != 'MULTI RANGE' or
+        switch_refresh_custom_discovery_item.ip_address_list | length <= 8
+    fail_msg: >-
+      Custom batch Discovery entries must use SINGLE, RANGE, or MULTI RANGE with
+      explicit target IPs. SINGLE and RANGE accept one IP; MULTI RANGE accepts
+      no more than eight IPs.
+  loop: "{{ switch_refresh_batch_new_devices.discovery_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_discovery_item
+    label: custom-discovery-entry
+  when: switch_refresh_batch_onboarding_method == 'discovery'
+  no_log: true
+
+- name: Initialize custom discovery batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_custom_discovery_target_ips: []
+  when:
+    - switch_refresh_batch_onboarding_method == 'discovery'
+    - switch_refresh_batch_new_devices.discovery_config is defined
+
+- name: Collect custom discovery batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_custom_discovery_target_ips: >-
+      {{
+        switch_refresh_custom_discovery_target_ips +
+        (switch_refresh_custom_discovery_item.ip_address_list | map('string') | list)
+      }}
+  loop: "{{ switch_refresh_batch_new_devices.discovery_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_discovery_item
+    label: custom-discovery-targets
+  when: switch_refresh_batch_onboarding_method == 'discovery'
+  no_log: true
+
+- name: Validate custom discovery batch target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_custom_discovery_target_ips | sort ==
+        switch_refresh_batch_device_ips | sort
+    fail_msg: >-
+      Custom discovery_config IPs must exactly match new_devices.device_ips.
+      Broad CDP, LLDP, CIDR, and multi-device ranges are not safe for a switch
+      refresh batch; use explicit SINGLE, RANGE, or MULTI RANGE target IPs.
+  when:
+    - switch_refresh_batch_onboarding_method == 'discovery'
+    - switch_refresh_batch_new_devices.discovery_config is defined
+
+- name: Set replacement switch batch inventory credentials
+  ansible.builtin.set_fact:
+    switch_refresh_batch_inventory_credentials: >-
+      {{
+        switch_refresh_batch_new_devices.inventory_credentials |
+        default(switch_refresh_inventory_credentials)
+      }}
+  no_log: true
+  when: switch_refresh_inventory_enabled | bool
+
+- name: Validate replacement switch batch inventory input
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_batch_new_devices.inventory_config is defined or
+        (
+          switch_refresh_batch_inventory_credentials.username is defined and
+          switch_refresh_batch_inventory_credentials.password is defined
+        )
+    fail_msg: >-
+      Batch inventory requires new_devices.inventory_config or inventory
+      credentials containing username and password.
+  when: switch_refresh_inventory_enabled | bool
+
+- name: Build replacement switch batch inventory configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_inventory_config: >-
+      {{
+        switch_refresh_batch_new_devices.inventory_config |
+        default([
+          {
+            'ip_address_list': switch_refresh_batch_device_ips,
+            'type': 'NETWORK_DEVICE',
+            'cli_transport': 'ssh'
+          } | combine(switch_refresh_batch_inventory_credentials)
+        ])
+      }}
+  no_log: true
+  when: switch_refresh_inventory_enabled | bool
+
+- name: Validate custom inventory batch entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_custom_inventory_item is mapping
+      - switch_refresh_custom_inventory_item.ip_address_list is defined
+      - (switch_refresh_custom_inventory_item.ip_address_list | type_debug) == 'list'
+    fail_msg: >-
+      Every custom inventory_config entry must contain an ip_address_list.
+  loop: "{{ switch_refresh_batch_new_devices.inventory_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_inventory_item
+    label: "{{ switch_refresh_custom_inventory_item.ip_address_list | default([]) }}"
+  no_log: true
+
+- name: Initialize custom inventory batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_custom_inventory_target_ips: []
+  when: switch_refresh_batch_new_devices.inventory_config is defined
+
+- name: Collect custom inventory batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_custom_inventory_target_ips: >-
+      {{
+        switch_refresh_custom_inventory_target_ips +
+        (switch_refresh_custom_inventory_item.ip_address_list | map('string') | list)
+      }}
+  loop: "{{ switch_refresh_batch_new_devices.inventory_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_inventory_item
+    label: "{{ switch_refresh_custom_inventory_item.ip_address_list | default([]) }}"
+  no_log: true
+
+- name: Validate custom inventory batch target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_custom_inventory_target_ips | sort ==
+        switch_refresh_batch_device_ips | sort
+    fail_msg: >-
+      Custom inventory_config IPs must exactly match new_devices.device_ips.
+  when: switch_refresh_batch_new_devices.inventory_config is defined
+
+- name: Build replacement switch batch inventory execution configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_inventory_execution_config: >-
+      {{
+        (
+          switch_refresh_batch_inventory_config
+          if (switch_refresh_inventory_enabled | bool)
+          else []
+        ) +
+        (
+          [
+            {
+              'ip_address_list': switch_refresh_batch_device_ips,
+              'role': 'ACCESS'
+            }
+          ]
+          if (switch_refresh_inventory_role_update_enabled | bool)
+          else []
+        )
+      }}
+  no_log: true
+
+- name: Initialize generated provision batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_provision_config: []
+  when:
+    - switch_refresh_provision_enabled | bool
+    - switch_refresh_batch_new_devices.provision_config is not defined
+
+- name: Build generated provision batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_provision_config: >-
+      {{
+        switch_refresh_batch_provision_config + [
+          {
+            'site_name_hierarchy':
+              refresh_item.provision_site_name_hierarchy |
+              default(refresh_item.fabric_site_name_hierarchy),
+            'management_ip_address': switch_refresh_provision_device_ip
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_provision_device_ip
+    label: "{{ switch_refresh_provision_device_ip }}"
+  when:
+    - switch_refresh_provision_enabled | bool
+    - switch_refresh_batch_new_devices.provision_config is not defined
+
+- name: Use custom provision batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_provision_config: >-
+      {{ switch_refresh_batch_new_devices.provision_config }}
+  when:
+    - switch_refresh_provision_enabled | bool
+    - switch_refresh_batch_new_devices.provision_config is defined
+
+- name: Validate custom provision batch entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_custom_provision_item is mapping
+      - switch_refresh_custom_provision_item.management_ip_address is defined
+      - >-
+        switch_refresh_custom_provision_item.management_ip_address |
+        string |
+        trim |
+        length > 0
+    fail_msg: >-
+      Every custom provision_config entry must contain a non-empty
+      management_ip_address.
+  loop: "{{ switch_refresh_batch_new_devices.provision_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_provision_item
+    label: >-
+      {{
+        switch_refresh_custom_provision_item.management_ip_address |
+        default('provision-device')
+      }}
+
+- name: Validate custom provision batch target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_batch_new_devices.provision_config |
+        map(attribute='management_ip_address') |
+        map('string') |
+        list |
+        sort == switch_refresh_batch_device_ips | sort
+    fail_msg: >-
+      Custom provision_config management IPs must exactly match
+      new_devices.device_ips.
+  when: switch_refresh_batch_new_devices.provision_config is defined
+
+- name: Initialize generated fabric device batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_fabric_device_entries: []
+  when:
+    - switch_refresh_fabric_add_enabled | bool
+    - switch_refresh_batch_new_devices.fabric_devices_config is not defined
+
+- name: Build generated fabric device batch entries
+  ansible.builtin.set_fact:
+    switch_refresh_batch_fabric_device_entries: >-
+      {{
+        switch_refresh_batch_fabric_device_entries + [
+          {
+            'device_ip': switch_refresh_fabric_device_ip,
+            'device_roles':
+              switch_refresh_batch_new_devices.device_roles |
+              default(['EDGE_NODE'])
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_fabric_device_ip
+    label: "{{ switch_refresh_fabric_device_ip }}"
+  when:
+    - switch_refresh_fabric_add_enabled | bool
+    - switch_refresh_batch_new_devices.fabric_devices_config is not defined
+
+- name: Build replacement fabric device batch configuration
+  ansible.builtin.set_fact:
+    switch_refresh_batch_fabric_devices_config: >-
+      {{
+        switch_refresh_batch_new_devices.fabric_devices_config |
+        default([
+          {
+            'fabric_devices': {
+              'fabric_name': refresh_item.fabric_site_name_hierarchy,
+              'device_config': switch_refresh_batch_fabric_device_entries
+            }
+          }
+        ])
+      }}
+  when: switch_refresh_fabric_add_enabled | bool
+
+- name: Validate custom fabric device batch entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_custom_fabric_item is mapping
+      - switch_refresh_custom_fabric_item.fabric_devices is defined
+      - switch_refresh_custom_fabric_item.fabric_devices is mapping
+      - switch_refresh_custom_fabric_item.fabric_devices.fabric_name is defined
+      - >-
+        switch_refresh_custom_fabric_item.fabric_devices.fabric_name ==
+        refresh_item.fabric_site_name_hierarchy
+      - switch_refresh_custom_fabric_item.fabric_devices.device_config is defined
+      - (switch_refresh_custom_fabric_item.fabric_devices.device_config | type_debug) == 'list'
+    fail_msg: >-
+      Every custom fabric_devices_config entry must contain
+      fabric_devices.device_config as a list and use the batch
+      fabric_site_name_hierarchy as fabric_name.
+  loop: "{{ switch_refresh_batch_new_devices.fabric_devices_config | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_custom_fabric_item
+    label: >-
+      {{
+        (
+          switch_refresh_custom_fabric_item.fabric_devices |
+          default({})
+        ).fabric_name |
+        default('fabric-devices')
+      }}
+
+- name: Validate custom fabric batch device records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_custom_fabric_device is mapping
+      - switch_refresh_custom_fabric_device.device_ip is defined
+      - >-
+        switch_refresh_custom_fabric_device.device_ip |
+        string |
+        trim |
+        length > 0
+    fail_msg: >-
+      Every custom fabric device_config entry must contain a non-empty device_ip.
+  loop: >-
+    {{
+      switch_refresh_batch_new_devices.fabric_devices_config |
+      default([]) |
+      map(attribute='fabric_devices') |
+      map(attribute='device_config') |
+      list |
+      flatten
+    }}
+  loop_control:
+    loop_var: switch_refresh_custom_fabric_device
+    label: "{{ switch_refresh_custom_fabric_device.device_ip | default('fabric-device') }}"
+
+- name: Derive custom fabric device batch target IPs
+  ansible.builtin.set_fact:
+    switch_refresh_custom_fabric_target_ips: >-
+      {{
+        switch_refresh_batch_new_devices.fabric_devices_config |
+        map(attribute='fabric_devices') |
+        map(attribute='device_config') |
+        list |
+        flatten |
+        map(attribute='device_ip') |
+        map('string') |
+        list
+      }}
+  when: switch_refresh_batch_new_devices.fabric_devices_config is defined
+
+- name: Validate custom fabric device batch target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_custom_fabric_target_ips | sort ==
+        switch_refresh_batch_device_ips | sort
+    fail_msg: >-
+      Custom fabric_devices_config device IPs must exactly match
+      new_devices.device_ips.
+  when: switch_refresh_batch_new_devices.fabric_devices_config is defined
+
+- name: Build batch migration output path
+  ansible.builtin.set_fact:
+    switch_refresh_batch_migration_output_file: >-
+      {{
+        refresh_item.migration_output_file |
+        default(
+          switch_refresh_work_dir ~ '/' ~ switch_refresh_batch_file_safe_name ~
+          '_host_port_migration.yml'
+        )
+      }}

@@ -1,0 +1,105 @@
+---
+- name: Validate cleanup mappings for switch refresh batch
+  ansible.builtin.assert:
+    that:
+      - refresh_item.name is defined
+      - refresh_item.name | string | trim | length > 0
+      - refresh_item.fabric_site_name_hierarchy is defined
+      - refresh_item.new_devices is defined
+      - refresh_item.new_devices is mapping
+      - (refresh_item.new_devices.device_ips | default([]) | type_debug) == 'list'
+      - refresh_item.new_devices.device_ips | default([]) | length > 0
+      - refresh_item.device_mapping is defined
+      - (refresh_item.device_mapping | type_debug) == 'list'
+      - refresh_item.device_mapping | length > 0
+    fail_msg: >-
+      Batch cleanup requires a non-empty name, fabric_site_name_hierarchy,
+      non-empty
+      new_devices.device_ips, and a non-empty device_mapping list.
+
+- name: Store switch refresh cleanup batch context
+  ansible.builtin.set_fact:
+    switch_refresh_cleanup_batch_context: "{{ refresh_item }}"
+    switch_refresh_batch_device_ips: >-
+      {{ refresh_item.new_devices.device_ips | map('string') | list }}
+    switch_refresh_batch_device_mappings: []
+    switch_refresh_cleanup_batch_old_keys: []
+  no_log: true
+
+- name: Normalize switch refresh cleanup batch mappings
+  ansible.builtin.include_tasks: normalize_batch_mapping.yml
+  loop: "{{ switch_refresh_cleanup_batch_context.device_mapping }}"
+  loop_control:
+    loop_var: switch_refresh_input_mapping
+    label: >-
+      {{
+        switch_refresh_input_mapping.new_device_management_ip |
+        default('cleanup-device-mapping')
+      }}
+
+- name: Derive switch refresh cleanup old-device keys
+  ansible.builtin.set_fact:
+    switch_refresh_cleanup_batch_old_keys: >-
+      {{
+        switch_refresh_cleanup_batch_old_keys + [
+          ('management_ip:' ~ (switch_refresh_cleanup_mapping.old.management_ip | string | lower))
+          if (switch_refresh_cleanup_mapping.old.management_ip is defined)
+          else ('hostname:' ~ (switch_refresh_cleanup_mapping.old.hostname | string | lower))
+          if (switch_refresh_cleanup_mapping.old.hostname is defined)
+          else ('serial_number:' ~ (switch_refresh_cleanup_mapping.old.serial_number | string | lower))
+          if (switch_refresh_cleanup_mapping.old.serial_number is defined)
+          else ('mac_address:' ~ (switch_refresh_cleanup_mapping.old.mac_address | string | lower))
+        ]
+      }}
+  loop: "{{ switch_refresh_batch_device_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_cleanup_mapping
+    label: "{{ switch_refresh_cleanup_mapping.new_device_management_ip }}"
+
+- name: Validate switch refresh cleanup batch mapping coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_batch_device_ips | unique | length ==
+        switch_refresh_batch_device_ips | length
+      - >-
+        switch_refresh_batch_device_mappings |
+        map(attribute='new_device_management_ip') |
+        list |
+        sort == switch_refresh_batch_device_ips | sort
+      - >-
+        switch_refresh_cleanup_batch_old_keys | unique | length ==
+        switch_refresh_cleanup_batch_old_keys | length
+    fail_msg: >-
+      Cleanup device_mapping must exactly cover unique new_devices.device_ips
+      and identify unique old devices.
+
+- name: Resolve all old switches before destructive cleanup
+  ansible.builtin.include_tasks: resolve_batch_old_devices.yml
+
+- name: Clean up each old switch from batch mapping
+  ansible.builtin.include_tasks: cleanup_one.yml
+  vars:
+    switch_refresh_device_info_lookup_enabled: false
+    refresh_item: >-
+      {{
+        switch_refresh_cleanup_batch_context |
+        combine(
+          {
+            'name':
+              switch_refresh_cleanup_batch_context.name ~ '-' ~
+              (switch_refresh_cleanup_batch_item.new_device_management_ip | string),
+            'old': {
+              'management_ip': switch_refresh_cleanup_batch_item.old_management_ip
+            }
+          }
+        )
+      }}
+  loop: "{{ switch_refresh_batch_resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_cleanup_batch_item
+    label: >-
+      {{
+        switch_refresh_cleanup_batch_item.new_device_management_ip |
+        default('old-switch-cleanup')
+      }}

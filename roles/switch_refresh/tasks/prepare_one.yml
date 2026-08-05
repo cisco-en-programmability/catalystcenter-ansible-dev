@@ -85,7 +85,19 @@
   ansible.builtin.set_fact:
     switch_refresh_new_management_ip: "{{ refresh_item.new.management_ip | default(refresh_item.new.discovery_ip | default('')) }}"
 
-- name: Derive replacement switch management IP from discovery config
+- name: Derive replacement switch management IP from flat discovery config
+  ansible.builtin.set_fact:
+    switch_refresh_new_management_ip: >-
+      {{ refresh_item.new.discovery_config[0].ip_address_list[0] }}
+  when:
+    - switch_refresh_new_management_ip | length == 0
+    - refresh_item.new.discovery_config is defined
+    - (refresh_item.new.discovery_config | type_debug) == 'list'
+    - refresh_item.new.discovery_config | length > 0
+    - refresh_item.new.discovery_config[0].ip_address_list is defined
+    - refresh_item.new.discovery_config[0].ip_address_list | length > 0
+
+- name: Derive replacement switch management IP from legacy discovery config
   ansible.builtin.set_fact:
     switch_refresh_new_management_ip: "{{ refresh_item.new.discovery_config.single[0].ip_address_list[0] }}"
   when:
@@ -117,8 +129,17 @@
   ansible.builtin.set_fact:
     switch_refresh_new_discovery_config: >-
       {{
-        refresh_item.new.discovery_config | default({
-          'single': [
+        refresh_item.new.discovery_config
+        if (
+          refresh_item.new.discovery_config is defined and
+          (refresh_item.new.discovery_config | type_debug) == 'list'
+        )
+        else refresh_item.new.discovery_config.single
+        if (
+          refresh_item.new.discovery_config is defined and
+          refresh_item.new.discovery_config.single is defined
+        )
+        else [
             {
               'discovery_name': refresh_item.new.discovery_name | default('switch-refresh-' ~ switch_refresh_item_file_safe_name),
               'discovery_type': 'SINGLE',
@@ -127,9 +148,21 @@
               'retry': refresh_item.new.discovery_retry | default(2),
               'use_global_credentials': refresh_item.new.use_global_credentials | default(true)
             }
-          ]
-        })
+        ]
       }}
+  when:
+    - switch_refresh_item_onboarding_method == 'discovery'
+    - switch_refresh_discovery_enabled | bool
+  no_log: true
+
+- name: Validate replacement switch discovery configuration
+  ansible.builtin.assert:
+    that:
+      - (switch_refresh_new_discovery_config | type_debug) == 'list'
+      - switch_refresh_new_discovery_config | length > 0
+    fail_msg: >-
+      Legacy new.discovery_config must be a flat workflow-manager list. The
+      previously documented single list wrapper is also accepted and flattened.
   when:
     - switch_refresh_item_onboarding_method == 'discovery'
     - switch_refresh_discovery_enabled | bool
@@ -429,16 +462,11 @@
     - switch_refresh_fabric_add_enabled | bool
     - switch_refresh_fabric_validation_enabled | bool
 
-- name: Fail if replacement switch is not visible as fabric edge device
-  ansible.builtin.assert:
-    that:
-      - fabric_devices_info_result.response is defined
-      - "'The fabric devices filtered' in (fabric_devices_info_result.response | string)"
-      - switch_refresh_new_management_ip in (fabric_devices_info_result.response | string)
-    fail_msg: >-
-      Replacement switch {{ switch_refresh_new_management_ip }} was not found as
-      a {{ refresh_item.fabric_validation_role | default('EDGE_NODE') }} in
-      fabric {{ refresh_item.fabric_site_name_hierarchy }}.
+- name: Validate replacement switch fabric response
+  ansible.builtin.include_tasks: validate_batch_fabric_result.yml
+  vars:
+    switch_refresh_batch_device_ips:
+      - "{{ switch_refresh_new_management_ip }}"
   when:
     - switch_refresh_fabric_add_enabled | bool
     - switch_refresh_fabric_validation_enabled | bool
@@ -459,6 +487,12 @@
             interface_mappings: "{{ switch_refresh_port_channel_interface_mappings }}"
   when: switch_refresh_host_onboarding_enabled | bool
 
+- name: Remove stale replacement host-port onboarding payload
+  ansible.builtin.file:
+    path: "{{ switch_refresh_migration_output_file }}"
+    state: absent
+  when: switch_refresh_host_onboarding_enabled | bool
+
 - name: Generate replacement host-port onboarding payload
   ansible.builtin.include_role:
     name: sda_host_port_migration_config_generator
@@ -468,25 +502,74 @@
   vars:
     sda_host_port_migration_config_generator_state: gathered
     sda_host_port_migration_config_generator_file_path: "{{ switch_refresh_migration_output_file }}"
-    sda_host_port_migration_config_generator_file_mode: "{{ switch_refresh_migration_file_mode }}"
+    sda_host_port_migration_config_generator_file_mode: overwrite
     sda_host_port_migration_config_generator_config: "{{ switch_refresh_migration_config }}"
+  when: switch_refresh_host_onboarding_enabled | bool
+
+- name: Check generated replacement host-port onboarding payload
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_migration_output_file }}"
+  register: switch_refresh_migration_output_stat
+  when: switch_refresh_host_onboarding_enabled | bool
+
+- name: Validate generated replacement host-port onboarding file
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_allow_empty_host_port_config | bool or
+        (
+          switch_refresh_migration_output_stat.stat.exists and
+          (switch_refresh_migration_output_stat.stat.isreg | default(false))
+        )
+    fail_msg: >-
+      Host-port migration did not generate a fresh output file for
+      {{ switch_refresh_item_name }}.
   when: switch_refresh_host_onboarding_enabled | bool
 
 - name: Load generated replacement host-port onboarding payload
   ansible.builtin.include_vars:
     file: "{{ switch_refresh_migration_output_file }}"
     name: switch_refresh_generated_host_onboarding
-  when: switch_refresh_host_onboarding_enabled | bool
+  when:
+    - switch_refresh_host_onboarding_enabled | bool
+    - switch_refresh_migration_output_stat.stat.exists
+
+- name: Set empty replacement host-port onboarding payload
+  ansible.builtin.set_fact:
+    switch_refresh_generated_host_onboarding:
+      config: []
+  when:
+    - switch_refresh_host_onboarding_enabled | bool
+    - not (switch_refresh_migration_output_stat.stat.exists | bool)
+    - switch_refresh_allow_empty_host_port_config | bool
 
 - name: Validate generated replacement host-port onboarding payload
   ansible.builtin.assert:
     that:
       - switch_refresh_generated_host_onboarding.config is defined
+      - (switch_refresh_generated_host_onboarding.config | type_debug) == 'list'
       - switch_refresh_allow_empty_host_port_config | bool or (switch_refresh_generated_host_onboarding.config | length > 0)
     fail_msg: >-
       Host-port migration did not generate an onboarding config for
       {{ switch_refresh_item_name }}. Confirm the old switch has port
       assignments or port channels in the supplied fabric site.
+  when: switch_refresh_host_onboarding_enabled | bool
+
+- name: Validate generated replacement host-port onboarding target
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_generated_host_onboarding.config | length == 0 or
+        (
+          switch_refresh_generated_host_onboarding.config |
+          map(attribute='ip_address') |
+          map('string') |
+          unique |
+          list == [switch_refresh_new_management_ip]
+        )
+    fail_msg: >-
+      A non-empty generated host onboarding payload must target only replacement
+      switch {{ switch_refresh_new_management_ip }}.
   when: switch_refresh_host_onboarding_enabled | bool
 
 - name: Push replacement host-port onboarding config
@@ -500,7 +583,9 @@
     sda_host_port_onboarding_config_verify: "{{ switch_refresh_sda_host_port_onboarding_config_verify }}"
     sda_host_port_onboarding_sda_fabric_port_channel_limit: "{{ switch_refresh_sda_fabric_port_channel_limit }}"
     sda_host_port_onboarding_config: "{{ switch_refresh_generated_host_onboarding.config }}"
-  when: switch_refresh_host_onboarding_enabled | bool
+  when:
+    - switch_refresh_host_onboarding_enabled | bool
+    - switch_refresh_generated_host_onboarding.config | length > 0
 
 - name: Record replacement switch prepare result
   ansible.builtin.set_fact:
