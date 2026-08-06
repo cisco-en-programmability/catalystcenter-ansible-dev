@@ -11,4 +11,6 @@ catalystcenter_log_level: "INFO"
 catalystcenter_log: false
 
 rma_config_generator_state: "gathered"
+rma_config_generator_file_path: null
+rma_config_generator_file_mode: null
 rma_config_generator_config: null
