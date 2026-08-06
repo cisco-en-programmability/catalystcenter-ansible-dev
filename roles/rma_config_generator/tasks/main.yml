@@ -12,6 +12,8 @@
     catalystcenter_log_level: "{{ catalystcenter_log_level }}"
     catalystcenter_log: "{{ catalystcenter_log }}"
     state: "{{ rma_config_generator_state }}"
+    file_path: "{{ rma_config_generator_file_path if rma_config_generator_file_path is not none else omit }}"
+    file_mode: "{{ rma_config_generator_file_mode if rma_config_generator_file_mode is not none else omit }}"
     config: "{{ rma_config_generator_config if rma_config_generator_config is not none else omit }}"
   register: rma_config_generator_result
 
