@@ -1,0 +1,127 @@
+---
+- name: Validate replacement provisioning check inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_device_ips | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_prepare_device_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_provision_site |
+        string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_provision_validation_timeout |
+        int) > 0
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_provision_validation_poll_interval |
+        int) > 0
+    fail_msg: >-
+      Provisioning validation requires replacement IPs, an exact site, and
+      positive timeout and polling values.
+
+- name: Derive replacement provisioning validation retries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_provision_validation_retries: >-
+      {{
+        (
+          (switch_refresh_sda_fabric_border_prepare_provision_validation_timeout | int) +
+          (switch_refresh_sda_fabric_border_prepare_provision_validation_poll_interval |
+          int) - 1
+        ) //
+        (switch_refresh_sda_fabric_border_prepare_provision_validation_poll_interval |
+        int)
+      }}
+
+- name: Wait for replacement border provisioning state
+  cisco.catalystcenter.sda_provision_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+    catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+    catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+    catalystcenter_debug: false
+    deviceManagementIpAddress: >-
+      {{ switch_refresh_sda_fabric_border_prepare_provision_ip }}
+  register: switch_refresh_sda_fabric_border_prepare_provision_lookup
+  until:
+    - >-
+      not (switch_refresh_sda_fabric_border_prepare_provision_lookup.failed |
+      default(false) | bool)
+    - >-
+      (switch_refresh_sda_fabric_border_prepare_provision_lookup
+      .catalystcenter_response | default({})) is mapping
+    - >-
+      switch_refresh_sda_fabric_border_prepare_provision_lookup
+      .catalystcenter_response.status | default('') | string | lower == 'success'
+    - >-
+      switch_refresh_sda_fabric_border_prepare_provision_lookup
+      .catalystcenter_response.deviceManagementIpAddress |
+      default('') | string ==
+      switch_refresh_sda_fabric_border_prepare_provision_ip | string
+    - >-
+      switch_refresh_sda_fabric_border_prepare_provision_lookup
+      .catalystcenter_response.siteNameHierarchy | default('') | string ==
+      switch_refresh_sda_fabric_border_prepare_provision_site | string
+  retries: >-
+    {{ switch_refresh_sda_fabric_border_prepare_provision_validation_retries | int }}
+  delay: >-
+    {{
+      switch_refresh_sda_fabric_border_prepare_provision_validation_poll_interval |
+      int
+    }}
+  loop: "{{ switch_refresh_sda_fabric_border_prepare_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_provision_ip
+    label: "{{ switch_refresh_sda_fabric_border_prepare_provision_ip }}"
+  failed_when: false
+  no_log: true
+
+- name: Validate replacement provisioning lookup coverage
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_prepare_provision_lookup is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_provision_lookup.results |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_provision_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_border_prepare_device_ips | length
+    fail_msg: >-
+      Provisioning validation did not return one result for every replacement
+      in batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}.
+
+- name: Validate each replacement is provisioned at the batch site
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_provision_result
+        .catalystcenter_response | default({})) is mapping
+      - >-
+        switch_refresh_sda_fabric_border_prepare_provision_result
+        .catalystcenter_response.status | default('') | string | lower == 'success'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_provision_result
+        .catalystcenter_response.deviceManagementIpAddress |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_prepare_provision_result
+        .switch_refresh_sda_fabric_border_prepare_provision_ip | string
+      - >-
+        switch_refresh_sda_fabric_border_prepare_provision_result
+        .catalystcenter_response.siteNameHierarchy | default('') | string ==
+        switch_refresh_sda_fabric_border_prepare_provision_site | string
+    fail_msg: >-
+      Replacement
+      {{ switch_refresh_sda_fabric_border_prepare_provision_result
+      .switch_refresh_sda_fabric_border_prepare_provision_ip |
+      default('unknown') }} is not provisioned at
+      {{ switch_refresh_sda_fabric_border_prepare_provision_site }}.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_prepare_provision_lookup.results |
+    default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_provision_result
+    label: >-
+      {{ switch_refresh_sda_fabric_border_prepare_provision_result
+      .switch_refresh_sda_fabric_border_prepare_provision_ip |
+      default('replacement-border') }}

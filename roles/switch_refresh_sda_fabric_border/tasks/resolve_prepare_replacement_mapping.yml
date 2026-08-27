@@ -1,0 +1,159 @@
+---
+- name: Select replacement device and interface records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_device_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_device_info_entries |
+        selectattr(
+          'device_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip
+        ) |
+        list
+      }}
+    switch_refresh_sda_fabric_border_prepare_interface_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_interface_info_entries |
+        selectattr(
+          'device_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip
+        ) |
+        list
+      }}
+  no_log: true
+
+- name: Validate exact replacement device and interface records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_prepare_device_matches | length == 1
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_device_matches[0].device_details |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_matches[0].device_details |
+        length == 1
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_matches[0].device_details[0]
+        is mapping
+      - switch_refresh_sda_fabric_border_prepare_interface_matches | length == 1
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_interface_matches[0]
+        .interface_details | type_debug) == 'list'
+    fail_msg: >-
+      Replacement
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      must resolve to exactly one inventory record and one interface record.
+
+- name: Normalize replacement device details and interfaces
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_device_details: >-
+      {{ switch_refresh_sda_fabric_border_prepare_device_matches[0].device_details[0] }}
+    switch_refresh_sda_fabric_border_prepare_interface_names: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_interface_matches[0]
+        .interface_details |
+        selectattr('portName', 'defined') |
+        map(attribute='portName') |
+        map('string') |
+        reject('equalto', '') |
+        unique |
+        list
+      }}
+  no_log: true
+
+- name: Derive replacement immutable identity
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_new_identity:
+      management_ip: >-
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      inventory_uuid: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_device_details.instanceUuid |
+          default(
+            switch_refresh_sda_fabric_border_prepare_device_details.id |
+            default('')
+          )
+        }}
+      serial_numbers: >-
+        {{
+          (
+            switch_refresh_sda_fabric_border_prepare_device_details.serialNumber |
+            default('') | string
+          ).split(',') |
+          map('trim') |
+          reject('equalto', '') |
+          map('upper') |
+          list
+        }}
+      hostname: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_device_details.hostname |
+          default('') | string
+        }}
+
+- name: Validate replacement immutable identity and state
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_new_identity.inventory_uuid |
+        string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_new_identity.serial_numbers |
+        length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_details.role |
+        default('') | string | upper | replace(' ', '_') == 'BORDER_ROUTER'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_details.collectionStatus |
+        default('') | string | upper == 'MANAGED'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_details.managementState |
+        default('') | string | upper == 'MANAGED'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_details.reachabilityStatus |
+        default('') | string | upper in ['REACHABLE', 'PING REACHABLE']
+    fail_msg: >-
+      Replacement
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      must have a stable UUID and serial and remain Managed, reachable, and
+      assigned inventory role BORDER_ROUTER.
+
+- name: Validate mapped destination interfaces exist on replacement
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_destination_interface_mapping
+        .destination_interface_name in
+        switch_refresh_sda_fabric_border_prepare_interface_names
+    fail_msg: >-
+      Destination interface
+      {{ switch_refresh_sda_fabric_border_destination_interface_mapping
+      .destination_interface_name | default('unknown') }} does not exist on
+      replacement
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}.
+  loop: "{{ switch_refresh_sda_fabric_border_prepare_mapping.interface_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_destination_interface_mapping
+    label: >-
+      {{ switch_refresh_sda_fabric_border_destination_interface_mapping
+      .destination_interface_name | default('destination-interface') }}
+
+- name: Add resolved replacement identity to prepare mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_runtime_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings +
+        [
+          switch_refresh_sda_fabric_border_prepare_mapping |
+          combine(
+            {
+              'new_identity':
+                switch_refresh_sda_fabric_border_prepare_new_identity,
+              'new_interface_names':
+                switch_refresh_sda_fabric_border_prepare_interface_names
+            }
+          )
+        ]
+      }}
+  no_log: true

@@ -1,0 +1,82 @@
+---
+- name: Validate border refresh phase before lock selection
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_phase in ['prepare', 'cutover']
+    fail_msg: switch_refresh_sda_fabric_border_phase must be prepare or cutover.
+  tags:
+    - always
+
+- name: Execute non-destructive border prepare workflow
+  ansible.builtin.include_tasks:
+    file: workflow.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  tags:
+    - always
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Derive controller-scoped local border cutover lock path
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_lock_path: >-
+      {{
+        '/tmp/catalystcenter-switch-refresh-sda-border-' ~
+        (
+          {
+            'controller_host': catalystcenter_host | string | trim | lower,
+            'controller_port': catalystcenter_port | default(443) | int
+          } |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        ) ~
+        '.lock'
+      }}
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - always
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Execute border cutover under an exclusive local controller lock
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - always
+    - switch_refresh_sda_fabric_border_cutover
+  block:
+    - name: Acquire exclusive local border cutover lock
+      ansible.builtin.command:
+        argv:
+          - mkdir
+          - -m
+          - "0700"
+          - "{{ switch_refresh_sda_fabric_border_cutover_lock_path }}"
+      register: switch_refresh_sda_fabric_border_cutover_lock_create
+      changed_when: >-
+        switch_refresh_sda_fabric_border_cutover_lock_create.rc | int == 0
+      failed_when: false
+
+    - name: Require exclusive local border cutover lock ownership
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_lock_create.rc | int == 0
+        fail_msg: >-
+          Another border cutover for this Catalyst Center controller is active
+          on this Ansible control node. No cutover preflight or deletion ran.
+
+    - name: Run locked border cutover workflow
+      ansible.builtin.include_tasks:
+        file: workflow.yml
+        apply:
+          tags:
+            - switch_refresh_sda_fabric_border_cutover
+  always:
+    - name: Release owned local border cutover lock
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_cutover_lock_path }}"
+        state: absent
+      when:
+        - switch_refresh_sda_fabric_border_cutover_lock_create is defined
+        - >-
+          switch_refresh_sda_fabric_border_cutover_lock_create.rc |
+          default(1) | int == 0

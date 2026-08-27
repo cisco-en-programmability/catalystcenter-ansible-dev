@@ -1,0 +1,128 @@
+---
+- name: Validate destination-interface request envelope
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_interface_validation_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_interface_validation_request.resolved_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_interface_validation_request.interface_records |
+        default([]) | type_debug) == 'list'
+    fail_msg: Destination-interface validation requires mappings and interface records.
+
+- name: Validate one replacement interface record exists per mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_interface_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_interface_validation_request.interface_records |
+        selectattr(
+          'device_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip |
+          string
+        ) |
+        list
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_cutover_interface_validation_request.resolved_mappings |
+      selectattr('interface_mappings', 'defined') |
+      rejectattr('interface_mappings', 'equalto', []) |
+      list
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_interface_mapping
+    label: "{{ switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip }}"
+  register: switch_refresh_sda_fabric_border_cutover_interface_match_results
+
+- name: Validate replacement interface query envelopes
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_cutover_interface_match_result.ansible_facts.switch_refresh_sda_fabric_border_cutover_interface_matches |
+        length == 1
+      - >-
+        (
+          switch_refresh_sda_fabric_border_cutover_interface_match_result.ansible_facts.switch_refresh_sda_fabric_border_cutover_interface_matches[0].interface_details |
+          default([]) | type_debug
+        ) == 'list'
+    fail_msg: >-
+      Replacement interface inventory could not be read exactly once; mapped
+      destination interfaces were not proven.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_cutover_interface_match_results.results }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_interface_match_result
+    label: replacement-interface-record
+
+- name: Initialize mapped destination-interface validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_destination_interface_checks: []
+
+- name: Build mapped destination-interface validation entries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_destination_interface_checks: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_destination_interface_checks + [
+          {
+            'new_management_ip':
+              switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip,
+            'destination_interface_name':
+              switch_refresh_sda_fabric_border_cutover_interface_pair.destination_interface_name,
+            'available_interface_names':
+              switch_refresh_sda_fabric_border_cutover_interface_validation_request.interface_records |
+              selectattr(
+                'device_ip',
+                'equalto',
+                switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip |
+                string
+              ) |
+              map(attribute='interface_details') |
+              first |
+              map(attribute='portName', default='') |
+              reject('equalto', '') |
+              list
+          }
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_cutover_interface_validation_request.resolved_mappings |
+      subelements('interface_mappings', skip_missing=true)
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_interface_mapping_pair
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.0.new_management_ip ~
+        ':' ~
+        switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.1.destination_interface_name
+      }}
+  vars:
+    switch_refresh_sda_fabric_border_cutover_interface_mapping: >-
+      {{ switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.0 }}
+    switch_refresh_sda_fabric_border_cutover_interface_pair: >-
+      {{ switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.1 }}
+
+- name: Require every mapped destination interface on its replacement
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_cutover_destination_interface_check.destination_interface_name
+        in
+        switch_refresh_sda_fabric_border_cutover_destination_interface_check.available_interface_names
+    fail_msg: >-
+      Destination interface {{
+      switch_refresh_sda_fabric_border_cutover_destination_interface_check.destination_interface_name }}
+      does not exist on replacement {{
+      switch_refresh_sda_fabric_border_cutover_destination_interface_check.new_management_ip }}.
+  loop: "{{ switch_refresh_sda_fabric_border_cutover_destination_interface_checks }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_destination_interface_check
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_destination_interface_check.new_management_ip ~
+        ':' ~
+        switch_refresh_sda_fabric_border_cutover_destination_interface_check.destination_interface_name
+      }}

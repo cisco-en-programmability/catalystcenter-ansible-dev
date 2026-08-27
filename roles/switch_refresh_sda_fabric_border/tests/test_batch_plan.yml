@@ -1,0 +1,341 @@
+---
+- name: Validate border refresh batch planning offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_border_onboarding_method: discovery
+    switch_refresh_sda_fabric_border_inventory_credentials:
+      username: test-user
+      password: test-password
+      enable_password: test-enable-password
+      cli_transport: ssh
+      type: NETWORK_DEVICE
+    switch_refresh_sda_fabric_border_inventory_enabled: true
+    switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
+    switch_refresh_sda_fabric_border_provision_enabled: true
+    switch_refresh_sda_fabric_border_inventory_readiness_timeout: 1200
+    switch_refresh_sda_fabric_border_inventory_readiness_poll_interval: 10
+    switch_refresh_sda_fabric_border_provision_validation_timeout: 1200
+    switch_refresh_sda_fabric_border_provision_validation_poll_interval: 10
+  tasks:
+    - name: Set valid Discovery border batch
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: valid-border-discovery
+          fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - "192.0.2.20"
+              - "192.0.2.21"
+          device_mapping:
+            - old:
+                serial_number: old-border-0001
+              new_device_management_ip: "192.0.2.20"
+              handoff_interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+                - source_interface_name: FortyGigabitEthernet1/1/2
+                  destination_interface_name: HundredGigE1/0/2
+            - old:
+                mac_address: 00-11-22-33-44-55
+              new_device_management_ip: "192.0.2.21"
+              handoff_interface_mappings: []
+
+    - name: Build valid Discovery border plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify generated Discovery border plan
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_batch_name == 'valid-border-discovery'
+          - >-
+            switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy ==
+            'Global/India/Bangalore/Fabric'
+          - >-
+            switch_refresh_sda_fabric_border_batch_device_ips ==
+            ['192.0.2.20', '192.0.2.21']
+          - switch_refresh_sda_fabric_border_batch_device_mappings | length == 2
+          - >-
+            switch_refresh_sda_fabric_border_batch_device_mappings[0].old ==
+            {'serial_number': 'OLD-BORDER-0001'}
+          - >-
+            switch_refresh_sda_fabric_border_batch_device_mappings[1].old ==
+            {'mac_address': '00:11:22:33:44:55'}
+          - >-
+            switch_refresh_sda_fabric_border_batch_device_mappings[0].handoff_interface_mappings |
+            length == 2
+          - switch_refresh_sda_fabric_border_batch_discovery_config | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_batch_discovery_config[0].discovery_type ==
+            'MULTI RANGE'
+          - >-
+            switch_refresh_sda_fabric_border_batch_discovery_config[0].ip_address_list ==
+            switch_refresh_sda_fabric_border_batch_device_ips
+          - switch_refresh_sda_fabric_border_batch_lan_automation_config | length == 0
+          - switch_refresh_sda_fabric_border_batch_inventory_execution_config | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
+            'BORDER_ROUTER'
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].ip_address_list ==
+            switch_refresh_sda_fabric_border_batch_device_ips
+          - switch_refresh_sda_fabric_border_batch_provision_config | length == 2
+          - >-
+            switch_refresh_sda_fabric_border_batch_provision_config |
+            map(attribute='management_ip_address') | list ==
+            switch_refresh_sda_fabric_border_batch_device_ips
+
+    - name: Set valid LAN Automation border batch
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: valid-border-lan-automation
+          fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+          onboarding_method: lan_automation
+          new_devices:
+            device_ips:
+              - "192.0.2.30"
+              - "192.0.2.31"
+            lan_automation_config:
+              - lan_automation:
+                  discovered_device_site_name_hierarchy: >-
+                    Global/India/Bangalore/Fabric
+                  primary_device_management_ip_address: "198.51.100.10"
+                  primary_device_interface_names:
+                    - GigabitEthernet2/0/7
+                  ip_pools:
+                    - ip_pool_name: LAN_AUTO_MAIN
+                      ip_pool_role: MAIN_POOL
+                  discovery_devices:
+                    - device_serial_number: NEW-BORDER-0001
+                      device_host_name: new-border-01
+                      device_site_name_hierarchy: >-
+                        Global/India/Bangalore/Fabric
+                      device_management_ip_address: "192.0.2.30"
+                    - device_serial_number: NEW-BORDER-0002
+                      device_host_name: new-border-02
+                      device_site_name_hierarchy: >-
+                        Global/India/Bangalore/Fabric
+                      device_management_ip_address: "192.0.2.31"
+                  launch_and_wait: true
+          device_mapping:
+            - old:
+                management_ip: "198.51.100.30"
+              new_device_management_ip: "192.0.2.30"
+              handoff_interface_mappings: []
+            - old:
+                hostname: old-border-02.example.test
+              new_device_management_ip: "192.0.2.31"
+              handoff_interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+
+    - name: Build valid LAN Automation border plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify LAN Automation border plan
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_batch_onboarding_method ==
+            'lan_automation'
+          - switch_refresh_sda_fabric_border_batch_discovery_config | length == 0
+          - switch_refresh_sda_fabric_border_batch_lan_automation_config | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_batch_lan_automation_target_ips ==
+            switch_refresh_sda_fabric_border_batch_device_ips
+          - >-
+            switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers ==
+            ['NEW-BORDER-0001', 'NEW-BORDER-0002']
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
+            'BORDER_ROUTER'
+
+    - name: Set valid custom-stage border batch
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: valid-border-custom-stages
+          fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - "192.0.2.40"
+              - "192.0.2.41"
+            discovery_config:
+              - discovery_name: custom-border-discovery
+                discovery_type: MULTI RANGE
+                ip_address_list:
+                  - "192.0.2.40"
+                  - "192.0.2.41"
+                protocol_order: ssh
+                use_global_credentials: true
+            inventory_config:
+              - ip_address_list:
+                  - "192.0.2.40"
+                  - "192.0.2.41"
+                username: custom-user
+                password: custom-password
+                type: NETWORK_DEVICE
+                role: BORDER_ROUTER
+            provision_config:
+              - site_name_hierarchy: Global/India/Bangalore/Fabric
+                management_ip_address: "192.0.2.40"
+              - site_name_hierarchy: Global/India/Bangalore/Fabric
+                management_ip_address: "192.0.2.41"
+          device_mapping:
+            - old:
+                serial_number: OLD-BORDER-0040
+              new_device_management_ip: "192.0.2.40"
+              handoff_interface_mappings: []
+            - old:
+                serial_number: OLD-BORDER-0041
+              new_device_management_ip: "192.0.2.41"
+              handoff_interface_mappings: []
+
+    - name: Build valid custom-stage border plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify custom-stage target preservation
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_batch_discovery_config ==
+            refresh_item.new_devices.discovery_config
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
+            'BORDER_ROUTER'
+          - >-
+            switch_refresh_sda_fabric_border_batch_provision_config ==
+            refresh_item.new_devices.provision_config
+
+    - name: Verify duplicate interface mappings are rejected
+      block:
+        - name: Set duplicate handoff interface mapping input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-duplicate-interface-mapping
+              fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.50"
+              device_mapping:
+                - old:
+                    serial_number: OLD-BORDER-0050
+                  new_device_management_ip: "192.0.2.50"
+                  handoff_interface_mappings:
+                    - source_interface_name: FortyGigabitEthernet1/1/1
+                      destination_interface_name: HundredGigE1/0/1
+                    - source_interface_name: fortygigabitethernet1/1/1
+                      destination_interface_name: HundredGigE1/0/2
+
+        - name: Build duplicate handoff interface mapping input
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when duplicate handoff interface mapping passed
+          ansible.builtin.fail:
+            msg: Duplicate handoff interface mappings unexpectedly passed.
+      rescue:
+        - name: Confirm duplicate handoff interface mapping failed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate unique border handoff interface mappings'
+
+    - name: Verify incomplete mapping coverage is rejected
+      block:
+        - name: Set incomplete replacement mapping input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-incomplete-coverage
+              fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.60"
+                  - "192.0.2.61"
+              device_mapping:
+                - old:
+                    serial_number: OLD-BORDER-0060
+                  new_device_management_ip: "192.0.2.60"
+                  handoff_interface_mappings: []
+
+        - name: Build incomplete replacement mapping input
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when incomplete replacement mapping passed
+          ansible.builtin.fail:
+            msg: Incomplete replacement mapping unexpectedly passed.
+      rescue:
+        - name: Confirm incomplete replacement mapping failed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate border refresh batch mapping coverage'
+
+    - name: Verify non-border inventory role is rejected
+      block:
+        - name: Set invalid custom inventory role input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-inventory-role
+              fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.70"
+                inventory_config:
+                  - ip_address_list:
+                      - "192.0.2.70"
+                    username: custom-user
+                    password: custom-password
+                    type: NETWORK_DEVICE
+                    role: ACCESS
+              device_mapping:
+                - old:
+                    serial_number: OLD-BORDER-0070
+                  new_device_management_ip: "192.0.2.70"
+                  handoff_interface_mappings: []
+
+        - name: Build invalid custom inventory role input
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when non-border inventory role passed
+          ansible.builtin.fail:
+            msg: Non-border inventory role unexpectedly passed.
+      rescue:
+        - name: Confirm non-border inventory role failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate custom inventory entry'
+
+    - name: Verify old and replacement IP overlap is rejected
+      block:
+        - name: Set overlapping old and replacement IP input
+          ansible.builtin.set_fact:
+            refresh_item:
+              name: invalid-overlapping-management-ip
+              fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.80"
+              device_mapping:
+                - old:
+                    management_ip: "192.0.2.80"
+                  new_device_management_ip: "192.0.2.80"
+                  handoff_interface_mappings: []
+
+        - name: Build overlapping old and replacement IP input
+          ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+        - name: Fail when overlapping management IPs passed
+          ansible.builtin.fail:
+            msg: Overlapping management IPs unexpectedly passed.
+      rescue:
+        - name: Confirm overlapping management IP validation failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate border refresh device mapping'

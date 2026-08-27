@@ -1,0 +1,258 @@
+---
+- name: Find immutable border prepare batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_plan_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plans |
+        selectattr('name', 'equalto', refresh_item.name | string) |
+        list
+      }}
+  no_log: true
+
+- name: Validate immutable border prepare plan match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_prepare_plan_matches | length == 1
+    fail_msg: >-
+      Expected exactly one immutable prepare plan for batch
+      {{ refresh_item.name }}. No replacement workflow change was made.
+
+- name: Load immutable border prepare batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_batch_name: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].name }}
+    switch_refresh_sda_fabric_border_prepare_file_safe_name: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].file_safe_name }}
+    switch_refresh_sda_fabric_border_prepare_fabric_site: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .fabric_site_name_hierarchy
+      }}
+    switch_refresh_sda_fabric_border_prepare_onboarding_method: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].onboarding_method }}
+    switch_refresh_sda_fabric_border_prepare_new_devices: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].new_devices }}
+    switch_refresh_sda_fabric_border_prepare_device_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .new_management_ips
+      }}
+    switch_refresh_sda_fabric_border_prepare_resolved_mappings: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].resolved_mappings }}
+    switch_refresh_sda_fabric_border_prepare_discovery_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].discovery_config }}
+    switch_refresh_sda_fabric_border_prepare_lan_automation_config: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .lan_automation_config
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_config: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .inventory_execution_config
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .inventory_readiness_timeout
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .inventory_readiness_poll_interval
+      }}
+    switch_refresh_sda_fabric_border_prepare_provision_site: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .provision_site_name_hierarchy
+      }}
+    switch_refresh_sda_fabric_border_prepare_provision_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_plan_matches[0].provision_config }}
+    switch_refresh_sda_fabric_border_prepare_provision_validation_timeout: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .provision_validation_timeout
+      }}
+    switch_refresh_sda_fabric_border_prepare_provision_validation_poll_interval: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .provision_validation_poll_interval
+      }}
+  no_log: true
+
+- name: Discover replacement border batch
+  ansible.builtin.include_role:
+    name: discovery
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    discovery_state: >-
+      {{ switch_refresh_sda_fabric_border_prepare_new_devices.discovery_state |
+      default('merged') }}
+    discovery_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_discovery_config_verify }}
+    discovery_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_discovery_config }}
+  when:
+    - switch_refresh_sda_fabric_border_prepare_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_discovery_enabled | bool
+  no_log: true
+
+- name: Run LAN Automation for replacement border batch
+  ansible.builtin.include_role:
+    name: lan_automation
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_state: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_new_devices
+        .lan_automation_state | default('merged')
+      }}
+    lan_automation_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_lan_automation_config_verify }}
+    lan_automation_catalystcenter_api_task_timeout: >-
+      {{ switch_refresh_sda_fabric_border_lan_automation_completion_timeout }}
+    lan_automation_catalystcenter_task_poll_interval: >-
+      {{ switch_refresh_sda_fabric_border_lan_automation_completion_poll_interval }}
+    lan_automation_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_lan_automation_config }}
+  when:
+    - switch_refresh_sda_fabric_border_prepare_onboarding_method == 'lan_automation'
+    - switch_refresh_sda_fabric_border_lan_automation_enabled | bool
+  no_log: true
+
+- name: Add replacement border batch to inventory
+  ansible.builtin.include_role:
+    name: inventory
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    inventory_state: merged
+    inventory_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_inventory_config_verify }}
+    inventory_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_config }}
+  when: switch_refresh_sda_fabric_border_prepare_inventory_config | length > 0
+  no_log: true
+
+- name: Wait for replacement borders to become inventory-ready
+  ansible.builtin.include_tasks: wait_for_prepare_inventory.yml
+
+- name: Provision replacement border batch
+  ansible.builtin.include_role:
+    name: provision
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    provision_state: merged
+    provision_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_provision_config_verify }}
+    provision_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_provision_config }}
+  when: switch_refresh_sda_fabric_border_provision_enabled | bool
+
+- name: Validate replacement provisioning at the batch site
+  ansible.builtin.include_tasks: validate_prepare_provisioning.yml
+
+- name: Resolve replacement identities and destination interfaces before fabric add
+  ansible.builtin.include_tasks: resolve_prepare_replacements.yml
+
+- name: Build handoff-free replacement fabric payload
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_base_device_configs: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings |
+        map(attribute='base_new_device_config') |
+        list
+      }}
+    switch_refresh_sda_fabric_border_prepare_fabric_config:
+      - fabric_devices:
+          fabric_name: "{{ switch_refresh_sda_fabric_border_prepare_fabric_site }}"
+          device_config: >-
+            {{
+              switch_refresh_sda_fabric_border_prepare_runtime_mappings |
+              map(attribute='base_new_device_config') |
+              list
+            }}
+  no_log: true
+
+- name: Add replacement batch as handoff-free border nodes
+  ansible.builtin.include_role:
+    name: sda_fabric_devices
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    sda_fabric_devices_state: merged
+    sda_fabric_devices_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_sda_fabric_devices_config_verify }}
+    sda_fabric_devices_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_fabric_config }}
+  when: switch_refresh_sda_fabric_border_fabric_add_enabled | bool
+
+- name: Generate and verify all prepared replacement borders
+  block:
+    - name: Create protected prepared-border verification workspace
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: switch-refresh-border-verify-
+      register: switch_refresh_sda_fabric_border_prepare_verify_workspace
+
+    - name: Protect prepared-border verification workspace
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_prepare_verify_workspace.path }}"
+        state: directory
+        mode: "0700"
+
+    - name: Initialize prepared replacement result mappings
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_prepare_mapping_results: []
+
+    - name: Verify prepared replacement border mapping
+      ansible.builtin.include_tasks: verify_prepare_mapping.yml
+      loop: "{{ switch_refresh_sda_fabric_border_prepare_runtime_mappings }}"
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_prepare_verify_mapping
+        index_var: switch_refresh_sda_fabric_border_prepare_verify_mapping_index
+        label: >-
+          {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+  always:
+    - name: Remove prepared-border verification workspace
+      ansible.builtin.file:
+        path: >-
+          {{ switch_refresh_sda_fabric_border_prepare_verify_workspace.path }}
+        state: absent
+      when:
+        - switch_refresh_sda_fabric_border_prepare_verify_workspace is defined
+        - >-
+          switch_refresh_sda_fabric_border_prepare_verify_workspace.path |
+          default('') | string | trim | length > 0
+
+- name: Publish border refresh prepare batch result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_results: >-
+      {{
+        (switch_refresh_sda_fabric_border_prepare_results | default([])) +
+        [
+          {
+            'batch_name': switch_refresh_sda_fabric_border_prepare_batch_name,
+            'status': 'prepared_no_handoff',
+            'mappings': switch_refresh_sda_fabric_border_prepare_mapping_results
+          }
+        ]
+      }}
+  no_log: true

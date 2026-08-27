@@ -1,0 +1,728 @@
+---
+- name: Validate border cutover manifest contract offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    catalystcenter_host: test-controller.example.test
+    catalystcenter_port: 443
+    switch_refresh_sda_fabric_border_manifest_test_dir: >-
+      /tmp/catalystcenter_switch_refresh_sda_fabric_border-manifest-test
+    switch_refresh_sda_fabric_border_manifest_test_file: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_test_dir ~
+        '/border-manifest-test_border_cutover.yml'
+      }}
+    switch_refresh_sda_fabric_border_manifest_test_original:
+      device_ip: 198.51.100.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+          is_default_exit: true
+        layer2_handoff:
+          - interface_name: FortyGigabitEthernet1/1/1
+            internal_vlan_id: 1001
+            external_vlan_id: 101
+    switch_refresh_sda_fabric_border_manifest_test_base:
+      device_ip: 192.0.2.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+          is_default_exit: true
+    switch_refresh_sda_fabric_border_manifest_test_expected:
+      device_ip: 192.0.2.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+          is_default_exit: true
+        layer2_handoff:
+          - interface_name: HundredGigE1/0/1
+            internal_vlan_id: 1001
+            external_vlan_id: 101
+    refresh_item:
+      name: border-manifest-test
+      fabric_site_name_hierarchy: Global/Test/Fabric
+      new_devices:
+        device_ips:
+          - 192.0.2.10
+      device_mapping:
+        - old:
+            serial_number: OLD-BORDER-01
+          new_device_management_ip: 192.0.2.10
+          handoff_interface_mappings:
+            - source_interface_name: FortyGigabitEthernet1/1/1
+              destination_interface_name: HundredGigE1/0/1
+
+  tasks:
+    - name: Remove stale cutover manifest test directory
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_manifest_test_dir }}"
+        state: absent
+
+    - name: Derive manifest test input fingerprint
+      ansible.builtin.include_tasks: ../tasks/derive_cutover_input_fingerprint.yml
+
+    - name: Build manifest test plan
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_plan:
+          name: border-manifest-test
+          file_safe_name: border-manifest-test
+          fabric_site_name_hierarchy: Global/Test/Fabric
+          new_management_ips:
+            - 192.0.2.10
+          manifest_file: >-
+            {{ switch_refresh_sda_fabric_border_manifest_test_file }}
+          input_fingerprint: >-
+            {{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}
+          status: captured
+          resolved_mappings:
+            - old_selector:
+                serial_number: OLD-BORDER-01
+              old_management_ip: 198.51.100.10
+              new_management_ip: 192.0.2.10
+              interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+              old_identity:
+                management_ip: 198.51.100.10
+                inventory_uuid: old-uuid-01
+                serial_numbers:
+                  - OLD-BORDER-01
+                hostname: old-border-01.example.test
+              new_identity:
+                management_ip: 192.0.2.10
+                inventory_uuid: new-uuid-01
+                serial_numbers:
+                  - NEW-BORDER-01
+                hostname: temporary-border-01.example.test
+              original_device_config: >-
+                {{ switch_refresh_sda_fabric_border_manifest_test_original }}
+              base_new_device_config: >-
+                {{ switch_refresh_sda_fabric_border_manifest_test_base }}
+              expected_new_device_config: >-
+                {{ switch_refresh_sda_fabric_border_manifest_test_expected }}
+              source_config_fingerprint: >-
+                {{
+                  switch_refresh_sda_fabric_border_manifest_test_original |
+                  to_json(sort_keys=true) |
+                  hash('sha256')
+                }}
+              source_handoff_interfaces:
+                - FortyGigabitEthernet1/1/1
+              status: captured
+
+    - name: Persist initial border cutover manifest
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Inspect protected border cutover manifest
+      ansible.builtin.stat:
+        path: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+        follow: false
+      register: switch_refresh_sda_fabric_border_manifest_test_stat
+
+    - name: Read protected border cutover manifest
+      ansible.builtin.slurp:
+        src: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+      register: switch_refresh_sda_fabric_border_manifest_test_slurp
+
+    - name: Parse protected border cutover manifest
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_test_document: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_test_slurp.content |
+            b64decode |
+            from_yaml
+          }}
+
+    - name: Verify protected and complete manifest capture
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_manifest_test_stat.stat.isreg | bool
+          - not (switch_refresh_sda_fabric_border_manifest_test_stat.stat.islnk | default(false))
+          - switch_refresh_sda_fabric_border_manifest_test_stat.stat.mode == '0600'
+          - switch_refresh_sda_fabric_border_manifest_test_document.schema_version == 1
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.controller.host ==
+            catalystcenter_host
+          - switch_refresh_sda_fabric_border_manifest_test_document.controller.port | int == 443
+          - switch_refresh_sda_fabric_border_manifest_test_document.status == 'captured'
+          - switch_refresh_sda_fabric_border_manifest_test_document.devices | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].old.inventory_uuid ==
+            'old-uuid-01'
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].new.inventory_uuid ==
+            'new-uuid-01'
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].source_config_fingerprint ==
+            (
+              switch_refresh_sda_fabric_border_manifest_test_original |
+              to_json(sort_keys=true) |
+              hash('sha256')
+            )
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].base_new_config_fingerprint ==
+            (
+              switch_refresh_sda_fabric_border_manifest_test_base |
+              to_json(sort_keys=true) |
+              hash('sha256')
+            )
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].expected_new_config_fingerprint ==
+            (
+              switch_refresh_sda_fabric_border_manifest_test_expected |
+              to_json(sort_keys=true) |
+              hash('sha256')
+            )
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0]
+            .immutable_payload_fingerprint |
+            regex_search('^[0-9a-f]{64}$') is not none
+
+    - name: Set manifest loader path
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_manifest_file: >-
+          {{ switch_refresh_sda_fabric_border_manifest_test_file }}
+
+    - name: Load and validate durable cutover manifest
+      ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+    - name: Verify loaded cutover plan contract
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_loaded_cutover_plan.name == 'border-manifest-test'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].old_management_ip ==
+            '198.51.100.10'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].new_management_ip ==
+            '192.0.2.10'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].status ==
+            'captured'
+
+    - name: Verify payload tampering fails manifest integrity checks
+      block:
+        - name: Write tampered cutover manifest with stale source fingerprint
+          ansible.builtin.copy:
+            dest: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                switch_refresh_sda_fabric_border_manifest_test_document |
+                combine(
+                  {
+                    'devices': [
+                      switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                      combine(
+                        {
+                          'original_device_config':
+                            switch_refresh_sda_fabric_border_manifest_test_original |
+                            combine({'device_ip': '198.51.100.99'})
+                        }
+                      )
+                    ]
+                  }
+                ) |
+                to_nice_yaml(indent=2, width=4096, sort_keys=false)
+              }}
+
+        - name: Load tampered cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when payload tampering was accepted
+          ansible.builtin.fail:
+            msg: Tampered manifest unexpectedly passed validation.
+      rescue:
+        - name: Verify source payload tampering was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name == 'Validate each cutover manifest entry'
+
+    - name: Restore valid cutover manifest after tamper test
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Verify interface mapping tampering fails immutable payload integrity
+      block:
+        - name: Write cutover manifest with an altered destination interface
+          ansible.builtin.copy:
+            dest: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                switch_refresh_sda_fabric_border_manifest_test_document |
+                combine(
+                  {
+                    'devices': [
+                      switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                      combine(
+                        {
+                          'interface_mappings': [
+                            {
+                              'source_interface_name':
+                                'FortyGigabitEthernet1/1/1',
+                              'destination_interface_name':
+                                'HundredGigE1/0/99'
+                            }
+                          ]
+                        }
+                      )
+                    ]
+                  }
+                ) |
+                to_nice_yaml(indent=2, width=4096, sort_keys=false)
+              }}
+
+        - name: Load interface-tampered cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when interface mapping tampering was accepted
+          ansible.builtin.fail:
+            msg: Interface-tampered manifest unexpectedly passed validation.
+      rescue:
+        - name: Verify immutable payload tampering was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate each cutover manifest entry'
+
+    - name: Restore valid manifest after interface mapping tamper test
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Build pool-backed source and replacement manifest payloads
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_pool_source_config: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_test_original |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_manifest_test_original.borders_settings |
+                  combine(
+                    {
+                      'layer3_handoff_ip_transit': [
+                        {
+                          'transit_network_name': 'IP-TRANSIT',
+                          'interface_name': 'FortyGigabitEthernet1/1/1',
+                          'external_connectivity_ip_pool_name':
+                            'BORDER-TRANSIT-POOL',
+                          'virtual_network_name': 'CORPORATE',
+                          'vlan_id': 2001,
+                          'local_ip_address': '203.0.113.1/30',
+                          'remote_ip_address': '203.0.113.2/30'
+                        }
+                      ]
+                    }
+                  )
+              }
+            )
+          }}
+        switch_refresh_sda_fabric_border_manifest_pool_expected_config: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_test_expected |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_manifest_test_expected.borders_settings |
+                  combine(
+                    {
+                      'layer3_handoff_ip_transit': [
+                        {
+                          'transit_network_name': 'IP-TRANSIT',
+                          'interface_name': 'HundredGigE1/0/1',
+                          'external_connectivity_ip_pool_name':
+                            'BORDER-TRANSIT-POOL',
+                          'virtual_network_name': 'CORPORATE',
+                          'vlan_id': 2001,
+                          'local_ip_address': '203.0.113.1/30',
+                          'remote_ip_address': '203.0.113.2/30'
+                        }
+                      ]
+                    }
+                  )
+              }
+            )
+          }}
+
+    - name: Build internally fingerprinted pool-backed manifest entry
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_pool_entry_base: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+            combine(
+              {
+                'original_device_config':
+                  switch_refresh_sda_fabric_border_manifest_pool_source_config,
+                'expected_new_device_config':
+                  switch_refresh_sda_fabric_border_manifest_pool_expected_config,
+                'source_config_fingerprint':
+                  switch_refresh_sda_fabric_border_manifest_pool_source_config |
+                  to_json(sort_keys=true) | hash('sha256'),
+                'expected_new_config_fingerprint':
+                  switch_refresh_sda_fabric_border_manifest_pool_expected_config |
+                  to_json(sort_keys=true) | hash('sha256')
+              }
+            )
+          }}
+
+    - name: Complete immutable fingerprint for pool-backed manifest entry
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_pool_entry: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_pool_entry_base |
+            combine(
+              {
+                'immutable_payload_fingerprint':
+                  {
+                    'old': switch_refresh_sda_fabric_border_manifest_pool_entry_base.old,
+                    'new': switch_refresh_sda_fabric_border_manifest_pool_entry_base.new,
+                    'old_selector':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.old_selector,
+                    'interface_mappings':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.interface_mappings,
+                    'original_device_config':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.original_device_config,
+                    'base_new_device_config':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.base_new_device_config,
+                    'expected_new_device_config':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.expected_new_device_config,
+                    'source_config_fingerprint':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.source_config_fingerprint,
+                    'source_handoff_interfaces':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.source_handoff_interfaces
+                  } |
+                  to_json(sort_keys=true) |
+                  hash('sha256')
+              }
+            )
+          }}
+
+    - name: Verify fingerprint-valid pool-backed manifest is rejected
+      block:
+        - name: Validate unsupported pool-backed manifest entry
+          ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
+          vars:
+            switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+              entries:
+                - >-
+                  {{ switch_refresh_sda_fabric_border_manifest_pool_entry }}
+              expected_new_ips:
+                - 192.0.2.10
+              context: pool-backed replay negative test
+
+        - name: Fail when pool-backed manifest replay was accepted
+          ansible.builtin.fail:
+            msg: Pool-backed manifest replay unexpectedly passed validation.
+      rescue:
+        - name: Verify pool-backed manifest policy was enforced
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Reject pool-backed IP-transit replay in cutover manifests'
+
+    - name: Verify old and replacement UUID overlap is rejected
+      block:
+        - name: Write cutover manifest with overlapping immutable UUIDs
+          ansible.builtin.copy:
+            dest: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                switch_refresh_sda_fabric_border_manifest_test_document |
+                combine(
+                  {
+                    'devices': [
+                      switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                      combine(
+                        {
+                          'new':
+                            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].new |
+                            combine({'inventory_uuid': 'old-uuid-01'})
+                        },
+                        recursive=true
+                      )
+                    ]
+                  }
+                ) |
+                to_nice_yaml(indent=2, width=4096, sort_keys=false)
+              }}
+
+        - name: Load overlapping-UUID cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when overlapping immutable UUIDs were accepted
+          ansible.builtin.fail:
+            msg: Old/replacement UUID overlap unexpectedly passed validation.
+      rescue:
+        - name: Verify immutable UUID overlap was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate each cutover manifest entry'
+
+    - name: Restore valid manifest after UUID-overlap test
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Verify hostname-enabled manifest requires captured old hostname
+      block:
+        - name: Enable hostname transfer for negative manifest validation
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_hostname_transfer_enabled: true
+
+        - name: Write cutover manifest without captured old hostname
+          ansible.builtin.copy:
+            dest: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+            mode: "0600"
+            content: >-
+              {{
+                switch_refresh_sda_fabric_border_manifest_test_document |
+                combine(
+                  {
+                    'devices': [
+                      switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                      combine(
+                        {
+                          'old':
+                            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].old |
+                            combine({'hostname': ''})
+                        },
+                        recursive=true
+                      )
+                    ]
+                  }
+                ) |
+                to_nice_yaml(indent=2, width=4096, sort_keys=false)
+              }}
+
+        - name: Load hostname-incomplete cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when missing captured old hostname was accepted
+          ansible.builtin.fail:
+            msg: Hostname-enabled manifest unexpectedly accepted an empty old hostname.
+      rescue:
+        - name: Verify hostname-enabled manifest rejected missing old hostname
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate each cutover manifest entry'
+
+    - name: Restore hostname setting and valid manifest after negative test
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
+
+    - name: Restore valid manifest after hostname negative test
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Verify permissive manifest mode is rejected
+      block:
+        - name: Make cutover manifest permissions unsafe
+          ansible.builtin.file:
+            path: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+            mode: "0644"
+
+        - name: Load permissive cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when permissive manifest mode was accepted
+          ansible.builtin.fail:
+            msg: Permissive manifest unexpectedly passed validation.
+      rescue:
+        - name: Verify permissive manifest was rejected before loading
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate border cutover manifest file protection'
+
+    - name: Restore protected cutover manifest permissions
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_manifest_test_file }}"
+        mode: "0600"
+
+    - name: Verify changed input fingerprint is rejected
+      block:
+        - name: Preserve original cutover input fingerprint
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_manifest_original_input_fingerprint: >-
+              {{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}
+
+        - name: Replace current fingerprint with unrelated valid hash
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_cutover_input_fingerprint: >-
+              {{ 'different-cutover-input' | hash('sha256') }}
+
+        - name: Load stale-input cutover manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Fail when stale input fingerprint was accepted
+          ansible.builtin.fail:
+            msg: Stale-input manifest unexpectedly passed validation.
+      rescue:
+        - name: Verify stale input fingerprint was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate border cutover manifest envelope'
+
+    - name: Restore original input fingerprint after negative test
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_input_fingerprint: >-
+          {{ switch_refresh_sda_fabric_border_manifest_original_input_fingerprint }}
+
+    - name: Mark manifest test mapping complete
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_active_cutover_plan: >-
+          {{ switch_refresh_sda_fabric_border_cutover_plan }}
+
+    - name: Update manifest test entry through deletion-started state
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: deletion_started
+
+    - name: Verify deletion-started aggregate state before destructive call
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_active_cutover_plan
+            .resolved_mappings[0].status == 'deletion_started'
+          - >-
+            switch_refresh_sda_fabric_border_active_cutover_plan.status ==
+            'deletion_started'
+
+    - name: Persist deletion-started recovery boundary offline
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_plan: >-
+          {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+
+    - name: Reload deletion-started recovery boundary offline
+      ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+    - name: Verify deletion-started state survives durable reread
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.status ==
+            'deletion_started'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan
+            .resolved_mappings[0].status == 'deletion_started'
+
+    - name: Update manifest test entry through old-deleted state
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: old_deleted
+
+    - name: Update manifest test entry through handoff-verified state
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: handoff_verified
+
+    - name: Update manifest test entry through complete state
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: complete
+          hostname_verified: false
+
+    - name: Request an earlier state for an already-complete entry
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: old_deleted
+
+    - name: Verify manifest progress cannot move backward on resume
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings[0].status ==
+            'complete'
+          - switch_refresh_sda_fabric_border_active_cutover_plan.status == 'complete'
+
+    - name: Persist complete manifest test state
+      ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_plan: >-
+          {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+
+    - name: Reload completed cutover manifest
+      ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+    - name: Verify four-state forward manifest progression
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_loaded_cutover_plan.status == 'complete'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].status ==
+            'complete'
+
+    - name: Build mixed-progress active plan for aggregate-status validation
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_active_cutover_plan: >-
+          {{
+            switch_refresh_sda_fabric_border_loaded_cutover_plan |
+            combine(
+              {
+                'resolved_mappings': [
+                  switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0],
+                  switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0] |
+                  combine(
+                    {
+                      'new_management_ip': '192.0.2.11',
+                      'status': 'captured'
+                    }
+                  )
+                ]
+              }
+            )
+          }}
+
+    - name: Reapply complete state to first mixed-progress entry
+      ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_entry_update_request:
+          new_management_ip: 192.0.2.10
+          status: complete
+
+    - name: Verify aggregate status remains at the lowest common boundary
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_active_cutover_plan.status == 'captured'
+          - >-
+            switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings[0].status ==
+            'complete'
+          - >-
+            switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings[1].status ==
+            'captured'
+
+    - name: Load manifest persistence task source
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_persistence_source: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/persist_cutover_manifest.yml') }}
+
+    - name: Verify manifest implementation excludes credentials and uses atomic protected copy
+      ansible.builtin.assert:
+        that:
+          - "'ansible.builtin.copy' in switch_refresh_sda_fabric_border_manifest_persistence_source"
+          - "'mode: \"0600\"' in switch_refresh_sda_fabric_border_manifest_persistence_source"
+          - "'catalystcenter_password' not in switch_refresh_sda_fabric_border_manifest_persistence_source"
+          - "'catalystcenter_username' not in switch_refresh_sda_fabric_border_manifest_persistence_source"
+
+    - name: Remove border cutover manifest test directory
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_manifest_test_dir }}"
+        state: absent
