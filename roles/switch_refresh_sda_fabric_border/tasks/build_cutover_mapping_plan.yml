@@ -1,0 +1,117 @@
+---
+# Build the immutable captured payload for one already-resolved old/new pair.
+- name: Capture current old border configuration for cutover
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: "{{ switch_refresh_sda_fabric_border_cutover_build_site }}"
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.old_management_ip }}
+      capture_file: >-
+        {{
+          switch_refresh_sda_fabric_border_cutover_build_workspace ~ '/' ~
+          (
+            switch_refresh_sda_fabric_border_cutover_build_mapping.old_management_ip |
+            regex_replace('[^A-Za-z0-9_.-]', '_')
+          ) ~ '_old.yml'
+        }}
+      expected_state: present
+      context: >-
+        cutover source for {{
+        switch_refresh_sda_fabric_border_cutover_build_mapping.old_management_ip }}
+
+- name: Preserve current old border capture
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_old_capture: >-
+      {{ switch_refresh_sda_fabric_border_capture_result }}
+  no_log: true
+
+- name: Build base and final replacement border configurations
+  ansible.builtin.include_tasks: build_replacement_configs.yml
+  vars:
+    switch_refresh_sda_fabric_border_transform_request:
+      fabric_name: "{{ switch_refresh_sda_fabric_border_cutover_build_site }}"
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+      interface_mappings: >-
+        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.interface_mappings }}
+      original_device_config: >-
+        {{ switch_refresh_sda_fabric_border_cutover_old_capture.device_config }}
+
+- name: Preserve transformed replacement configurations
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_transform: >-
+      {{ switch_refresh_sda_fabric_border_transform_result }}
+  no_log: true
+
+- name: Capture prepared replacement border configuration
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: "{{ switch_refresh_sda_fabric_border_cutover_build_site }}"
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+      capture_file: >-
+        {{
+          switch_refresh_sda_fabric_border_cutover_build_workspace ~ '/' ~
+          (
+            switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip |
+            regex_replace('[^A-Za-z0-9_.-]', '_')
+          ) ~ '_prepared.yml'
+        }}
+      expected_state: present
+      context: >-
+        prepared replacement {{
+        switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+
+- name: Preserve current prepared replacement capture
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_prepared_capture: >-
+      {{ switch_refresh_sda_fabric_border_capture_result }}
+  no_log: true
+
+- name: Verify replacement is still the handoff-free base border
+  ansible.builtin.include_tasks: verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: >-
+        {{ switch_refresh_sda_fabric_border_cutover_transform.base_new_device_config }}
+      actual_device_config: >-
+        {{ switch_refresh_sda_fabric_border_cutover_prepared_capture.device_config }}
+      context: >-
+        pre-cutover replacement {{
+        switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+      require_empty_handoffs: true
+
+- name: Append captured cutover mapping plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_built_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_built_mappings + [
+          switch_refresh_sda_fabric_border_cutover_build_mapping |
+          combine(
+            {
+              'original_device_config':
+                switch_refresh_sda_fabric_border_cutover_transform.original_device_config,
+              'base_new_device_config':
+                switch_refresh_sda_fabric_border_cutover_transform.base_new_device_config,
+              'expected_new_device_config':
+                switch_refresh_sda_fabric_border_cutover_transform.expected_new_device_config,
+              'source_config_fingerprint':
+                switch_refresh_sda_fabric_border_cutover_transform.source_config_fingerprint,
+              'source_handoff_interfaces':
+                switch_refresh_sda_fabric_border_cutover_transform.source_handoff_interfaces,
+              'l2_handoff_count':
+                switch_refresh_sda_fabric_border_cutover_transform.l2_handoff_count,
+              'ip_transit_handoff_count':
+                switch_refresh_sda_fabric_border_cutover_transform.ip_transit_handoff_count,
+              'sda_transit_handoff_count':
+                switch_refresh_sda_fabric_border_cutover_transform.sda_transit_handoff_count,
+              'status': 'captured'
+            },
+            recursive=true
+          )
+        ]
+      }}
+  no_log: true
+

@@ -1,0 +1,120 @@
+---
+- name: Resolve replacement inventory identities and interfaces
+  ansible.builtin.include_role:
+    name: network_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    network_devices_info_state: gathered
+    network_devices_info_config_verify: false
+    network_devices_info_config:
+      - network_devices:
+          - device_identifier:
+              - ip_address: >-
+                  {{ switch_refresh_sda_fabric_border_prepare_device_ips }}
+            timeout: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_timeout }}
+            retries: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_retries }}
+            interval: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_interval }}
+            requested_info:
+              - device_info
+              - interface_info
+
+- name: Initialize replacement inventory response collections
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_device_info_entries: []
+    switch_refresh_sda_fabric_border_prepare_interface_info_entries: []
+    switch_refresh_sda_fabric_border_prepare_runtime_mappings: []
+
+- name: Extract replacement device information
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_device_info_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_device_info_entries +
+        switch_refresh_sda_fabric_border_prepare_lookup_response[0].device_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_lookup_response
+    label: replacement-device-info
+  when:
+    - (switch_refresh_sda_fabric_border_prepare_lookup_response | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_prepare_lookup_response | length > 0
+    - switch_refresh_sda_fabric_border_prepare_lookup_response[0] is mapping
+    - switch_refresh_sda_fabric_border_prepare_lookup_response[0].device_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_prepare_lookup_response[0].device_info |
+      type_debug) == 'list'
+  no_log: true
+
+- name: Extract replacement interface information
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_interface_info_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_interface_info_entries +
+        switch_refresh_sda_fabric_border_prepare_lookup_response[0].interface_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_lookup_response
+    label: replacement-interface-info
+  when:
+    - (switch_refresh_sda_fabric_border_prepare_lookup_response | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_prepare_lookup_response | length > 0
+    - switch_refresh_sda_fabric_border_prepare_lookup_response[0] is mapping
+    - switch_refresh_sda_fabric_border_prepare_lookup_response[0].interface_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_prepare_lookup_response[0].interface_info |
+      type_debug) == 'list'
+  no_log: true
+
+- name: Validate replacement response coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_info_entries | length ==
+        switch_refresh_sda_fabric_border_prepare_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_interface_info_entries | length ==
+        switch_refresh_sda_fabric_border_prepare_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_device_info_entries |
+        map(attribute='device_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_border_prepare_device_ips | map('string') | list | sort
+      - >-
+        switch_refresh_sda_fabric_border_prepare_interface_info_entries |
+        map(attribute='device_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_border_prepare_device_ips | map('string') | list | sort
+    fail_msg: >-
+      network_devices_info did not return one device and interface response for
+      every replacement in batch
+      {{ switch_refresh_sda_fabric_border_prepare_batch_name }}.
+
+- name: Resolve each replacement identity and destination interface set
+  ansible.builtin.include_tasks: resolve_prepare_replacement_mapping.yml
+  loop: "{{ switch_refresh_sda_fabric_border_prepare_resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_mapping
+    label: "{{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}"
+
+- name: Validate resolved replacement identity uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings | length ==
+        switch_refresh_sda_fabric_border_prepare_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings |
+        map(attribute='new_identity.inventory_uuid') | unique | list | length ==
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings |
+        map(attribute='new_identity.serial_numbers') | map('first') |
+        unique | list | length ==
+        switch_refresh_sda_fabric_border_prepare_runtime_mappings | length
+    fail_msg: >-
+      Every replacement must resolve to a unique immutable UUID and serial
+      before fabric mutation.

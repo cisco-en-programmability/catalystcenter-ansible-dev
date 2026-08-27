@@ -1,0 +1,825 @@
+---
+- name: Validate border refresh batch structure
+  ansible.builtin.assert:
+    that:
+      - refresh_item is mapping
+      - refresh_item.name is defined
+      - refresh_item.name is string
+      - refresh_item.name | trim | length > 0
+      - refresh_item.name == (refresh_item.name | trim)
+      - refresh_item.fabric_site_name_hierarchy is defined
+      - refresh_item.fabric_site_name_hierarchy is string
+      - refresh_item.fabric_site_name_hierarchy | trim | length > 0
+      - >-
+        refresh_item.fabric_site_name_hierarchy ==
+        (refresh_item.fabric_site_name_hierarchy | trim)
+      - refresh_item.new_devices is defined
+      - refresh_item.new_devices is mapping
+    fail_msg: >-
+      A switch_refresh_sda_fabric_border_batches entry requires a non-empty
+      name, fabric_site_name_hierarchy, and new_devices mapping.
+
+- name: Initialize border refresh batch execution plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_name: "{{ refresh_item.name }}"
+    switch_refresh_sda_fabric_border_batch_file_safe_name: >-
+      {{ refresh_item.name | lower | regex_replace('[^a-z0-9_.-]', '_') }}
+    switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy: >-
+      {{ refresh_item.fabric_site_name_hierarchy }}
+    switch_refresh_sda_fabric_border_batch_onboarding_method: >-
+      {{
+        refresh_item.onboarding_method |
+        default(switch_refresh_sda_fabric_border_onboarding_method)
+      }}
+    switch_refresh_sda_fabric_border_batch_new_devices: "{{ refresh_item.new_devices }}"
+    switch_refresh_sda_fabric_border_batch_device_ips: >-
+      {{ refresh_item.new_devices.device_ips | default([]) | map('string') | list }}
+    switch_refresh_sda_fabric_border_batch_device_mappings: []
+    switch_refresh_sda_fabric_border_batch_resolved_mappings: []
+    switch_refresh_sda_fabric_border_batch_mapping_new_ips: []
+    switch_refresh_sda_fabric_border_batch_mapping_old_keys: []
+    switch_refresh_sda_fabric_border_batch_device_results: []
+    switch_refresh_sda_fabric_border_batch_discovery_config: []
+    switch_refresh_sda_fabric_border_batch_lan_automation_config: >-
+      {{ refresh_item.new_devices.lan_automation_config | default([]) }}
+    switch_refresh_sda_fabric_border_batch_lan_automation_target_ips: []
+    switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers: []
+    switch_refresh_sda_fabric_border_batch_inventory_credentials: {}
+    switch_refresh_sda_fabric_border_batch_inventory_config: []
+    switch_refresh_sda_fabric_border_batch_inventory_execution_config: []
+    switch_refresh_sda_fabric_border_batch_provision_config: []
+    switch_refresh_sda_fabric_border_custom_discovery_target_ips: []
+    switch_refresh_sda_fabric_border_custom_discovery_names: []
+    switch_refresh_sda_fabric_border_custom_inventory_target_ips: []
+    switch_refresh_sda_fabric_border_custom_provision_target_ips: []
+    switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout: >-
+      {{
+        refresh_item.inventory_readiness_timeout |
+        default(switch_refresh_sda_fabric_border_inventory_readiness_timeout) |
+        int
+      }}
+    switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval: >-
+      {{
+        refresh_item.inventory_readiness_poll_interval |
+        default(switch_refresh_sda_fabric_border_inventory_readiness_poll_interval) |
+        int
+      }}
+    switch_refresh_sda_fabric_border_batch_provision_validation_timeout: >-
+      {{
+        refresh_item.provision_validation_timeout |
+        default(switch_refresh_sda_fabric_border_provision_validation_timeout) |
+        int
+      }}
+    switch_refresh_sda_fabric_border_batch_provision_validation_poll_interval: >-
+      {{
+        refresh_item.provision_validation_poll_interval |
+        default(switch_refresh_sda_fabric_border_provision_validation_poll_interval) |
+        int
+      }}
+    switch_refresh_sda_fabric_border_inventory_allowed_connection_keys:
+      - username
+      - password
+      - enable_password
+      - cli_transport
+      - netconf_port
+      - http_username
+      - http_password
+      - http_port
+      - http_secure
+      - snmp_version
+      - snmp_mode
+      - snmp_username
+      - snmp_auth_passphrase
+      - snmp_auth_protocol
+      - snmp_priv_passphrase
+      - snmp_priv_protocol
+      - snmp_ro_community
+      - snmp_rw_community
+      - snmp_retry
+      - snmp_timeout
+      - type
+  no_log: true
+
+- name: Validate border refresh batch inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_border_batch_new_devices.device_ips |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_batch_device_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_device_ips | unique | length ==
+        switch_refresh_sda_fabric_border_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_onboarding_method in
+        ['discovery', 'lan_automation']
+      - (refresh_item.device_mapping | default([]) | type_debug) == 'list'
+      - refresh_item.device_mapping | default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is not defined or
+        (
+          (switch_refresh_sda_fabric_border_batch_new_devices.discovery_config |
+          type_debug) == 'list' and
+          switch_refresh_sda_fabric_border_batch_new_devices.discovery_config | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.lan_automation_config
+        is not defined or
+        (
+          (switch_refresh_sda_fabric_border_batch_new_devices.lan_automation_config |
+          type_debug) == 'list' and
+          switch_refresh_sda_fabric_border_batch_new_devices.lan_automation_config |
+          length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is not defined or
+        (
+          (switch_refresh_sda_fabric_border_batch_new_devices.inventory_config |
+          type_debug) == 'list' and
+          switch_refresh_sda_fabric_border_batch_new_devices.inventory_config | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.provision_config is not defined or
+        (
+          (switch_refresh_sda_fabric_border_batch_new_devices.provision_config |
+          type_debug) == 'list' and
+          switch_refresh_sda_fabric_border_batch_new_devices.provision_config | length > 0
+        )
+      - >-
+        (switch_refresh_sda_fabric_border_batch_new_devices.discovery_state |
+        default('merged')) == 'merged'
+      - >-
+        (switch_refresh_sda_fabric_border_batch_new_devices.lan_automation_state |
+        default('merged')) == 'merged'
+      - >-
+        (switch_refresh_sda_fabric_border_batch_new_devices.inventory_state |
+        default('merged')) == 'merged'
+      - >-
+        (switch_refresh_sda_fabric_border_batch_new_devices.provision_state |
+        default('merged')) == 'merged'
+      - >-
+        switch_refresh_sda_fabric_border_batch_onboarding_method != 'discovery' or
+        switch_refresh_sda_fabric_border_batch_new_devices.lan_automation_config
+        is not defined
+      - >-
+        switch_refresh_sda_fabric_border_batch_onboarding_method != 'lan_automation' or
+        switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is not defined
+      - (switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval |
+        int) > 0
+      - (switch_refresh_sda_fabric_border_batch_provision_validation_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_border_batch_provision_validation_poll_interval |
+        int) > 0
+    fail_msg: >-
+      A batch requires unique replacement IPv4 addresses, one mapping per
+      replacement, and discovery or lan_automation onboarding. Custom stage
+      configurations must be non-empty lists, all stage states must be merged,
+      and a batch may configure only its selected onboarding method.
+
+- name: Validate replacement management IP syntax
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_target_ip |
+        regex_search(
+          '^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$'
+        ) is not none
+      - >-
+        switch_refresh_sda_fabric_border_target_ip.split('.') |
+        map('int') | max <= 255
+    fail_msg: >-
+      new_devices.device_ips must contain explicit, valid IPv4 management
+      addresses. Invalid value: {{ switch_refresh_sda_fabric_border_target_ip }}.
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_target_ip
+    label: "{{ switch_refresh_sda_fabric_border_target_ip }}"
+
+- name: Normalize border refresh batch mappings
+  ansible.builtin.include_tasks: normalize_batch_mapping.yml
+  loop: "{{ refresh_item.device_mapping }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_input_mapping
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip |
+        default('device-mapping')
+      }}
+
+- name: Derive border refresh batch mapping keys
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_mapping_new_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_device_mappings |
+        map(attribute='new_device_management_ip') | list
+      }}
+    switch_refresh_sda_fabric_border_batch_mapping_old_keys: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_mapping_old_keys +
+        [
+          ('management_ip:' ~
+            (switch_refresh_sda_fabric_border_mapping_item.old.management_ip | lower))
+          if (switch_refresh_sda_fabric_border_mapping_item.old.management_ip is defined)
+          else ('hostname:' ~
+            (switch_refresh_sda_fabric_border_mapping_item.old.hostname | lower))
+          if (switch_refresh_sda_fabric_border_mapping_item.old.hostname is defined)
+          else ('serial_number:' ~
+            (switch_refresh_sda_fabric_border_mapping_item.old.serial_number | upper))
+          if (switch_refresh_sda_fabric_border_mapping_item.old.serial_number is defined)
+          else ('mac_address:' ~
+            (switch_refresh_sda_fabric_border_mapping_item.old.mac_address |
+            lower | regex_replace('[:-]', '')))
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_mapping_item
+    label: "{{ switch_refresh_sda_fabric_border_mapping_item.new_device_management_ip }}"
+
+- name: Validate border refresh batch mapping coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_mapping_old_keys | unique | length ==
+        switch_refresh_sda_fabric_border_batch_mapping_old_keys | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | unique | length ==
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+    fail_msg: >-
+      device_mapping must contain unique old selectors and map every
+      new_devices.device_ips address exactly once.
+
+- name: Validate LAN Automation batch configuration
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_batch_lan_automation_config | length == 1
+      - switch_refresh_sda_fabric_border_batch_lan_automation_config[0] is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_batch_lan_automation_config[0].keys() |
+        list | sort) == ['lan_automation']
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.launch_and_wait
+        is defined
+      - >-
+        (switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.launch_and_wait |
+        type_debug) == 'bool'
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.launch_and_wait |
+        bool
+      - >-
+        (switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) | length <= 50
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy
+        is defined
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy ==
+        switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy
+    fail_msg: >-
+      LAN Automation onboarding requires one launch-and-wait configuration,
+      one to fifty discovery devices, and the batch fabric site as the
+      discovered-device site.
+  when: switch_refresh_sda_fabric_border_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation replacement entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_lan_automation_device is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_lan_automation_device.device_serial_number |
+        default('')) is string
+      - >-
+        switch_refresh_sda_fabric_border_lan_automation_device.device_serial_number |
+        default('') | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_lan_automation_device
+        .device_management_ip_address | default('')) is string
+      - >-
+        switch_refresh_sda_fabric_border_lan_automation_device.device_management_ip_address |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_lan_automation_device.device_site_name_hierarchy
+        is not defined or
+        switch_refresh_sda_fabric_border_lan_automation_device.device_site_name_hierarchy ==
+        switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy
+    fail_msg: >-
+      Each LAN Automation discovery device requires a non-empty serial number
+      and management IP, and any supplied device site must match the batch.
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+      default([])
+      if (switch_refresh_sda_fabric_border_batch_lan_automation_config | length == 1)
+      else []
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_lan_automation_device
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_lan_automation_device.device_management_ip_address |
+        default('lan-automation-device')
+      }}
+  when: switch_refresh_sda_fabric_border_batch_onboarding_method == 'lan_automation'
+
+- name: Derive LAN Automation target identifiers
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_lan_automation_target_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+        map(attribute='device_management_ip_address') | map('string') | list
+      }}
+    switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_lan_automation_config[0].lan_automation.discovery_devices |
+        map(attribute='device_serial_number') | map('string') | map('upper') | list
+      }}
+  when: switch_refresh_sda_fabric_border_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_target_ips | unique | length ==
+        switch_refresh_sda_fabric_border_batch_lan_automation_target_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers |
+        unique | length ==
+        switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_lan_automation_target_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+    fail_msg: >-
+      LAN Automation device IPs must exactly cover the replacement set, and
+      replacement IPs and serial numbers must be unique.
+  when: switch_refresh_sda_fabric_border_batch_onboarding_method == 'lan_automation'
+
+- name: Validate generated Discovery overrides
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.discovery_name is not defined or
+        (
+          switch_refresh_sda_fabric_border_batch_new_devices.discovery_name is string and
+          switch_refresh_sda_fabric_border_batch_new_devices.discovery_name |
+          trim | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.protocol_order is not defined or
+        switch_refresh_sda_fabric_border_batch_new_devices.protocol_order in
+        ['ssh', 'telnet', 'ssh, telnet']
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.discovery_retry is not defined or
+        (
+          (switch_refresh_sda_fabric_border_batch_new_devices.discovery_retry |
+          type_debug) == 'int' and
+          switch_refresh_sda_fabric_border_batch_new_devices.discovery_retry >= 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.use_global_credentials
+        is not defined or
+        (switch_refresh_sda_fabric_border_batch_new_devices.use_global_credentials |
+        type_debug) == 'bool'
+    fail_msg: >-
+      Generated Discovery overrides require valid name, protocol, retry, and
+      global-credential values.
+  when:
+    - switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is not defined
+
+- name: Build generated Discovery configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_discovery_config: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_discovery_config +
+        [
+          {
+            'discovery_name':
+              (
+                switch_refresh_sda_fabric_border_batch_new_devices.discovery_name |
+                default(
+                  'switch-refresh-' ~
+                  switch_refresh_sda_fabric_border_batch_file_safe_name,
+                  true
+                )
+              )
+              if (switch_refresh_sda_fabric_border_batch_device_ips | length <= 8)
+              else
+              (
+                switch_refresh_sda_fabric_border_batch_new_devices.discovery_name |
+                default(
+                  'switch-refresh-' ~
+                  switch_refresh_sda_fabric_border_batch_file_safe_name,
+                  true
+                )
+              ) ~ '-' ~
+              (((switch_refresh_sda_fabric_border_discovery_chunk_index | int) + 1) |
+              string),
+            'discovery_type':
+              'SINGLE'
+              if (switch_refresh_sda_fabric_border_discovery_chunk | length == 1)
+              else 'MULTI RANGE',
+            'ip_address_list':
+              switch_refresh_sda_fabric_border_discovery_chunk | map('string') | list,
+            'protocol_order':
+              switch_refresh_sda_fabric_border_batch_new_devices.protocol_order |
+              default('ssh'),
+            'retry':
+              switch_refresh_sda_fabric_border_batch_new_devices.discovery_retry |
+              default(2),
+            'use_global_credentials':
+              switch_refresh_sda_fabric_border_batch_new_devices.use_global_credentials |
+              default(true)
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_ips | batch(8) | list }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_discovery_chunk
+    index_var: switch_refresh_sda_fabric_border_discovery_chunk_index
+    label: "{{ switch_refresh_sda_fabric_border_discovery_chunk_index + 1 }}"
+  when:
+    - switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is not defined
+
+- name: Use custom Discovery configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_discovery_config: >-
+      {{ switch_refresh_sda_fabric_border_batch_new_devices.discovery_config }}
+  when:
+    - switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is defined
+  no_log: true
+
+- name: Validate custom Discovery entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_custom_discovery_item is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_custom_discovery_item.discovery_name |
+        default('')) is string
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_item.discovery_name |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_item.discovery_type in
+        ['SINGLE', 'RANGE', 'MULTI RANGE']
+      - >-
+        (switch_refresh_sda_fabric_border_custom_discovery_item.ip_address_list |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_item.ip_address_list |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_item.discovery_type ==
+        'MULTI RANGE' or
+        switch_refresh_sda_fabric_border_custom_discovery_item.ip_address_list | length == 1
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_item.discovery_type !=
+        'MULTI RANGE' or
+        switch_refresh_sda_fabric_border_custom_discovery_item.ip_address_list | length <= 8
+    fail_msg: >-
+      Custom Discovery entries must use explicit SINGLE, RANGE, or MULTI RANGE
+      targets; MULTI RANGE accepts at most eight replacement IPs.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.discovery_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_discovery_item
+    label: custom-discovery-entry
+  when: switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+  no_log: true
+
+- name: Collect custom Discovery targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_custom_discovery_target_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_discovery_target_ips +
+        (switch_refresh_sda_fabric_border_custom_discovery_item.ip_address_list |
+        map('string') | list)
+      }}
+    switch_refresh_sda_fabric_border_custom_discovery_names: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_discovery_names +
+        [switch_refresh_sda_fabric_border_custom_discovery_item.discovery_name | lower]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.discovery_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_discovery_item
+    label: custom-discovery-targets
+  when:
+    - switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is defined
+  no_log: true
+
+- name: Validate custom Discovery target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_target_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+      - >-
+        switch_refresh_sda_fabric_border_custom_discovery_names | unique | length ==
+        switch_refresh_sda_fabric_border_custom_discovery_names | length
+    fail_msg: >-
+      Custom discovery_config IPs must exactly cover new_devices.device_ips and
+      Discovery names must be unique.
+  when:
+    - switch_refresh_sda_fabric_border_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is defined
+
+- name: Set generated inventory credentials
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_credentials: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_new_devices.inventory_credentials |
+        default(switch_refresh_sda_fabric_border_inventory_credentials)
+      }}
+  when:
+    - switch_refresh_sda_fabric_border_inventory_enabled | bool
+    - switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is not defined
+  no_log: true
+
+- name: Validate generated inventory input
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is defined or
+        (
+          switch_refresh_sda_fabric_border_batch_inventory_credentials is mapping and
+          (switch_refresh_sda_fabric_border_batch_inventory_credentials.username |
+          default('')) is string and
+          switch_refresh_sda_fabric_border_batch_inventory_credentials.username |
+          default('') | trim | length > 0 and
+          (switch_refresh_sda_fabric_border_batch_inventory_credentials.password |
+          default('')) is string and
+          switch_refresh_sda_fabric_border_batch_inventory_credentials.password |
+          default('') | trim | length > 0
+        )
+    fail_msg: >-
+      Inventory onboarding requires custom inventory_config or credentials
+      containing a non-empty username and password.
+  when: switch_refresh_sda_fabric_border_inventory_enabled | bool
+  no_log: true
+
+- name: Validate generated inventory credential scope
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_credentials.keys() |
+        list |
+        difference(switch_refresh_sda_fabric_border_inventory_allowed_connection_keys) |
+        length == 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_credentials.type is not defined or
+        switch_refresh_sda_fabric_border_batch_inventory_credentials.type ==
+        'NETWORK_DEVICE'
+    fail_msg: >-
+      inventory_credentials may contain only connection and authentication
+      fields for NETWORK_DEVICE records.
+  when:
+    - switch_refresh_sda_fabric_border_inventory_enabled | bool
+    - switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is not defined
+  no_log: true
+
+- name: Build generated inventory configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_config: >-
+      {{
+        [
+          {'cli_transport': 'ssh'} |
+          combine(switch_refresh_sda_fabric_border_batch_inventory_credentials) |
+          combine(
+            {
+              'ip_address_list': switch_refresh_sda_fabric_border_batch_device_ips,
+              'type': 'NETWORK_DEVICE'
+            }
+          )
+        ]
+      }}
+  when:
+    - switch_refresh_sda_fabric_border_inventory_enabled | bool
+    - switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is not defined
+  no_log: true
+
+- name: Use custom inventory configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_config: >-
+      {{ switch_refresh_sda_fabric_border_batch_new_devices.inventory_config }}
+  when: switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is defined
+  no_log: true
+
+- name: Validate custom inventory entry
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_custom_inventory_item is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_custom_inventory_item.ip_address_list |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_custom_inventory_item.ip_address_list |
+        default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_custom_inventory_item.type |
+        default('NETWORK_DEVICE')) == 'NETWORK_DEVICE'
+      - >-
+        switch_refresh_sda_fabric_border_custom_inventory_item.role is not defined or
+        switch_refresh_sda_fabric_border_custom_inventory_item.role == 'BORDER_ROUTER'
+      - >-
+        switch_refresh_sda_fabric_border_custom_inventory_item.role is not defined or
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
+      - >-
+        switch_refresh_sda_fabric_border_custom_inventory_item.keys() |
+        list |
+        difference(
+          switch_refresh_sda_fabric_border_inventory_allowed_connection_keys +
+          ['ip_address_list', 'role']
+        ) |
+        length == 0
+    fail_msg: >-
+      Custom inventory_config must target only replacement NETWORK_DEVICE
+      records and may set only the protected BORDER_ROUTER role.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.inventory_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_inventory_item
+    label: custom-inventory-entry
+  no_log: true
+
+- name: Collect custom inventory targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_custom_inventory_target_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_inventory_target_ips +
+        (switch_refresh_sda_fabric_border_custom_inventory_item.ip_address_list |
+        map('string') | list)
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.inventory_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_inventory_item
+    label: custom-inventory-targets
+  no_log: true
+
+- name: Validate custom inventory target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_custom_inventory_target_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+    fail_msg: >-
+      Custom inventory_config IPs must exactly cover new_devices.device_ips.
+  when: switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is defined
+  no_log: true
+
+- name: Build protected inventory execution configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_execution_config: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_inventory_execution_config +
+        [
+          switch_refresh_sda_fabric_border_inventory_execution_item |
+          combine(
+            {'role': 'BORDER_ROUTER'}
+            if (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool)
+            else {}
+          )
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_batch_inventory_config
+      if (switch_refresh_sda_fabric_border_inventory_enabled | bool)
+      else []
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_execution_item
+    label: aggregate-inventory-entry
+  no_log: true
+
+- name: Build protected inventory role-only configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_execution_config:
+      - ip_address_list: "{{ switch_refresh_sda_fabric_border_batch_device_ips }}"
+        role: BORDER_ROUTER
+  when:
+    - not (switch_refresh_sda_fabric_border_inventory_enabled | bool)
+    - switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
+  no_log: true
+
+- name: Set replacement provisioning site
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy: >-
+      {{
+        refresh_item.provision_site_name_hierarchy |
+        default(switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy)
+      }}
+
+- name: Validate replacement provisioning site
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy is string
+      - >-
+        switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy |
+        trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy ==
+        (switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy | trim)
+    fail_msg: >-
+      provision_site_name_hierarchy must be a non-empty, trimmed string.
+
+- name: Build generated provisioning configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_provision_config: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_provision_config +
+        [
+          {
+            'site_name_hierarchy':
+              switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy,
+            'management_ip_address': switch_refresh_sda_fabric_border_provision_device_ip
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_provision_device_ip
+    label: "{{ switch_refresh_sda_fabric_border_provision_device_ip }}"
+  when:
+    - switch_refresh_sda_fabric_border_provision_enabled | bool
+    - switch_refresh_sda_fabric_border_batch_new_devices.provision_config is not defined
+
+- name: Use custom provisioning configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_provision_config: >-
+      {{ switch_refresh_sda_fabric_border_batch_new_devices.provision_config }}
+  when: switch_refresh_sda_fabric_border_batch_new_devices.provision_config is defined
+
+- name: Validate custom provisioning entries
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_custom_provision_item is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_custom_provision_item.management_ip_address |
+        default('')) is string
+      - >-
+        switch_refresh_sda_fabric_border_custom_provision_item.management_ip_address |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_custom_provision_item.site_name_hierarchy
+        is defined
+      - >-
+        switch_refresh_sda_fabric_border_custom_provision_item.site_name_hierarchy ==
+        switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy
+    fail_msg: >-
+      Every custom provision_config entry must target a replacement IP at the
+      batch provisioning site.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.provision_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_provision_item
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_provision_item.management_ip_address |
+        default('provision-device')
+      }}
+
+- name: Collect custom provisioning targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_custom_provision_target_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_provision_target_ips +
+        [switch_refresh_sda_fabric_border_custom_provision_item.management_ip_address]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_batch_new_devices.provision_config | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_custom_provision_item
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_custom_provision_item.management_ip_address |
+        default('provision-device')
+      }}
+
+- name: Validate custom provisioning target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_custom_provision_target_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+    fail_msg: >-
+      Custom provision_config IPs must exactly cover new_devices.device_ips.
+  when: switch_refresh_sda_fabric_border_batch_new_devices.provision_config is defined

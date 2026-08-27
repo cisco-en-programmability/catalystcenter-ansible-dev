@@ -1,0 +1,376 @@
+---
+# Transform one generated old-border record into a handoff-free prepare record
+# and the complete replacement record used by cutover.
+#
+# Input:
+#   switch_refresh_sda_fabric_border_transform_request:
+#     fabric_name: <site hierarchy>
+#     new_management_ip: <replacement IP>
+#     interface_mappings: [{source_interface_name, destination_interface_name}]
+#     original_device_config: <generator device_config record>
+# Output:
+#   switch_refresh_sda_fabric_border_transform_result
+
+- name: Validate border replacement transformation request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_transform_request is mapping
+      - switch_refresh_sda_fabric_border_transform_request.fabric_name is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.fabric_name |
+        string | trim | length > 0
+      - switch_refresh_sda_fabric_border_transform_request.new_management_ip is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.new_management_ip |
+        string | trim | length > 0
+      - switch_refresh_sda_fabric_border_transform_request.interface_mappings is defined
+      - >-
+        (switch_refresh_sda_fabric_border_transform_request.interface_mappings |
+        type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_transform_request.original_device_config is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config is mapping
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .device_roles | default([]) | sort == ['BORDER_NODE']
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings is mapping
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings.layer3_settings is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings.layer3_settings is mapping
+    fail_msg: >-
+      Border replacement transformation requires a pure generated BORDER_NODE
+      record, a replacement management IP, a fabric, and an interface-mapping
+      list.
+
+- name: Normalize captured border handoff collections
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_original: >-
+      {{ switch_refresh_sda_fabric_border_transform_request.original_device_config }}
+    switch_refresh_sda_fabric_border_transform_interface_mappings: >-
+      {{ switch_refresh_sda_fabric_border_transform_request.interface_mappings }}
+    switch_refresh_sda_fabric_border_transform_l2_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings.layer2_handoff | default([])
+      }}
+    switch_refresh_sda_fabric_border_transform_ip_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings.layer3_handoff_ip_transit | default([])
+      }}
+    switch_refresh_sda_fabric_border_transform_sda_handoff: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_request.original_device_config
+        .borders_settings.layer3_handoff_sda_transit | default({})
+      }}
+  no_log: true
+
+- name: Validate captured border priority compatibility
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_transform_original
+        .borders_settings.layer3_settings.border_priority is not defined or
+        (
+          switch_refresh_sda_fabric_border_transform_original
+          .borders_settings.layer3_settings.border_priority | int >= 1 and
+          switch_refresh_sda_fabric_border_transform_original
+          .borders_settings.layer3_settings.border_priority | int <= 10
+        )
+    fail_msg: >-
+      The generated border priority must be 1 through 9, or generator default
+      10. Default 10 is omitted from the mutation payload because the fabric
+      manager rejects it as an explicit value.
+
+- name: Build manager-compatible Layer 3 border settings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_manager_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_original
+        .borders_settings.layer3_settings |
+        dict2items |
+        rejectattr('key', 'equalto', 'border_priority') |
+        list |
+        items2dict
+        if (
+          switch_refresh_sda_fabric_border_transform_original
+          .borders_settings.layer3_settings.border_priority is defined and
+          switch_refresh_sda_fabric_border_transform_original
+          .borders_settings.layer3_settings.border_priority | int == 10
+        )
+        else
+        switch_refresh_sda_fabric_border_transform_original
+        .borders_settings.layer3_settings
+      }}
+  no_log: true
+
+- name: Validate captured L2 handoff records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_transform_handoff_item is mapping
+      - switch_refresh_sda_fabric_border_transform_handoff_item.interface_name is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
+        string | trim | length > 0
+    fail_msg: >-
+      Every generated L2 handoff must contain a non-empty interface_name.
+  loop: "{{ switch_refresh_sda_fabric_border_transform_l2_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_transform_handoff_item
+    label: >-
+      {{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
+      default('invalid-l2-handoff') }}
+
+- name: Validate captured IP-transit handoff records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_transform_handoff_item is mapping
+      - switch_refresh_sda_fabric_border_transform_handoff_item.interface_name is defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
+        string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_transform_handoff_item
+        .external_connectivity_ip_pool_name |
+        default('') | string | trim | length == 0
+    fail_msg: >-
+      Every generated IP-transit handoff must contain a non-empty
+      interface_name. Pool-backed IP-transit handoffs are not supported by
+      this initial role because the fabric manager ignores captured peer
+      addresses and requests a new allocation when the pool name is supplied.
+  loop: "{{ switch_refresh_sda_fabric_border_transform_ip_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_transform_handoff_item
+    label: >-
+      {{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
+      default('invalid-ip-transit-handoff') }}
+
+- name: Collect distinct source handoff interfaces
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_source_interfaces: >-
+      {{
+        (
+          switch_refresh_sda_fabric_border_transform_l2_handoffs |
+          map(attribute='interface_name') |
+          list +
+          switch_refresh_sda_fabric_border_transform_ip_handoffs |
+          map(attribute='interface_name') |
+          list
+        ) |
+        unique |
+        sort
+      }}
+
+- name: Validate exact mapping for every source handoff interface
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_transform_interface_mappings |
+        selectattr(
+          'source_interface_name',
+          'equalto',
+          switch_refresh_sda_fabric_border_transform_source_interface
+        ) |
+        list |
+        length == 1
+    fail_msg: >-
+      Captured source interface
+      {{ switch_refresh_sda_fabric_border_transform_source_interface }} must
+      have exactly one handoff_interface_mappings entry.
+  loop: "{{ switch_refresh_sda_fabric_border_transform_source_interfaces }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_transform_source_interface
+    label: "{{ switch_refresh_sda_fabric_border_transform_source_interface }}"
+
+- name: Build handoff interface replacement lookup
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_interface_lookup: >-
+      {{
+        dict(
+          switch_refresh_sda_fabric_border_transform_interface_mappings |
+          map(attribute='source_interface_name') |
+          zip(
+            switch_refresh_sda_fabric_border_transform_interface_mappings |
+            map(attribute='destination_interface_name')
+          )
+        )
+      }}
+    switch_refresh_sda_fabric_border_transform_mapped_l2_handoffs: []
+    switch_refresh_sda_fabric_border_transform_mapped_ip_handoffs: []
+  no_log: true
+
+- name: Map replacement L2 handoff interfaces
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_mapped_l2_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_mapped_l2_handoffs +
+        [
+          switch_refresh_sda_fabric_border_transform_handoff_item |
+          combine(
+            {
+              'interface_name':
+                switch_refresh_sda_fabric_border_transform_interface_lookup[
+                  switch_refresh_sda_fabric_border_transform_handoff_item.interface_name
+                ]
+            }
+          )
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_transform_l2_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_transform_handoff_item
+    label: "{{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name }}"
+  no_log: true
+
+- name: Map replacement IP-transit handoff interfaces
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_mapped_ip_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_mapped_ip_handoffs +
+        [
+          switch_refresh_sda_fabric_border_transform_handoff_item |
+          combine(
+            {
+              'interface_name':
+                switch_refresh_sda_fabric_border_transform_interface_lookup[
+                  switch_refresh_sda_fabric_border_transform_handoff_item.interface_name
+                ]
+            }
+          )
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_transform_ip_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_transform_handoff_item
+    label: "{{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name }}"
+  no_log: true
+
+- name: Build replacement border settings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_base_settings:
+      layer3_settings: >-
+        {{ switch_refresh_sda_fabric_border_transform_manager_layer3_settings }}
+    switch_refresh_sda_fabric_border_transform_final_settings: >-
+      {{
+        {
+          'layer3_settings':
+            switch_refresh_sda_fabric_border_transform_manager_layer3_settings
+        } |
+        combine(
+          {
+            'layer2_handoff':
+              switch_refresh_sda_fabric_border_transform_mapped_l2_handoffs
+          }
+          if (
+            switch_refresh_sda_fabric_border_transform_original
+            .borders_settings.layer2_handoff is defined
+          )
+          else {}
+        ) |
+        combine(
+          {
+            'layer3_handoff_ip_transit':
+              switch_refresh_sda_fabric_border_transform_mapped_ip_handoffs
+          }
+          if (
+            switch_refresh_sda_fabric_border_transform_original
+            .borders_settings.layer3_handoff_ip_transit is defined
+          )
+          else {}
+        ) |
+        combine(
+          {
+            'layer3_handoff_sda_transit':
+              switch_refresh_sda_fabric_border_transform_sda_handoff
+          }
+          if (
+            switch_refresh_sda_fabric_border_transform_original
+            .borders_settings.layer3_handoff_sda_transit is defined
+          )
+          else {}
+        )
+      }}
+  no_log: true
+
+- name: Build base and final replacement device records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_base_device: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_original |
+        combine(
+          {
+            'device_ip':
+              switch_refresh_sda_fabric_border_transform_request.new_management_ip,
+            'borders_settings':
+              switch_refresh_sda_fabric_border_transform_base_settings
+          }
+        )
+      }}
+    switch_refresh_sda_fabric_border_transform_final_device: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_original |
+        combine(
+          {
+            'device_ip':
+              switch_refresh_sda_fabric_border_transform_request.new_management_ip,
+            'borders_settings':
+              switch_refresh_sda_fabric_border_transform_final_settings
+          }
+        )
+      }}
+  no_log: true
+
+- name: Validate base replacement has no handoff sections
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_transform_base_device
+        .borders_settings.layer2_handoff is not defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_base_device
+        .borders_settings.layer3_handoff_ip_transit is not defined
+      - >-
+        switch_refresh_sda_fabric_border_transform_base_device
+        .borders_settings.layer3_handoff_sda_transit is not defined
+    fail_msg: >-
+      The derived prepare configuration must not contain border handoff
+      sections.
+
+- name: Publish transformed border replacement configurations
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_result:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_transform_request.fabric_name }}
+      original_device_config: >-
+        {{ switch_refresh_sda_fabric_border_transform_original }}
+      base_new_device_config: >-
+        {{ switch_refresh_sda_fabric_border_transform_base_device }}
+      expected_new_device_config: >-
+        {{ switch_refresh_sda_fabric_border_transform_final_device }}
+      source_handoff_interfaces: >-
+        {{ switch_refresh_sda_fabric_border_transform_source_interfaces }}
+      l2_handoff_count: >-
+        {{ switch_refresh_sda_fabric_border_transform_l2_handoffs | length }}
+      ip_transit_handoff_count: >-
+        {{ switch_refresh_sda_fabric_border_transform_ip_handoffs | length }}
+      sda_transit_handoff_count: >-
+        {{
+          1
+          if (switch_refresh_sda_fabric_border_transform_sda_handoff | length > 0)
+          else 0
+        }}
+      source_config_fingerprint: >-
+        {{
+          switch_refresh_sda_fabric_border_transform_original |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        }}
+  no_log: true

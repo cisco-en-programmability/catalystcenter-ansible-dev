@@ -1,0 +1,13 @@
+---
+- name: Transfer SDA fabric border handoffs to replacement devices
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/switch_refresh_sda_fabric_border_usecase.yml
+  vars:
+    switch_refresh_sda_fabric_border_phase: cutover
+  roles:
+    - role: switch_refresh_sda_fabric_border
+      tags:
+        - switch_refresh_sda_fabric_border_cutover

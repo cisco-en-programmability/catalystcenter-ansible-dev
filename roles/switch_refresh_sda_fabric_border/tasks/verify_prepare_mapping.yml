@@ -1,0 +1,68 @@
+---
+- name: Generate prepared replacement border configuration
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_prepare_fabric_site }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+      capture_file: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_verify_workspace.path ~ '/' ~
+          switch_refresh_sda_fabric_border_prepare_file_safe_name ~ '-' ~
+          switch_refresh_sda_fabric_border_prepare_verify_mapping_index ~ '.yml'
+        }}
+      expected_state: present
+      context: >-
+        Prepared replacement verification for batch
+        {{ switch_refresh_sda_fabric_border_prepare_batch_name }}, replacement
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+
+- name: Compare prepared replacement with expected handoff-free base
+  ansible.builtin.include_tasks: verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_verify_mapping
+          .base_new_device_config
+        }}
+      actual_device_config: >-
+        {{ switch_refresh_sda_fabric_border_capture_result.device_config }}
+      context: >-
+        Prepared replacement
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+        in batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
+      require_empty_handoffs: true
+      fail_on_mismatch: true
+
+- name: Add verified prepared replacement result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_mapping_results: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_mapping_results +
+        [
+          {
+            'old_management_ip':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping
+              .old_management_ip,
+            'new_management_ip':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping
+              .new_management_ip,
+            'new_identity':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping.new_identity,
+            'status': 'prepared_no_handoff',
+            'l2_handoff_count':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping
+              .l2_handoff_count,
+            'ip_transit_handoff_count':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping
+              .ip_transit_handoff_count,
+            'sda_transit_handoff_count':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping
+              .sda_transit_handoff_count
+          }
+        ]
+      }}
+  no_log: true

@@ -1,0 +1,198 @@
+---
+# Called once per raw refresh_item. Normal cutover captures and persists a new
+# manifest. Manifest continuation loads the durable plan without querying the
+# already-deleted old configuration.
+- name: Validate border cutover batch selector and controls
+  ansible.builtin.assert:
+    that:
+      - refresh_item is mapping
+      - refresh_item.name is defined
+      - refresh_item.name | string | trim | length > 0
+      - refresh_item.fabric_site_name_hierarchy is defined
+      - refresh_item.fabric_site_name_hierarchy | string | trim | length > 0
+      - refresh_item.new_devices is mapping
+      - (refresh_item.new_devices.device_ips | default([]) | type_debug) == 'list'
+      - refresh_item.new_devices.device_ips | default([]) | length > 0
+      - (refresh_item.device_mapping | default([]) | type_debug) == 'list'
+      - refresh_item.device_mapping | default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_approved | bool or
+        switch_refresh_sda_fabric_border_resume_from_manifest | bool
+      - switch_refresh_sda_fabric_border_manifest_dir is string
+      - switch_refresh_sda_fabric_border_manifest_dir | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir ==
+        (switch_refresh_sda_fabric_border_manifest_dir | trim)
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('^/') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_replace('/+$', '') | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('//') is none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('(^|/)\.{1,2}(/|$)') is none
+    fail_msg: >-
+      Cutover preflight requires a complete batch, an absolute manifest
+      directory, and either destructive approval or manifest resume.
+
+- name: Derive cutover batch selector values
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_file_safe_name: >-
+      {{ refresh_item.name | string | lower | regex_replace('[^a-z0-9_.-]', '_') }}
+    switch_refresh_sda_fabric_border_cutover_manifest_file: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_replace('/+$', '') ~ '/' ~
+        (
+          refresh_item.name |
+          string |
+          lower |
+          regex_replace('[^a-z0-9_.-]', '_')
+        ) ~ '_border_cutover.yml'
+      }}
+    switch_refresh_sda_fabric_border_cutover_workspace: >-
+      {{
+        switch_refresh_sda_fabric_border_work_dir |
+        regex_replace('/+$', '') ~ '/' ~
+        (
+          refresh_item.name |
+          string |
+          lower |
+          regex_replace('[^a-z0-9_.-]', '_')
+        ) ~ '/cutover'
+      }}
+
+- name: Derive canonical cutover input fingerprint
+  ansible.builtin.include_tasks: derive_cutover_input_fingerprint.yml
+
+- name: Load existing cutover manifest for continuation
+  ansible.builtin.include_tasks: load_cutover_manifest.yml
+  when: switch_refresh_sda_fabric_border_resume_from_manifest | bool
+
+- name: Append loaded manifest continuation plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_plans: >-
+      {{
+        (switch_refresh_sda_fabric_border_cutover_plans | default([])) +
+        [switch_refresh_sda_fabric_border_loaded_cutover_plan]
+      }}
+  when: switch_refresh_sda_fabric_border_resume_from_manifest | bool
+  no_log: true
+
+- name: Capture a new immutable cutover plan
+  when: not (switch_refresh_sda_fabric_border_resume_from_manifest | bool)
+  block:
+    - name: Inspect normal-cutover manifest target before capture
+      ansible.builtin.stat:
+        path: "{{ switch_refresh_sda_fabric_border_cutover_manifest_file }}"
+        follow: false
+      register: switch_refresh_sda_fabric_border_normal_manifest_target
+
+    - name: Refuse to overwrite an existing cutover recovery manifest
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_normal_manifest_target.stat.exists | bool)
+        fail_msg: >-
+          A cutover manifest already exists for this batch. Use
+          switch_refresh_sda_fabric_border_resume_from_manifest=true to load
+          it, or archive it explicitly after confirming the prior cutover is
+          complete. No live configuration was captured or deleted.
+
+    - name: Find immutable normalized batch plan for cutover
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_batch_plan_matches: >-
+          {{
+            switch_refresh_sda_fabric_border_batch_plans |
+            default([]) |
+            selectattr('name', 'equalto', refresh_item.name | string) |
+            list
+          }}
+
+    - name: Select normalized cutover batch input
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_device_mappings: >-
+          {{
+            switch_refresh_sda_fabric_border_cutover_batch_plan_matches[0].device_mappings
+            if (switch_refresh_sda_fabric_border_cutover_batch_plan_matches | length == 1)
+            else refresh_item.device_mapping
+          }}
+        switch_refresh_sda_fabric_border_cutover_new_management_ips: >-
+          {{
+            switch_refresh_sda_fabric_border_cutover_batch_plan_matches[0].device_ips
+            if (switch_refresh_sda_fabric_border_cutover_batch_plan_matches | length == 1)
+            else refresh_item.new_devices.device_ips | map('string') | list
+          }}
+
+    - name: Create protected cutover generator workspace
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_cutover_workspace }}"
+        state: directory
+        mode: "0700"
+
+    - name: Resolve current old and replacement cutover identities
+      ansible.builtin.include_tasks: resolve_cutover_identities.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_identity_request:
+          device_mappings: >-
+            {{ switch_refresh_sda_fabric_border_cutover_device_mappings }}
+          expected_new_ips: >-
+            {{ switch_refresh_sda_fabric_border_cutover_new_management_ips }}
+          context: "normal cutover for {{ refresh_item.name }}"
+
+    - name: Initialize captured cutover mapping plans
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_built_mappings: []
+
+    - name: Capture current border intent and replacement base per mapping
+      ansible.builtin.include_tasks: build_cutover_mapping_plan.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_build_mapping: >-
+          {{ switch_refresh_sda_fabric_border_cutover_identity_mapping }}
+        switch_refresh_sda_fabric_border_cutover_build_site: >-
+          {{ refresh_item.fabric_site_name_hierarchy }}
+        switch_refresh_sda_fabric_border_cutover_build_workspace: >-
+          {{ switch_refresh_sda_fabric_border_cutover_workspace }}
+      loop: >-
+        {{ switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings }}
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_cutover_identity_mapping
+        label: >-
+          {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.old_management_ip }}
+
+    - name: Build immutable border cutover batch plan
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_plan:
+          name: "{{ refresh_item.name | string }}"
+          file_safe_name: >-
+            {{ switch_refresh_sda_fabric_border_cutover_file_safe_name }}
+          fabric_site_name_hierarchy: >-
+            {{ refresh_item.fabric_site_name_hierarchy | string }}
+          new_management_ips: >-
+            {{ switch_refresh_sda_fabric_border_cutover_new_management_ips }}
+          resolved_mappings: >-
+            {{ switch_refresh_sda_fabric_border_cutover_built_mappings }}
+          manifest_file: >-
+            {{ switch_refresh_sda_fabric_border_cutover_manifest_file }}
+          input_fingerprint: >-
+            {{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}
+          status: captured
+      no_log: true
+
+    - name: Persist complete batch cutover manifest before deletion
+      ansible.builtin.include_tasks: persist_cutover_manifest.yml
+
+    - name: Reread and validate persisted batch manifest before deletion
+      ansible.builtin.include_tasks: load_cutover_manifest.yml
+
+    - name: Append reread immutable normal cutover plan
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_plans: >-
+          {{
+            (switch_refresh_sda_fabric_border_cutover_plans | default([])) +
+            [switch_refresh_sda_fabric_border_loaded_cutover_plan]
+          }}
+      no_log: true

@@ -1,0 +1,112 @@
+---
+- name: Build read-only border refresh prepare batch plan
+  ansible.builtin.include_tasks: build_batch_plan.yml
+
+- name: Require generator-backed prepare planning
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_config_generator_enabled | bool
+    fail_msg: >-
+      Prepare requires sda_fabric_devices_config_generator so the old border
+      settings and handoffs can be captured before any replacement mutation.
+
+- name: Resolve all old borders during prepare preflight
+  ansible.builtin.include_tasks: resolve_batch_old_devices.yml
+
+- name: Capture and transform all old border configurations
+  block:
+    - name: Create protected prepare generator workspace
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: switch-refresh-border-prepare-
+      register: switch_refresh_sda_fabric_border_prepare_capture_workspace
+
+    - name: Protect prepare generator workspace
+      ansible.builtin.file:
+        path: "{{ switch_refresh_sda_fabric_border_prepare_capture_workspace.path }}"
+        state: directory
+        mode: "0700"
+
+    - name: Initialize captured prepare mappings
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_prepare_resolved_mappings: []
+
+    - name: Capture and transform prepare mapping
+      ansible.builtin.include_tasks: capture_prepare_mapping.yml
+      loop: "{{ switch_refresh_sda_fabric_border_batch_resolved_mappings }}"
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_prepare_mapping
+        index_var: switch_refresh_sda_fabric_border_prepare_mapping_index
+        label: >-
+          {{ switch_refresh_sda_fabric_border_prepare_mapping.old_management_ip }} ->
+          {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+  always:
+    - name: Remove temporary prepare generator workspace
+      ansible.builtin.file:
+        path: >-
+          {{ switch_refresh_sda_fabric_border_prepare_capture_workspace.path }}
+        state: absent
+      when:
+        - switch_refresh_sda_fabric_border_prepare_capture_workspace is defined
+        - >-
+          switch_refresh_sda_fabric_border_prepare_capture_workspace.path |
+          default('') | string | trim | length > 0
+
+- name: Validate captured prepare mapping coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_resolved_mappings | length ==
+        switch_refresh_sda_fabric_border_batch_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_resolved_mappings |
+        map(attribute='new_management_ip') | list | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | list | sort
+    fail_msg: >-
+      Prepare preflight did not capture one generated old-border configuration
+      for every replacement in batch
+      {{ switch_refresh_sda_fabric_border_batch_name }}.
+
+- name: Save immutable border refresh prepare batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_plans: >-
+      {{
+        (switch_refresh_sda_fabric_border_prepare_plans | default([])) +
+        [
+          {
+            'name': switch_refresh_sda_fabric_border_batch_name,
+            'file_safe_name':
+              switch_refresh_sda_fabric_border_batch_file_safe_name,
+            'fabric_site_name_hierarchy':
+              switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy,
+            'onboarding_method':
+              switch_refresh_sda_fabric_border_batch_onboarding_method,
+            'new_devices': switch_refresh_sda_fabric_border_batch_new_devices,
+            'new_management_ips':
+              switch_refresh_sda_fabric_border_batch_device_ips,
+            'device_mappings':
+              switch_refresh_sda_fabric_border_batch_device_mappings,
+            'resolved_mappings':
+              switch_refresh_sda_fabric_border_prepare_resolved_mappings,
+            'discovery_config':
+              switch_refresh_sda_fabric_border_batch_discovery_config,
+            'lan_automation_config':
+              switch_refresh_sda_fabric_border_batch_lan_automation_config,
+            'inventory_execution_config':
+              switch_refresh_sda_fabric_border_batch_inventory_execution_config,
+            'inventory_readiness_timeout':
+              switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout,
+            'inventory_readiness_poll_interval':
+              switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval,
+            'provision_site_name_hierarchy':
+              switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy,
+            'provision_config':
+              switch_refresh_sda_fabric_border_batch_provision_config,
+            'provision_validation_timeout':
+              switch_refresh_sda_fabric_border_batch_provision_validation_timeout,
+            'provision_validation_poll_interval':
+              switch_refresh_sda_fabric_border_batch_provision_validation_poll_interval
+          }
+        ]
+      }}
+  no_log: true

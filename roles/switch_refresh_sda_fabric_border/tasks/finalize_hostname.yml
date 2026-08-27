@@ -1,0 +1,237 @@
+---
+# Optional per-mapping hostname transfer. Handoff verification and complete old
+# deletion are mandatory callers' preconditions.
+- name: Initialize border hostname finalization result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_hostname_result:
+      requested: >-
+        {{ switch_refresh_sda_fabric_border_hostname_transfer_enabled | bool }}
+      verified: false
+      status: >-
+        {{
+          'pending'
+          if (switch_refresh_sda_fabric_border_hostname_transfer_enabled | bool)
+          else 'not_requested'
+        }}
+
+- name: Finalize captured old hostname on replacement
+  when: switch_refresh_sda_fabric_border_hostname_transfer_enabled | bool
+  block:
+    - name: Validate captured hostname transfer entry
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_hostname_entry is mapping
+          - switch_refresh_sda_fabric_border_hostname_entry.old_identity is mapping
+          - switch_refresh_sda_fabric_border_hostname_entry.new_identity is mapping
+          - >-
+            switch_refresh_sda_fabric_border_hostname_entry.old_identity.hostname |
+            default('') | string | trim | length > 0
+          - >-
+            switch_refresh_sda_fabric_border_hostname_entry.new_identity.management_ip |
+            default('') | string | trim | length > 0
+          - (switch_refresh_sda_fabric_border_hostname_transfer_timeout | int) > 0
+          - (switch_refresh_sda_fabric_border_hostname_transfer_poll_interval | int) > 0
+          - (switch_refresh_sda_fabric_border_hostname_validation_retries | int) > 0
+          - (switch_refresh_sda_fabric_border_hostname_validation_interval | int) > 0
+        fail_msg: Hostname transfer requires captured identities and positive polling controls.
+
+    - name: Derive desired replacement hostname values
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_desired_hostname: >-
+          {{
+            switch_refresh_sda_fabric_border_hostname_entry.old_identity.hostname |
+            string | trim
+          }}
+        switch_refresh_sda_fabric_border_hostname_submission_label: >-
+          {{
+            (
+              switch_refresh_sda_fabric_border_hostname_entry.old_identity.hostname |
+              string | trim
+            ).split('.')[0]
+          }}
+
+    - name: Validate hostname submission label
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_hostname_submission_label | length > 0
+          - switch_refresh_sda_fabric_border_hostname_submission_label | length <= 63
+        fail_msg: Captured old hostname does not produce a valid hostname label.
+
+    - name: Resolve current replacement record before hostname transfer
+      cisco.catalystcenter.network_device_info:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+        catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+        catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+        catalystcenter_debug: false
+        managementIpAddress:
+          - >-
+            {{ switch_refresh_sda_fabric_border_hostname_entry.new_identity.management_ip }}
+        limit: 500
+      register: switch_refresh_sda_fabric_border_hostname_new_lookup
+      no_log: true
+
+    - name: Resolve desired hostname ownership before transfer
+      cisco.catalystcenter.network_device_info:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+        catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+        catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+        catalystcenter_debug: false
+        hostname:
+          - "{{ switch_refresh_sda_fabric_border_desired_hostname }}"
+        limit: 500
+      register: switch_refresh_sda_fabric_border_hostname_claim_lookup
+      no_log: true
+
+    - name: Extract pre-transfer hostname inventory records
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_hostname_new_records: >-
+          {{
+            (
+              switch_refresh_sda_fabric_border_hostname_new_lookup.catalystcenter_response |
+              default({})
+            ).response |
+            default([]) |
+            reject('equalto', none) |
+            list
+          }}
+        switch_refresh_sda_fabric_border_hostname_claim_records: >-
+          {{
+            (
+              switch_refresh_sda_fabric_border_hostname_claim_lookup.catalystcenter_response |
+              default({})
+            ).response |
+            default([]) |
+            reject('equalto', none) |
+            list
+          }}
+      no_log: true
+
+    - name: Validate hostname ownership and replacement identity
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_hostname_new_lookup.failed | default(false) | bool)
+          - not (switch_refresh_sda_fabric_border_hostname_claim_lookup.failed | default(false) | bool)
+          - switch_refresh_sda_fabric_border_hostname_new_records | length == 1
+          - >-
+            (
+              switch_refresh_sda_fabric_border_hostname_new_records[0].instanceUuid |
+              default(switch_refresh_sda_fabric_border_hostname_new_records[0].id | default(''), true) |
+              string | lower
+            ) ==
+            switch_refresh_sda_fabric_border_hostname_entry.new_identity.inventory_uuid |
+            string | lower
+          - >-
+            (
+              switch_refresh_sda_fabric_border_hostname_new_records[0].serialNumber |
+              default('') | string | split(',') | map('trim') | map('upper') |
+              reject('equalto', '') | unique | sort | list
+            ) ==
+            (
+              switch_refresh_sda_fabric_border_hostname_entry.new_identity.serial_numbers |
+              map('string') | map('upper') | unique | sort | list
+            )
+          - >-
+            switch_refresh_sda_fabric_border_hostname_claim_records | length == 0 or
+            (
+              switch_refresh_sda_fabric_border_hostname_claim_records |
+              map(attribute='instanceUuid', default='') |
+              map('lower') |
+              difference([
+                switch_refresh_sda_fabric_border_hostname_entry.new_identity.inventory_uuid |
+                string | lower
+              ]) |
+              length == 0
+            )
+        fail_msg: >-
+          Desired hostname is owned by another device or the replacement no
+          longer matches the manifest UUID/serial. No hostname update was submitted.
+
+    - name: Derive whether hostname update is required
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_hostname_update_required: >-
+          {{
+            switch_refresh_sda_fabric_border_hostname_new_records[0].hostname |
+            default('') | string | lower !=
+            switch_refresh_sda_fabric_border_desired_hostname | lower
+          }}
+
+    - name: Submit replacement hostname update
+      ansible.builtin.include_role:
+        name: lan_automation
+        apply:
+          tags:
+            - switch_refresh_sda_fabric_border_cutover
+      vars:
+        lan_automation_catalystcenter_api_task_timeout: >-
+          {{ switch_refresh_sda_fabric_border_hostname_transfer_timeout | int }}
+        lan_automation_catalystcenter_task_poll_interval: >-
+          {{ switch_refresh_sda_fabric_border_hostname_transfer_poll_interval | int }}
+        lan_automation_state: merged
+        lan_automation_config_verify: false
+        lan_automation_config:
+          - lan_automated_device_update:
+              hostname_update_devices:
+                - device_management_ip_address: >-
+                    {{
+                      switch_refresh_sda_fabric_border_hostname_entry.new_identity.management_ip
+                    }}
+                  new_host_name: >-
+                    {{ switch_refresh_sda_fabric_border_hostname_submission_label }}
+      when: switch_refresh_sda_fabric_border_hostname_update_required | bool
+      no_log: true
+
+    - name: Wait for exact desired hostname on captured replacement
+      cisco.catalystcenter.network_device_info:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+        catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+        catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+        catalystcenter_debug: false
+        managementIpAddress:
+          - >-
+            {{ switch_refresh_sda_fabric_border_hostname_entry.new_identity.management_ip }}
+        limit: 500
+      register: switch_refresh_sda_fabric_border_hostname_verify_lookup
+      until:
+        - not (switch_refresh_sda_fabric_border_hostname_verify_lookup.failed | default(false) | bool)
+        - >-
+          (
+            (
+              switch_refresh_sda_fabric_border_hostname_verify_lookup.catalystcenter_response |
+              default({})
+            ).response | default([]) | length
+          ) == 1
+        - >-
+          (
+            switch_refresh_sda_fabric_border_hostname_verify_lookup.catalystcenter_response.response[0].instanceUuid |
+            default(
+              switch_refresh_sda_fabric_border_hostname_verify_lookup.catalystcenter_response.response[0].id |
+              default(''),
+              true
+            ) | string | lower
+          ) ==
+          switch_refresh_sda_fabric_border_hostname_entry.new_identity.inventory_uuid |
+          string | lower
+        - >-
+          switch_refresh_sda_fabric_border_hostname_verify_lookup.catalystcenter_response.response[0].hostname |
+          default('') | string | lower ==
+          switch_refresh_sda_fabric_border_desired_hostname | lower
+      retries: "{{ switch_refresh_sda_fabric_border_hostname_validation_retries | int }}"
+      delay: "{{ switch_refresh_sda_fabric_border_hostname_validation_interval | int }}"
+      no_log: true
+
+    - name: Publish verified border hostname transfer result
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_hostname_result:
+          requested: true
+          verified: true
+          desired_hostname: "{{ switch_refresh_sda_fabric_border_desired_hostname }}"
+          status: verified

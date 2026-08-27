@@ -1,0 +1,417 @@
+---
+# Input:
+#   switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+#     entries: [...]
+#     expected_new_ips: [...]
+#     context: text
+# Output:
+#   switch_refresh_sda_fabric_border_manifest_entry_validation_result
+- name: Validate cutover manifest entry validation request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_manifest_entry_validation_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+        default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry_validation_request.expected_new_ips |
+        default([]) | type_debug) == 'list'
+    fail_msg: Cutover manifest validation requires a non-empty device entry list.
+
+- name: Initialize validated cutover manifest entry aggregates
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_manifest_validated_entries: []
+    switch_refresh_sda_fabric_border_manifest_old_ips: []
+    switch_refresh_sda_fabric_border_manifest_new_ips: []
+    switch_refresh_sda_fabric_border_manifest_old_uuids: []
+    switch_refresh_sda_fabric_border_manifest_new_uuids: []
+    switch_refresh_sda_fabric_border_manifest_source_hashes: []
+
+- name: Validate each cutover manifest entry
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_manifest_entry is mapping
+      - switch_refresh_sda_fabric_border_manifest_entry.old is mapping
+      - switch_refresh_sda_fabric_border_manifest_entry.new is mapping
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old.management_ip |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old.inventory_uuid |
+        default('') | string | trim | length > 0
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_hostname_transfer_enabled |
+          default(false) | bool
+        ) or
+        switch_refresh_sda_fabric_border_manifest_entry.old.hostname |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.old.serial_numbers |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old.serial_numbers |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.new.management_ip |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.new.inventory_uuid |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.new.serial_numbers |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.new.serial_numbers |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old.management_ip | string !=
+        switch_refresh_sda_fabric_border_manifest_entry.new.management_ip | string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old.inventory_uuid |
+        string | lower !=
+        switch_refresh_sda_fabric_border_manifest_entry.new.inventory_uuid |
+        string | lower
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.source_handoff_interfaces |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | map(attribute='source_interface_name') | map('lower') |
+        unique | length ==
+        switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | map(attribute='destination_interface_name') | map('lower') |
+        unique | length ==
+        switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+        default([]) | map(attribute='source_interface_name') | list | sort ==
+        switch_refresh_sda_fabric_border_manifest_entry.source_handoff_interfaces |
+        default([]) | map('string') | unique | list | sort
+      - switch_refresh_sda_fabric_border_manifest_entry.original_device_config is mapping
+      - switch_refresh_sda_fabric_border_manifest_entry.base_new_device_config is mapping
+      - switch_refresh_sda_fabric_border_manifest_entry.expected_new_device_config is mapping
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.borders_settings is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.borders_settings.layer3_handoff_ip_transit |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.borders_settings is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.borders_settings.layer3_handoff_ip_transit |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.original_device_config.device_ip |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_manifest_entry.old.management_ip | string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.base_new_device_config.device_ip |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_manifest_entry.new.management_ip | string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.expected_new_device_config.device_ip |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_manifest_entry.new.management_ip | string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.source_config_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.source_config_fingerprint | string ==
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.original_device_config |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.base_new_config_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.base_new_config_fingerprint | string ==
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.base_new_device_config |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.expected_new_config_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.expected_new_config_fingerprint | string ==
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.expected_new_device_config |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.immutable_payload_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.immutable_payload_fingerprint | string ==
+        (
+          {
+            'old': switch_refresh_sda_fabric_border_manifest_entry.old,
+            'new': switch_refresh_sda_fabric_border_manifest_entry.new,
+            'old_selector':
+              switch_refresh_sda_fabric_border_manifest_entry.old_selector |
+              default({}),
+            'interface_mappings':
+              switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
+              default([]),
+            'original_device_config':
+              switch_refresh_sda_fabric_border_manifest_entry.original_device_config,
+            'base_new_device_config':
+              switch_refresh_sda_fabric_border_manifest_entry.base_new_device_config,
+            'expected_new_device_config':
+              switch_refresh_sda_fabric_border_manifest_entry.expected_new_device_config,
+            'source_config_fingerprint':
+              switch_refresh_sda_fabric_border_manifest_entry.source_config_fingerprint,
+            'source_handoff_interfaces':
+              switch_refresh_sda_fabric_border_manifest_entry.source_handoff_interfaces |
+              default([])
+          } |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.status |
+        default('') | string in
+        ['captured', 'deletion_started', 'old_deleted', 'handoff_verified', 'complete']
+    fail_msg: >-
+      Invalid cutover manifest device entry in {{
+      switch_refresh_sda_fabric_border_manifest_entry_validation_request.context |
+      default('manifest') }}.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_manifest_entry
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_entry.new.management_ip |
+        default('cutover-entry')
+      }}
+  no_log: true
+
+- name: Normalize and aggregate validated cutover manifest entries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_manifest_validated_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_validated_entries + [
+          switch_refresh_sda_fabric_border_manifest_entry |
+          combine(
+            {
+              'old':
+                switch_refresh_sda_fabric_border_manifest_entry.old |
+                combine(
+                  {
+                    'management_ip':
+                      switch_refresh_sda_fabric_border_manifest_entry.old.management_ip |
+                      string,
+                    'inventory_uuid':
+                      switch_refresh_sda_fabric_border_manifest_entry.old.inventory_uuid |
+                      string,
+                    'serial_numbers':
+                      switch_refresh_sda_fabric_border_manifest_entry.old.serial_numbers |
+                      map('string') | map('upper') | unique | sort | list,
+                    'hostname':
+                      switch_refresh_sda_fabric_border_manifest_entry.old.hostname |
+                      default('') | string
+                  },
+                  recursive=true
+                ),
+              'new':
+                switch_refresh_sda_fabric_border_manifest_entry.new |
+                combine(
+                  {
+                    'management_ip':
+                      switch_refresh_sda_fabric_border_manifest_entry.new.management_ip |
+                      string,
+                    'inventory_uuid':
+                      switch_refresh_sda_fabric_border_manifest_entry.new.inventory_uuid |
+                      string,
+                    'serial_numbers':
+                      switch_refresh_sda_fabric_border_manifest_entry.new.serial_numbers |
+                      map('string') | map('upper') | unique | sort | list,
+                    'hostname':
+                      switch_refresh_sda_fabric_border_manifest_entry.new.hostname |
+                      default('') | string
+                  },
+                  recursive=true
+                )
+            },
+            recursive=true
+          )
+        ]
+      }}
+    switch_refresh_sda_fabric_border_manifest_old_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_old_ips +
+        [switch_refresh_sda_fabric_border_manifest_entry.old.management_ip | string]
+      }}
+    switch_refresh_sda_fabric_border_manifest_new_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_new_ips +
+        [switch_refresh_sda_fabric_border_manifest_entry.new.management_ip | string]
+      }}
+    switch_refresh_sda_fabric_border_manifest_old_uuids: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_old_uuids +
+        [switch_refresh_sda_fabric_border_manifest_entry.old.inventory_uuid | string | lower]
+      }}
+    switch_refresh_sda_fabric_border_manifest_new_uuids: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_new_uuids +
+        [switch_refresh_sda_fabric_border_manifest_entry.new.inventory_uuid | string | lower]
+      }}
+    switch_refresh_sda_fabric_border_manifest_source_hashes: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_source_hashes + [
+          {
+            'old_management_ip':
+              switch_refresh_sda_fabric_border_manifest_entry.old.management_ip | string,
+            'source_config_fingerprint':
+              switch_refresh_sda_fabric_border_manifest_entry.source_config_fingerprint |
+              string
+          }
+        ]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_manifest_entry
+    label: >-
+      {{ switch_refresh_sda_fabric_border_manifest_entry.new.management_ip }}
+  no_log: true
+
+- name: Validate cutover manifest interface mapping records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_manifest_interface_pair.1 is mapping
+      - >-
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.keys() |
+        list |
+        difference(['source_interface_name', 'destination_interface_name']) |
+        length == 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.source_interface_name |
+        default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.source_interface_name |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.destination_interface_name |
+        default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.destination_interface_name |
+        default('') | trim | length > 0
+    fail_msg: >-
+      Cutover manifest interface mappings must contain only non-empty source
+      and destination interface-name strings.
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+      subelements('interface_mappings', skip_missing=true)
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_manifest_interface_pair
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_interface_pair.1.source_interface_name |
+        default('invalid-interface-mapping')
+      }}
+  no_log: true
+
+- name: Reject pool-backed IP-transit replay in cutover manifests
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_manifest_ip_handoff_pair.1
+        .external_connectivity_ip_pool_name |
+        default('') | string | trim | length == 0
+    fail_msg: >-
+      Pool-backed IP-transit replay is not supported because the fabric manager
+      ignores captured peer addresses and requests a new allocation when a
+      pool name is supplied.
+  loop: >-
+    {{
+      (
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+        subelements(
+          'original_device_config.borders_settings.layer3_handoff_ip_transit',
+          skip_missing=true
+        )
+      ) +
+      (
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+        subelements(
+          'expected_new_device_config.borders_settings.layer3_handoff_ip_transit',
+          skip_missing=true
+        )
+      )
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_manifest_ip_handoff_pair
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_ip_handoff_pair.1.interface_name |
+        default('invalid-ip-transit-handoff')
+      }}
+  no_log: true
+
+- name: Validate cutover manifest entry coverage and uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_manifest_new_ips | sort ==
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request.expected_new_ips |
+        map('string') | list | sort
+      - >-
+        switch_refresh_sda_fabric_border_manifest_old_ips | unique | length ==
+        switch_refresh_sda_fabric_border_manifest_old_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_new_ips | unique | length ==
+        switch_refresh_sda_fabric_border_manifest_new_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_old_uuids | unique | length ==
+        switch_refresh_sda_fabric_border_manifest_old_uuids | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_new_uuids | unique | length ==
+        switch_refresh_sda_fabric_border_manifest_new_uuids | length
+      - >-
+        switch_refresh_sda_fabric_border_manifest_old_ips |
+        intersect(switch_refresh_sda_fabric_border_manifest_new_ips) | length == 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_old_uuids |
+        intersect(switch_refresh_sda_fabric_border_manifest_new_uuids) | length == 0
+    fail_msg: >-
+      Cutover manifest entries do not exactly cover the replacements or reuse
+      an old/new management IP or immutable UUID.
+
+- name: Publish validated cutover manifest entry result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_manifest_entry_validation_result:
+      entries: "{{ switch_refresh_sda_fabric_border_manifest_validated_entries }}"
+      old_management_ips: "{{ switch_refresh_sda_fabric_border_manifest_old_ips }}"
+      new_management_ips: "{{ switch_refresh_sda_fabric_border_manifest_new_ips }}"
+      source_config_fingerprint: >-
+        {{
+          switch_refresh_sda_fabric_border_manifest_source_hashes |
+          sort(attribute='old_management_ip') |
+          to_json(sort_keys=true) |
+          hash('sha256')
+        }}
+  no_log: true
