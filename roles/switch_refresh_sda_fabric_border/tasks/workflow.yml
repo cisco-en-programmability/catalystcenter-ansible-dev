@@ -1,0 +1,537 @@
+---
+# Internal prepare/cutover workflow. tasks/main.yml owns the cutover lock.
+- name: Validate border refresh execution controls
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_phase in ['prepare', 'cutover']
+      - (switch_refresh_sda_fabric_border_batches | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_batches | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_approved | type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_border_resume_from_manifest | type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_border_allow_single_border_outage |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_border_hostname_transfer_enabled |
+        type_debug) == 'bool'
+      - >-
+        switch_refresh_sda_fabric_border_phase != 'prepare' or
+        (
+          not (switch_refresh_sda_fabric_border_cutover_approved | bool) and
+          not (switch_refresh_sda_fabric_border_resume_from_manifest | bool)
+        )
+      - >-
+        switch_refresh_sda_fabric_border_phase != 'cutover' or
+        switch_refresh_sda_fabric_border_cutover_approved | bool or
+        switch_refresh_sda_fabric_border_resume_from_manifest | bool
+      - switch_refresh_sda_fabric_border_config_generator_enabled | bool
+      - switch_refresh_sda_fabric_border_work_dir is string
+      - >-
+        switch_refresh_sda_fabric_border_work_dir ==
+        (switch_refresh_sda_fabric_border_work_dir | trim)
+      - >-
+        switch_refresh_sda_fabric_border_work_dir | string |
+        regex_search('^/') is not none
+      - >-
+        switch_refresh_sda_fabric_border_work_dir |
+        regex_replace('/+$', '') | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_work_dir |
+        regex_search('//') is none
+      - >-
+        switch_refresh_sda_fabric_border_work_dir |
+        regex_search('(^|/)\.{1,2}(/|$)') is none
+      - (switch_refresh_sda_fabric_border_device_info_lookup_timeout | int) > 0
+      - (switch_refresh_sda_fabric_border_device_info_lookup_retries | int) > 0
+      - (switch_refresh_sda_fabric_border_device_info_lookup_interval | int) > 0
+    fail_msg: >-
+      Border refresh requires phase prepare or cutover, a non-empty batch list,
+      generator-backed capture, a normalized absolute non-root work directory,
+      and positive
+      identity lookup controls. Prepare must disable approval and manifest
+      resume. Cutover requires destructive approval, manifest resume, or both.
+  tags:
+    - always
+
+- name: Validate cutover manifest control
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_manifest_dir is string
+      - switch_refresh_sda_fabric_border_manifest_dir | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir ==
+        (switch_refresh_sda_fabric_border_manifest_dir | trim)
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('^/') is not none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_replace('/+$', '') | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('//') is none
+      - >-
+        switch_refresh_sda_fabric_border_manifest_dir |
+        regex_search('(^|/)\.{1,2}(/|$)') is none
+    fail_msg: >-
+      Cutover requires a normalized absolute non-root manifest directory with
+      no dot, dot-dot, or repeated-slash path components.
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - always
+
+- name: Derive border refresh execution mode
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_normal_cutover_mode: >-
+      {{
+        switch_refresh_sda_fabric_border_phase == 'cutover' and
+        switch_refresh_sda_fabric_border_cutover_approved | bool and
+        not (switch_refresh_sda_fabric_border_resume_from_manifest | bool)
+      }}
+    switch_refresh_sda_fabric_border_approved_continuation_mode: >-
+      {{
+        switch_refresh_sda_fabric_border_phase == 'cutover' and
+        switch_refresh_sda_fabric_border_cutover_approved | bool and
+        switch_refresh_sda_fabric_border_resume_from_manifest | bool
+      }}
+    switch_refresh_sda_fabric_border_safe_resume_mode: >-
+      {{
+        switch_refresh_sda_fabric_border_phase == 'cutover' and
+        not (switch_refresh_sda_fabric_border_cutover_approved | bool) and
+        switch_refresh_sda_fabric_border_resume_from_manifest | bool
+      }}
+  tags:
+    - always
+
+- name: Inspect configured border refresh work directory
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_work_dir }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_work_dir_stat
+  tags:
+    - always
+
+- name: Reject unsafe existing border refresh work directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_border_work_dir_stat.stat.exists | bool) or
+        (
+          switch_refresh_sda_fabric_border_work_dir_stat.stat.isdir |
+          default(false) | bool
+        )
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_work_dir_stat.stat.islnk |
+          default(false) | bool
+        )
+    fail_msg: >-
+      The configured border refresh work directory must be absent or an
+      existing non-symlink directory.
+  tags:
+    - always
+
+- name: Inspect configured cutover manifest directory
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_manifest_dir }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_manifest_dir_stat
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - always
+
+- name: Reject unsafe existing cutover manifest directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_border_manifest_dir_stat.stat.exists | bool) or
+        (
+          switch_refresh_sda_fabric_border_manifest_dir_stat.stat.isdir |
+          default(false) | bool
+        )
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_manifest_dir_stat.stat.islnk |
+          default(false) | bool
+        )
+    fail_msg: >-
+      The configured cutover manifest directory must be absent or an existing
+      non-symlink directory.
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - always
+
+- name: Validate top-level border refresh batches
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_batch_input is mapping
+      - switch_refresh_sda_fabric_border_batch_input.name is defined
+      - >-
+        switch_refresh_sda_fabric_border_batch_input.name |
+        string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_input.fabric_site_name_hierarchy
+        is defined
+      - >-
+        switch_refresh_sda_fabric_border_batch_input
+        .fabric_site_name_hierarchy | string | trim | length > 0
+      - switch_refresh_sda_fabric_border_batch_input.new_devices is defined
+      - switch_refresh_sda_fabric_border_batch_input.new_devices is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_batch_input.new_devices.device_ips |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_batch_input.new_devices.device_ips |
+        default([]) | length > 0
+    fail_msg: >-
+      Every border refresh batch requires a name, fabric site hierarchy, and a
+      non-empty new_devices.device_ips list.
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_batch_input
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_input.name |
+        default('invalid-border-refresh-batch')
+        if (switch_refresh_sda_fabric_border_batch_input is mapping)
+        else 'invalid-border-refresh-batch'
+      }}
+  no_log: >-
+    {{
+      switch_refresh_sda_fabric_border_batch_input is mapping and
+      switch_refresh_sda_fabric_border_batch_input.new_devices is defined and
+      switch_refresh_sda_fabric_border_batch_input.new_devices is mapping and
+      (
+        switch_refresh_sda_fabric_border_batch_input.new_devices
+        .inventory_credentials is defined or
+        switch_refresh_sda_fabric_border_batch_input.new_devices
+        .inventory_config is defined or
+        switch_refresh_sda_fabric_border_batch_input.new_devices
+        .discovery_config is defined
+      )
+    }}
+  tags:
+    - always
+
+- name: Initialize global border refresh targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_all_batch_device_ips: []
+  no_log: true
+  tags:
+    - always
+
+- name: Collect replacement IPs across every batch
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_all_batch_device_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_all_batch_device_ips +
+        (
+          switch_refresh_sda_fabric_border_batch_input
+          .new_devices.device_ips | map('string') | list
+        )
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_batch_input
+    label: "{{ switch_refresh_sda_fabric_border_batch_input.name }}"
+  no_log: true
+  tags:
+    - always
+
+- name: Validate global batch and replacement uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batches |
+        map(attribute='name') | map('string') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_border_batches | length
+      - >-
+        switch_refresh_sda_fabric_border_all_batch_device_ips | unique | length ==
+        switch_refresh_sda_fabric_border_all_batch_device_ips | length
+    fail_msg: >-
+      Batch names must be case-insensitively unique and every replacement
+      management IP may appear only once across the complete run.
+  tags:
+    - always
+
+- name: Create protected border refresh work directory
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_border_work_dir }}"
+    state: directory
+    mode: "0700"
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Initialize all-batch prepare preflight
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_plans: []
+    switch_refresh_sda_fabric_border_prepare_results: []
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  no_log: true
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Preflight every border replacement batch
+  ansible.builtin.include_tasks:
+    file: preflight_prepare_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    refresh_item: "{{ switch_refresh_sda_fabric_border_prepare_preflight_item }}"
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_preflight_item
+    label: "{{ switch_refresh_sda_fabric_border_prepare_preflight_item.name }}"
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Collect globally resolved prepare mappings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_all_prepare_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plans |
+        map(attribute='resolved_mappings') | list | flatten
+      }}
+    switch_refresh_sda_fabric_border_all_prepare_file_safe_names: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plans |
+        map(attribute='file_safe_name') | map('string') | list
+      }}
+    switch_refresh_sda_fabric_border_all_prepare_discovery_names: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plans |
+        map(attribute='discovery_config') | list | flatten |
+        map(attribute='discovery_name') | map('string') | map('lower') | list
+      }}
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  no_log: true
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Validate all-batch prepare targets
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_plans | length ==
+        switch_refresh_sda_fabric_border_batches | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_mappings | length ==
+        switch_refresh_sda_fabric_border_all_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_mappings |
+        map(attribute='old_management_ip') | unique | length ==
+        switch_refresh_sda_fabric_border_all_prepare_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_mappings |
+        map(attribute='old_identity') | map(attribute='inventory_uuid') |
+        map('lower') | unique | length ==
+        switch_refresh_sda_fabric_border_all_prepare_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_mappings |
+        map(attribute='old_management_ip') | list |
+        intersect(switch_refresh_sda_fabric_border_all_batch_device_ips) |
+        length == 0
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_file_safe_names |
+        unique | length ==
+        switch_refresh_sda_fabric_border_all_prepare_file_safe_names | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_file_safe_names |
+        difference(['.', '..']) | length ==
+        switch_refresh_sda_fabric_border_all_prepare_file_safe_names | length
+      - >-
+        switch_refresh_sda_fabric_border_all_prepare_discovery_names |
+        unique | length ==
+        switch_refresh_sda_fabric_border_all_prepare_discovery_names | length
+    fail_msg: >-
+      Prepare must resolve and capture one unique old border for every globally
+      unique replacement, with no old/replacement identity overlap. No
+      replacement workflow change was made. Batch-derived work paths and
+      Discovery names must also be globally unique.
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Prepare replacement border batches
+  ansible.builtin.include_tasks:
+    file: prepare_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    refresh_item: "{{ switch_refresh_sda_fabric_border_prepare_batch_item }}"
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_batch_item
+    label: "{{ switch_refresh_sda_fabric_border_prepare_batch_item.name }}"
+  when: switch_refresh_sda_fabric_border_phase == 'prepare'
+  tags:
+    - switch_refresh_sda_fabric_border_prepare
+
+- name: Initialize all-batch cutover preflight
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_plans: []
+    switch_refresh_sda_fabric_border_cutover_plans: []
+    switch_refresh_sda_fabric_border_cutover_results: []
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  no_log: true
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Normalize every cutover batch before capture or manifest loading
+  ansible.builtin.include_tasks:
+    file: collect_batch_plan.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    refresh_item: "{{ switch_refresh_sda_fabric_border_cutover_input_item }}"
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_input_item
+    label: "{{ switch_refresh_sda_fabric_border_cutover_input_item.name }}"
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Validate all cutover paths before manifest persistence
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_plans | length ==
+        switch_refresh_sda_fabric_border_batches | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_plans |
+        map(attribute='file_safe_name') | unique | length ==
+        switch_refresh_sda_fabric_border_batch_plans | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_plans |
+        map(attribute='file_safe_name') | difference(['.', '..']) | length ==
+        switch_refresh_sda_fabric_border_batch_plans | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_plans |
+        map(attribute='manifest_file') | unique | length ==
+        switch_refresh_sda_fabric_border_batch_plans | length
+    fail_msg: >-
+      Batch names must produce unique, safe cutover workspace and manifest
+      paths. No manifest was written.
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Preflight every border handoff cutover batch
+  ansible.builtin.include_tasks:
+    file: preflight_cutover_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    refresh_item: "{{ switch_refresh_sda_fabric_border_cutover_preflight_item }}"
+  loop: "{{ switch_refresh_sda_fabric_border_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_preflight_item
+    label: "{{ switch_refresh_sda_fabric_border_cutover_preflight_item.name }}"
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Collect globally resolved cutover mappings and manifests
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_all_cutover_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_plans |
+        map(attribute='resolved_mappings') | list | flatten
+      }}
+    switch_refresh_sda_fabric_border_all_cutover_manifest_files: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_plans |
+        map(attribute='manifest_file') | map('string') | list
+      }}
+    switch_refresh_sda_fabric_border_all_cutover_sites: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_plans |
+        map(attribute='fabric_site_name_hierarchy') | map('string') |
+        unique | list
+      }}
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  no_log: true
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Validate all-batch cutover targets and persisted plans
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_plans | length ==
+        switch_refresh_sda_fabric_border_batches | length
+      - >-
+        switch_refresh_sda_fabric_border_cutover_plans | length ==
+        switch_refresh_sda_fabric_border_batches | length
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings | length ==
+        switch_refresh_sda_fabric_border_all_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='new_management_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_border_all_batch_device_ips | sort
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='old_management_ip') | unique | length ==
+        switch_refresh_sda_fabric_border_all_cutover_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='old_management_ip') | map('string') | list |
+        intersect(switch_refresh_sda_fabric_border_all_batch_device_ips) |
+        length == 0
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='old_identity') | map(attribute='inventory_uuid') |
+        map('lower') | unique | length ==
+        switch_refresh_sda_fabric_border_all_cutover_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='new_identity') | map(attribute='inventory_uuid') |
+        map('lower') | unique | length ==
+        switch_refresh_sda_fabric_border_all_cutover_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_mappings |
+        map(attribute='old_identity') | map(attribute='inventory_uuid') |
+        map('lower') | list |
+        intersect(
+          switch_refresh_sda_fabric_border_all_cutover_mappings |
+          map(attribute='new_identity') | map(attribute='inventory_uuid') |
+          map('lower') | list
+        ) | length == 0
+      - >-
+        switch_refresh_sda_fabric_border_all_cutover_manifest_files |
+        unique | length ==
+        switch_refresh_sda_fabric_border_all_cutover_manifest_files | length
+    fail_msg: >-
+      Cutover requires one protected, unique batch plan and one unique old/new
+      immutable identity pair per replacement across the complete run. No old
+      border was deleted.
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - switch_refresh_sda_fabric_border_cutover
+
+- name: Execute validated border handoff cutover plans serially
+  ansible.builtin.include_tasks:
+    file: execute_cutover_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    switch_refresh_sda_fabric_border_cutover_execution_plan: >-
+      {{ switch_refresh_sda_fabric_border_cutover_plan_item }}
+  loop: "{{ switch_refresh_sda_fabric_border_cutover_plans | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_plan_item
+    label: "{{ switch_refresh_sda_fabric_border_cutover_plan_item.name }}"
+  when: switch_refresh_sda_fabric_border_phase == 'cutover'
+  tags:
+    - switch_refresh_sda_fabric_border_cutover

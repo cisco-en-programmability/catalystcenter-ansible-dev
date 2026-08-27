@@ -1,0 +1,569 @@
+---
+# Query old and replacement inventory records without requiring the old record
+# to exist. The replacement is always mandatory and both identities are checked
+# against the manifest before an action is selected.
+- name: Validate cutover inventory observation request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_inventory_observation_request is mapping
+      - switch_refresh_sda_fabric_border_inventory_observation_request.old_identity is mapping
+      - switch_refresh_sda_fabric_border_inventory_observation_request.new_identity is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_inventory_observation_request.interface_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request
+        .validate_replacement_interfaces is not defined or
+        (
+          switch_refresh_sda_fabric_border_inventory_observation_request
+          .validate_replacement_interfaces | type_debug
+        ) == 'bool'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.management_ip |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.inventory_uuid |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_inventory_observation_request
+        .old_identity.serial_numbers | default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request
+        .old_identity.serial_numbers | default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip |
+        default('') | string | trim | length > 0
+    fail_msg: Inventory observation requires captured old and replacement identities.
+
+- name: Initialize cutover inventory observation records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_records: []
+    switch_refresh_sda_fabric_border_inventory_observation_interface_records: []
+    switch_refresh_sda_fabric_border_inventory_observation_old_matches: []
+    switch_refresh_sda_fabric_border_inventory_observation_new_matches: []
+
+- name: Query current old and replacement inventory records
+  ansible.builtin.include_role:
+    name: network_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    network_devices_info_state: gathered
+    network_devices_info_config_verify: false
+    network_devices_info_config:
+      - network_devices:
+          - device_identifier:
+              - ip_address:
+                  - >-
+                    {{
+                      switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip
+                    }}
+              - serial_number: >-
+                  {{
+                    switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.serial_numbers |
+                    default([])
+                  }}
+            timeout: "{{ switch_refresh_sda_fabric_border_device_info_lookup_timeout }}"
+            retries: "{{ switch_refresh_sda_fabric_border_device_info_lookup_retries }}"
+            interval: "{{ switch_refresh_sda_fabric_border_device_info_lookup_interval }}"
+            requested_info: >-
+              {{
+                ['device_info', 'interface_info']
+                if (
+                  switch_refresh_sda_fabric_border_inventory_observation_request
+                  .validate_replacement_interfaces | default(true) | bool and
+                  switch_refresh_sda_fabric_border_inventory_observation_request
+                  .interface_mappings | default([]) | length > 0
+                )
+                else ['device_info']
+              }}
+  when: >-
+    switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+
+- name: Extract current cutover inventory records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_records: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_records +
+        switch_refresh_sda_fabric_border_inventory_observation_response_item[0].device_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_observation_response_item
+    label: cutover-inventory-observation
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+    - >-
+      (switch_refresh_sda_fabric_border_inventory_observation_response_item | type_debug) ==
+      'list'
+    - switch_refresh_sda_fabric_border_inventory_observation_response_item | length > 0
+    - switch_refresh_sda_fabric_border_inventory_observation_response_item[0] is mapping
+    - switch_refresh_sda_fabric_border_inventory_observation_response_item[0].device_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_inventory_observation_response_item[0].device_info |
+      type_debug) == 'list'
+
+- name: Use injected inventory records for offline state validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_records: >-
+      {{ switch_refresh_sda_fabric_border_inventory_observation_records_override }}
+  when: switch_refresh_sda_fabric_border_inventory_observation_records_override is defined
+
+- name: Extract current replacement interface records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_interface_records: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_interface_records +
+        switch_refresh_sda_fabric_border_inventory_observation_interface_response_item[0].interface_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_observation_interface_response_item
+    label: runtime-cutover-interface-observation
+  when:
+    - >-
+      switch_refresh_sda_fabric_border_inventory_observation_interface_records_override is
+      not defined
+    - >-
+      (switch_refresh_sda_fabric_border_inventory_observation_interface_response_item |
+      type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_inventory_observation_interface_response_item | length > 0
+    - switch_refresh_sda_fabric_border_inventory_observation_interface_response_item[0] is mapping
+    - >-
+      switch_refresh_sda_fabric_border_inventory_observation_interface_response_item[0].interface_info
+      is defined
+    - >-
+      (switch_refresh_sda_fabric_border_inventory_observation_interface_response_item[0].interface_info |
+      type_debug) == 'list'
+
+- name: Use injected runtime replacement interfaces for offline validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_interface_records: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_interface_records_override
+      }}
+  when: >-
+    switch_refresh_sda_fabric_border_inventory_observation_interface_records_override is defined
+
+- name: Match old inventory record by management IP
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_old_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches +
+        [switch_refresh_sda_fabric_border_inventory_observation_record]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_inventory_observation_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_observation_record
+    label: >-
+      {{ switch_refresh_sda_fabric_border_inventory_observation_record.device_ip | default('old') }}
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_record is mapping
+    - >-
+      (
+        switch_refresh_sda_fabric_border_inventory_observation_record.device_ip |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.management_ip |
+        string
+      ) or (
+        switch_refresh_sda_fabric_border_inventory_observation_record.device_details |
+        default([]) | length == 1 and
+        (
+          switch_refresh_sda_fabric_border_inventory_observation_record.device_details[0].instanceUuid |
+          default(
+            switch_refresh_sda_fabric_border_inventory_observation_record.device_details[0].id |
+            default(''),
+            true
+          ) | string | lower
+        ) ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.inventory_uuid |
+        string | lower
+      ) or (
+        switch_refresh_sda_fabric_border_inventory_observation_record.device_details |
+        default([]) | length == 1 and
+        (
+          switch_refresh_sda_fabric_border_inventory_observation_record.device_details[0].serialNumber |
+          default('') | string | split(',') | map('trim') | map('upper') | list |
+          intersect(
+            switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.serial_numbers |
+            default([]) | map('string') | map('upper') | list
+          ) | length > 0
+        )
+      )
+
+- name: Match replacement inventory record by management IP
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_new_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_new_matches +
+        [switch_refresh_sda_fabric_border_inventory_observation_record]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_inventory_observation_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_observation_record
+    label: >-
+      {{ switch_refresh_sda_fabric_border_inventory_observation_record.device_ip | default('new') }}
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_record is mapping
+    - >-
+      switch_refresh_sda_fabric_border_inventory_observation_record.device_ip |
+      default('') | string ==
+      switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip |
+      string
+
+- name: Query captured old inventory UUID directly when workflow reports absence
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+    catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+    catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+    catalystcenter_debug: false
+    id: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_request
+        .old_identity.inventory_uuid
+      }}
+  register: switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+  until:
+    - >-
+      (
+        switch_refresh_sda_fabric_border_direct_old_uuid_lookup.status |
+        default(0) | int == 404
+      ) or
+      (
+        not (
+          switch_refresh_sda_fabric_border_direct_old_uuid_lookup.failed |
+          default(false) | bool
+        ) and
+        (
+          (
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+            .catalystcenter_response.response | default(none, true)
+          ) is none or
+          (
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+            .catalystcenter_response.response is mapping and
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+            .catalystcenter_response.response | length == 0
+          ) or
+          (
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+            .catalystcenter_response.response | type_debug == 'list' and
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+            .catalystcenter_response.response |
+            reject('equalto', none) | list | length == 0
+          )
+        )
+      )
+  retries: "{{ switch_refresh_sda_fabric_border_device_info_lookup_retries | int }}"
+  delay: "{{ switch_refresh_sda_fabric_border_device_info_lookup_interval | int }}"
+  failed_when: false
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+    - switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0
+  no_log: true
+
+- name: Query captured old inventory serials directly when workflow reports absence
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+    catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+    catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+    catalystcenter_debug: false
+    serialNumber: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_request
+        .old_identity.serial_numbers
+      }}
+    limit: 500
+  register: switch_refresh_sda_fabric_border_direct_old_serial_lookup
+  until:
+    - >-
+      not (
+        switch_refresh_sda_fabric_border_direct_old_serial_lookup.failed |
+        default(false) | bool
+      )
+    - >-
+      switch_refresh_sda_fabric_border_direct_old_serial_lookup
+      .catalystcenter_response.response | default(['lookup-incomplete']) |
+      type_debug == 'list'
+    - >-
+      switch_refresh_sda_fabric_border_direct_old_serial_lookup
+      .catalystcenter_response.response | default(['lookup-incomplete']) |
+      reject('equalto', none) | list | length == 0
+  retries: "{{ switch_refresh_sda_fabric_border_device_info_lookup_retries | int }}"
+  delay: "{{ switch_refresh_sda_fabric_border_device_info_lookup_interval | int }}"
+  failed_when: false
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+    - switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0
+  no_log: true
+
+- name: Query captured old management IP directly when workflow reports absence
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify | default(false) }}"
+    catalystcenter_port: "{{ catalystcenter_port | default(443) }}"
+    catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
+    catalystcenter_debug: false
+    managementIpAddress:
+      - >-
+        {{
+          switch_refresh_sda_fabric_border_inventory_observation_request
+          .old_identity.management_ip
+        }}
+    limit: 500
+  register: switch_refresh_sda_fabric_border_direct_old_ip_lookup
+  until:
+    - >-
+      not (
+        switch_refresh_sda_fabric_border_direct_old_ip_lookup.failed |
+        default(false) | bool
+      )
+    - >-
+      switch_refresh_sda_fabric_border_direct_old_ip_lookup
+      .catalystcenter_response.response | default(['lookup-incomplete']) |
+      type_debug == 'list'
+    - >-
+      switch_refresh_sda_fabric_border_direct_old_ip_lookup
+      .catalystcenter_response.response | default(['lookup-incomplete']) |
+      reject('equalto', none) | list | length == 0
+  retries: "{{ switch_refresh_sda_fabric_border_device_info_lookup_retries | int }}"
+  delay: "{{ switch_refresh_sda_fabric_border_device_info_lookup_interval | int }}"
+  failed_when: false
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+    - switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0
+  no_log: true
+
+- name: Prove direct old inventory identity absence
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          switch_refresh_sda_fabric_border_direct_old_uuid_lookup.status |
+          default(0) | int == 404
+        ) or
+        (
+          not (
+            switch_refresh_sda_fabric_border_direct_old_uuid_lookup.failed |
+            default(true) | bool
+          ) and
+          (
+            (
+              switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+              .catalystcenter_response.response | default(none, true)
+            ) is none or
+            (
+              switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+              .catalystcenter_response.response is mapping and
+              switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+              .catalystcenter_response.response | length == 0
+            ) or
+            (
+              switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+              .catalystcenter_response.response | type_debug == 'list' and
+              switch_refresh_sda_fabric_border_direct_old_uuid_lookup
+              .catalystcenter_response.response |
+              reject('equalto', none) | list | length == 0
+            )
+          )
+        )
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_direct_old_serial_lookup.failed |
+          default(true) | bool
+        )
+      - >-
+        switch_refresh_sda_fabric_border_direct_old_serial_lookup
+        .catalystcenter_response.response | default(['lookup-incomplete']) |
+        type_debug == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_direct_old_serial_lookup
+        .catalystcenter_response.response | default(['lookup-incomplete']) |
+        reject('equalto', none) | list | length == 0
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_direct_old_ip_lookup.failed |
+          default(true) | bool
+        )
+      - >-
+        switch_refresh_sda_fabric_border_direct_old_ip_lookup
+        .catalystcenter_response.response | default(['lookup-incomplete']) |
+        type_debug == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_direct_old_ip_lookup
+        .catalystcenter_response.response | default(['lookup-incomplete']) |
+        reject('equalto', none) | list | length == 0
+    fail_msg: >-
+      The higher-level inventory workflow reported the old device absent, but
+      direct UUID, serial, and management-IP reads did not all prove absence.
+      Replacement handoffs were not submitted.
+  when:
+    - switch_refresh_sda_fabric_border_inventory_observation_records_override is not defined
+    - switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0
+  no_log: true
+
+- name: Validate cutover inventory observation cardinality
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_inventory_observation_old_matches | length <= 1
+      - switch_refresh_sda_fabric_border_inventory_observation_new_matches | length == 1
+      - >-
+        (switch_refresh_sda_fabric_border_inventory_observation_new_matches[0].device_details |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_matches[0].device_details |
+        default([]) | length == 1
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        (
+          switch_refresh_sda_fabric_border_inventory_observation_old_matches[0].device_details |
+          default([]) | type_debug
+        ) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches[0].device_details |
+        default([]) | length == 1
+    fail_msg: Current old/replacement inventory state is ambiguous or the replacement is missing.
+
+- name: Normalize observed replacement inventory identity
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_new_detail: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_new_matches[0].device_details[0]
+      }}
+    switch_refresh_sda_fabric_border_inventory_observation_old_detail: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches[0].device_details[0]
+        if (switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 1)
+        else {}
+      }}
+  no_log: true
+
+- name: Derive observed cutover inventory identities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_new_uuid: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_new_detail.instanceUuid |
+        default(
+          switch_refresh_sda_fabric_border_inventory_observation_new_detail.id | default(''),
+          true
+        ) |
+        string
+      }}
+    switch_refresh_sda_fabric_border_inventory_observation_new_serials: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_new_detail.serialNumber |
+        default('') | string | split(',') | map('trim') | map('upper') |
+        reject('equalto', '') | unique | sort | list
+      }}
+    switch_refresh_sda_fabric_border_inventory_observation_old_uuid: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_old_detail.instanceUuid |
+        default(
+          switch_refresh_sda_fabric_border_inventory_observation_old_detail.id | default(''),
+          true
+        ) |
+        string
+      }}
+    switch_refresh_sda_fabric_border_inventory_observation_old_serials: >-
+      {{
+        switch_refresh_sda_fabric_border_inventory_observation_old_detail.serialNumber |
+        default('') | string | split(',') | map('trim') | map('upper') |
+        reject('equalto', '') | unique | sort | list
+      }}
+  no_log: true
+
+- name: Revalidate immutable replacement and any present old identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_uuid | lower ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.inventory_uuid |
+        string | lower
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_serials ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.serial_numbers |
+        map('string') | map('upper') | unique | sort | list
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_detail.managementState |
+        default(
+          switch_refresh_sda_fabric_border_inventory_observation_new_detail.collectionStatus |
+          default(''),
+          true
+        ) | string | lower == 'managed'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_detail.reachabilityStatus |
+        default('') | string | upper in ['REACHABLE', 'PING REACHABLE']
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_new_detail.role |
+        default('') | string | upper | regex_replace('[ -]+', '_') ==
+        'BORDER_ROUTER'
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches[0].device_ip |
+        string ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.management_ip |
+        string
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        switch_refresh_sda_fabric_border_inventory_observation_old_uuid | lower ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.inventory_uuid |
+        string | lower
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        switch_refresh_sda_fabric_border_inventory_observation_old_serials ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.serial_numbers |
+        map('string') | map('upper') | unique | sort | list
+    fail_msg: >-
+      Current inventory records no longer match the immutable old/replacement
+      UUID and serial identities captured in the manifest.
+
+- name: Revalidate mapped destination interfaces at runtime
+  ansible.builtin.include_tasks: validate_cutover_destination_interfaces.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_interface_validation_request:
+      resolved_mappings:
+        - new_management_ip: >-
+            {{
+              switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip
+            }}
+          interface_mappings: >-
+            {{
+              switch_refresh_sda_fabric_border_inventory_observation_request.interface_mappings |
+              default([])
+            }}
+      interface_records: >-
+        {{ switch_refresh_sda_fabric_border_inventory_observation_interface_records }}
+      context: runtime cutover destination-interface revalidation
+  when:
+    - >-
+      switch_refresh_sda_fabric_border_inventory_observation_request
+      .validate_replacement_interfaces | default(true) | bool
+    - >-
+      switch_refresh_sda_fabric_border_inventory_observation_request
+      .interface_mappings | default([]) | length > 0
+
+- name: Publish current cutover inventory observation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_inventory_observation_result:
+      old_present: >-
+        {{ switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 1 }}
+      new_present: true
+      observed_new_hostname: >-
+        {{
+          switch_refresh_sda_fabric_border_inventory_observation_new_detail.hostname |
+          default('') | string
+        }}
+      new_managed: true
+      new_reachable: true
+      new_inventory_role: BORDER_ROUTER
+  no_log: true

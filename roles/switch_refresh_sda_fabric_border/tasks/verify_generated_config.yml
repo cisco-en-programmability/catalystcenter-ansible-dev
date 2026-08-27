@@ -1,0 +1,350 @@
+---
+# Compare two generator device_config records without depending on list order.
+# Both records originate from the trusted config generator, so scalar values
+# are retained instead of introducing a second schema-conversion layer.
+#
+# Input:
+#   switch_refresh_sda_fabric_border_verify_request:
+#     expected_device_config: {}
+#     actual_device_config: {}
+#     context: <description>
+#     require_empty_handoffs: false
+#     fail_on_mismatch: true
+# Output:
+#   switch_refresh_sda_fabric_border_verify_result
+
+- name: Validate generated border comparison request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_request is mapping
+      - switch_refresh_sda_fabric_border_verify_request.expected_device_config is defined
+      - switch_refresh_sda_fabric_border_verify_request.expected_device_config is mapping
+      - switch_refresh_sda_fabric_border_verify_request.actual_device_config is defined
+      - switch_refresh_sda_fabric_border_verify_request.actual_device_config is mapping
+      - switch_refresh_sda_fabric_border_verify_request.context is defined
+      - >-
+        switch_refresh_sda_fabric_border_verify_request.context |
+        string | trim | length > 0
+    fail_msg: >-
+      Generated border verification requires expected and actual device_config
+      mappings and a non-empty context.
+
+- name: Normalize generated border comparison inputs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected: >-
+      {{ switch_refresh_sda_fabric_border_verify_request.expected_device_config }}
+    switch_refresh_sda_fabric_border_verify_actual: >-
+      {{ switch_refresh_sda_fabric_border_verify_request.actual_device_config }}
+    switch_refresh_sda_fabric_border_verify_context: >-
+      {{ switch_refresh_sda_fabric_border_verify_request.context | string }}
+    switch_refresh_sda_fabric_border_verify_require_empty: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_request
+        .require_empty_handoffs | default(false) | bool
+      }}
+    switch_refresh_sda_fabric_border_verify_fail_on_mismatch: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_request
+        .fail_on_mismatch | default(true) | bool
+      }}
+    switch_refresh_sda_fabric_border_verify_expected_l2_records: []
+    switch_refresh_sda_fabric_border_verify_actual_l2_records: []
+    switch_refresh_sda_fabric_border_verify_expected_ip_records: []
+    switch_refresh_sda_fabric_border_verify_actual_ip_records: []
+  no_log: true
+
+- name: Canonicalize manager default Layer 3 border priority
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_settings |
+        dict2items |
+        rejectattr('key', 'equalto', 'border_priority') |
+        list |
+        items2dict
+        if (
+          switch_refresh_sda_fabric_border_verify_expected
+          .borders_settings.layer3_settings.border_priority |
+          default(10) | int == 10
+        )
+        else
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_settings
+      }}
+    switch_refresh_sda_fabric_border_verify_actual_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_settings |
+        dict2items |
+        rejectattr('key', 'equalto', 'border_priority') |
+        list |
+        items2dict
+        if (
+          switch_refresh_sda_fabric_border_verify_actual
+          .borders_settings.layer3_settings.border_priority |
+          default(10) | int == 10
+        )
+        else
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_settings
+      }}
+  no_log: true
+
+- name: Validate expected generated border record shape
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_expected.device_ip is defined
+      - >-
+        (switch_refresh_sda_fabric_border_verify_expected.device_roles |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_verify_expected.borders_settings is defined
+      - switch_refresh_sda_fabric_border_verify_expected.borders_settings is mapping
+      - >-
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_settings is defined
+      - >-
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_settings is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer2_handoff | default([]) | type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_handoff_ip_transit | default([]) |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_handoff_sda_transit is not defined or
+        switch_refresh_sda_fabric_border_verify_expected
+        .borders_settings.layer3_handoff_sda_transit is mapping
+    fail_msg: >-
+      Expected generator record is malformed during
+      {{ switch_refresh_sda_fabric_border_verify_context }}.
+
+- name: Validate actual generated border record shape
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_actual.device_ip is defined
+      - >-
+        (switch_refresh_sda_fabric_border_verify_actual.device_roles |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_verify_actual.borders_settings is defined
+      - switch_refresh_sda_fabric_border_verify_actual.borders_settings is mapping
+      - >-
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_settings is defined
+      - >-
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_settings is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer2_handoff | default([]) | type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_handoff_ip_transit | default([]) |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_handoff_sda_transit is not defined or
+        switch_refresh_sda_fabric_border_verify_actual
+        .borders_settings.layer3_handoff_sda_transit is mapping
+    fail_msg: >-
+      Actual generator record is malformed during
+      {{ switch_refresh_sda_fabric_border_verify_context }}.
+
+- name: Canonicalize expected L2 handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected_l2_records: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_expected_l2_records +
+        [
+          switch_refresh_sda_fabric_border_verify_handoff_item |
+          to_json(sort_keys=true)
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_verify_expected
+      .borders_settings.layer2_handoff | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
+    label: expected-l2-handoff
+  no_log: true
+
+- name: Canonicalize actual L2 handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_actual_l2_records: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_actual_l2_records +
+        [
+          switch_refresh_sda_fabric_border_verify_handoff_item |
+          to_json(sort_keys=true)
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_verify_actual
+      .borders_settings.layer2_handoff | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
+    label: actual-l2-handoff
+  no_log: true
+
+- name: Canonicalize expected IP-transit handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected_ip_records: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_expected_ip_records +
+        [
+          switch_refresh_sda_fabric_border_verify_handoff_item |
+          to_json(sort_keys=true)
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_verify_expected
+      .borders_settings.layer3_handoff_ip_transit | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
+    label: expected-ip-transit-handoff
+  no_log: true
+
+- name: Canonicalize actual IP-transit handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_actual_ip_records: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_actual_ip_records +
+        [
+          switch_refresh_sda_fabric_border_verify_handoff_item |
+          to_json(sort_keys=true)
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_verify_actual
+      .borders_settings.layer3_handoff_ip_transit | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
+    label: actual-ip-transit-handoff
+  no_log: true
+
+- name: Build canonical generated border records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected_canonical:
+      device_ip: "{{ switch_refresh_sda_fabric_border_verify_expected.device_ip }}"
+      device_roles: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected.device_roles | sort }}
+      layer3_settings: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_expected_layer3_settings |
+          to_json(sort_keys=true)
+        }}
+      layer2_handoff: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected_l2_records | sort }}
+      layer3_handoff_ip_transit: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected_ip_records | sort }}
+      layer3_handoff_sda_transit: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_expected
+          .borders_settings.layer3_handoff_sda_transit |
+          default({}) |
+          to_json(sort_keys=true)
+        }}
+    switch_refresh_sda_fabric_border_verify_actual_canonical:
+      device_ip: "{{ switch_refresh_sda_fabric_border_verify_actual.device_ip }}"
+      device_roles: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual.device_roles | sort }}
+      layer3_settings: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_actual_layer3_settings |
+          to_json(sort_keys=true)
+        }}
+      layer2_handoff: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual_l2_records | sort }}
+      layer3_handoff_ip_transit: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual_ip_records | sort }}
+      layer3_handoff_sda_transit: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_actual
+          .borders_settings.layer3_handoff_sda_transit |
+          default({}) |
+          to_json(sort_keys=true)
+        }}
+  no_log: true
+
+- name: Publish generated border comparison result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_result:
+      match: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_expected_canonical ==
+          switch_refresh_sda_fabric_border_verify_actual_canonical
+        }}
+      handoffs_empty: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_actual_l2_records | length == 0 and
+          switch_refresh_sda_fabric_border_verify_actual_ip_records | length == 0 and
+          (
+            switch_refresh_sda_fabric_border_verify_actual
+            .borders_settings.layer3_handoff_sda_transit |
+            default({}) | length == 0
+          )
+        }}
+      expected_canonical: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected_canonical }}
+      actual_canonical: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual_canonical }}
+      expected_handoff_counts:
+        layer2: >-
+          {{ switch_refresh_sda_fabric_border_verify_expected_l2_records | length }}
+        ip_transit: >-
+          {{ switch_refresh_sda_fabric_border_verify_expected_ip_records | length }}
+        sda_transit: >-
+          {{
+            1
+            if (
+              switch_refresh_sda_fabric_border_verify_expected
+              .borders_settings.layer3_handoff_sda_transit |
+              default({}) | length > 0
+            )
+            else 0
+          }}
+      actual_handoff_counts:
+        layer2: >-
+          {{ switch_refresh_sda_fabric_border_verify_actual_l2_records | length }}
+        ip_transit: >-
+          {{ switch_refresh_sda_fabric_border_verify_actual_ip_records | length }}
+        sda_transit: >-
+          {{
+            1
+            if (
+              switch_refresh_sda_fabric_border_verify_actual
+              .borders_settings.layer3_handoff_sda_transit |
+              default({}) | length > 0
+            )
+            else 0
+          }}
+  no_log: true
+
+- name: Require empty replacement border handoffs
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_result.handoffs_empty | bool
+    fail_msg: >-
+      Replacement border has non-empty handoffs during
+      {{ switch_refresh_sda_fabric_border_verify_context }}.
+  when: switch_refresh_sda_fabric_border_verify_require_empty | bool
+
+- name: Require generated border configuration match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_result.match | bool
+    fail_msg: >-
+      Generated border configuration does not match the expected configuration
+      during {{ switch_refresh_sda_fabric_border_verify_context }}.
+  when: switch_refresh_sda_fabric_border_verify_fail_on_mismatch | bool

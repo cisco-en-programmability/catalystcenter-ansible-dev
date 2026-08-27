@@ -1,0 +1,953 @@
+---
+- name: Validate border cutover recovery state machine offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_border_state_expected:
+      device_ip: 192.0.2.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+        layer2_handoff:
+          - interface_name: HundredGigE1/0/1
+            internal_vlan_id: 1001
+            external_vlan_id: 101
+          - interface_name: HundredGigE1/0/2
+            internal_vlan_id: 1002
+            external_vlan_id: 102
+        layer3_handoff_ip_transit:
+          - transit_network_name: IP-TRANSIT
+            interface_name: HundredGigE1/0/3
+            virtual_network_name: CORPORATE
+            vlan_id: 2001
+            local_ip_address: 203.0.113.1/30
+            remote_ip_address: 203.0.113.2/30
+    switch_refresh_sda_fabric_border_state_base:
+      device_ip: 192.0.2.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+    switch_refresh_sda_fabric_border_state_transform_old:
+      device_ip: 198.51.100.10
+      device_roles:
+        - BORDER_NODE
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+          border_priority: 10
+          prepend_autonomous_system_count: 0
+        layer2_handoff:
+          - interface_name: FortyGigabitEthernet1/1/1
+            internal_vlan_id: 1001
+            external_vlan_id: 101
+
+  tasks:
+    - name: Transform generator-default border priority for manager compatibility
+      ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
+      vars:
+        switch_refresh_sda_fabric_border_transform_request:
+          fabric_name: Global/Test/Fabric
+          new_management_ip: 192.0.2.10
+          interface_mappings:
+            - source_interface_name: FortyGigabitEthernet1/1/1
+              destination_interface_name: HundredGigE1/0/1
+          original_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_transform_old }}
+
+    - name: Verify generator priority 10 is omitted only from mutation records
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_transform_result
+            .original_device_config.borders_settings.layer3_settings.border_priority == 10
+          - >-
+            switch_refresh_sda_fabric_border_transform_result
+            .base_new_device_config.borders_settings.layer3_settings.border_priority is
+            not defined
+          - >-
+            switch_refresh_sda_fabric_border_transform_result
+            .expected_new_device_config.borders_settings.layer3_settings.border_priority is
+            not defined
+          - >-
+            switch_refresh_sda_fabric_border_transform_result
+            .expected_new_device_config.borders_settings.layer2_handoff[0].interface_name ==
+            'HundredGigE1/0/1'
+
+    - name: Build generator-style readback with default priority 10
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_state_priority_readback: >-
+          {{
+            switch_refresh_sda_fabric_border_transform_result.expected_new_device_config |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_transform_result
+                  .expected_new_device_config.borders_settings |
+                  combine(
+                    {
+                      'layer3_settings':
+                        switch_refresh_sda_fabric_border_transform_result
+                        .expected_new_device_config.borders_settings.layer3_settings |
+                        combine({'border_priority': 10})
+                    }
+                  )
+              }
+            )
+          }}
+
+    - name: Compare omitted manager priority with generator default readback
+      ansible.builtin.include_tasks: ../tasks/verify_generated_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_verify_request:
+          expected_device_config: >-
+            {{
+              switch_refresh_sda_fabric_border_transform_result
+              .expected_new_device_config
+            }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_priority_readback }}
+          context: generator default border-priority compatibility
+          require_empty_handoffs: false
+          fail_on_mismatch: true
+
+    - name: Verify priority omission and generator default are semantically equal
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_verify_result.match | bool
+
+    - name: Verify pool-backed IP-transit replay fails before cutover
+      block:
+        - name: Build pool-backed generated border record
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_state_pool_backed_old: >-
+              {{
+                switch_refresh_sda_fabric_border_state_transform_old |
+                combine(
+                  {
+                    'borders_settings':
+                      switch_refresh_sda_fabric_border_state_transform_old.borders_settings |
+                      combine(
+                        {
+                          'layer3_handoff_ip_transit': [
+                            {
+                              'transit_network_name': 'IP-TRANSIT',
+                              'interface_name': 'FortyGigabitEthernet1/1/1',
+                              'external_connectivity_ip_pool_name':
+                                'BORDER-TRANSIT-POOL',
+                              'virtual_network_name': 'CORPORATE',
+                              'vlan_id': 2001,
+                              'local_ip_address': '203.0.113.1/30',
+                              'remote_ip_address': '203.0.113.2/30'
+                            }
+                          ]
+                        }
+                      )
+                  }
+                )
+              }}
+
+        - name: Transform unsupported pool-backed IP transit
+          ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
+          vars:
+            switch_refresh_sda_fabric_border_transform_request:
+              fabric_name: Global/Test/Fabric
+              new_management_ip: 192.0.2.10
+              interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+              original_device_config: >-
+                {{ switch_refresh_sda_fabric_border_state_pool_backed_old }}
+
+        - name: Fail when pool-backed replay was accepted
+          ansible.builtin.fail:
+            msg: Pool-backed IP-transit replay unexpectedly passed validation.
+      rescue:
+        - name: Verify pool-backed replay was rejected before mutation
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate captured IP-transit handoff records'
+
+    - name: Classify normal approved destructive cutover
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: true
+          old_inventory_present: true
+          replacement_config_state: empty
+          destructive_approved: true
+          resume_from_manifest: false
+
+    - name: Verify normal approved destructive action
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'delete_old_fabric_then_inventory'
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.effective_status ==
+            'captured'
+
+    - name: Classify unapproved destructive state
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: true
+          old_inventory_present: true
+          replacement_config_state: empty
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify non-destructive resume cannot delete old state
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool)
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'stop_destructive_approval_required'
+
+    - name: Classify split handoff ownership
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: true
+          old_inventory_present: true
+          replacement_config_state: subset
+          destructive_approved: true
+          resume_from_manifest: true
+
+    - name: Verify split ownership always stops
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool)
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'stop_split_handoff_ownership'
+
+    - name: Classify approved continuation after old fabric removal
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: true
+          replacement_config_state: empty
+          destructive_approved: true
+          resume_from_manifest: true
+
+    - name: Verify approved continuation finishes old inventory deletion
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'delete_old_inventory'
+
+    - name: Classify unapproved continuation with old inventory present
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: true
+          replacement_config_state: exact
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify remaining inventory deletion still requires approval
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool)
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'stop_destructive_approval_required'
+
+    - name: Classify non-destructive empty replacement resume
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: false
+          replacement_config_state: empty
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify empty replacement rolls forward from manifest
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'apply_expected_config'
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.effective_status ==
+            'old_deleted'
+
+    - name: Classify non-destructive partial replacement resume
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: false
+          replacement_config_state: subset
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify partial replacement reapplies complete expected payload
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'apply_expected_config'
+
+    - name: Classify already exact non-destructive resume
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: false
+          replacement_config_state: exact
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify exact replacement only needs verification
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'verify_expected_config'
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.effective_status ==
+            'handoff_verified'
+
+    - name: Classify impossible old fabric without inventory
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: true
+          old_inventory_present: false
+          replacement_config_state: empty
+          destructive_approved: true
+          resume_from_manifest: true
+
+    - name: Verify inconsistent old state stops
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool)
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'stop_inconsistent_old_state'
+
+    - name: Classify divergent replacement
+      ansible.builtin.include_tasks: ../tasks/classify_cutover_entry.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_classification_request:
+          old_fabric_present: false
+          old_inventory_present: false
+          replacement_config_state: divergent
+          destructive_approved: false
+          resume_from_manifest: true
+
+    - name: Verify divergent replacement stops without automatic deletion
+      ansible.builtin.assert:
+        that:
+          - not (switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool)
+          - >-
+            switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+            'stop_divergent_replacement'
+
+    - name: Classify handoff-free prepared replacement configuration
+      ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_expected }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_base }}
+
+    - name: Verify prepared replacement is empty
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state == 'empty'
+
+    - name: Build partial replacement handoff configuration
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_state_subset: >-
+          {{
+            switch_refresh_sda_fabric_border_state_base |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_state_base.borders_settings |
+                  combine(
+                    {
+                      'layer2_handoff':
+                        switch_refresh_sda_fabric_border_state_expected.borders_settings.layer2_handoff[0:1]
+                    }
+                  )
+              },
+              recursive=true
+            )
+          }}
+
+    - name: Classify partial replacement handoff configuration
+      ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_expected }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_subset }}
+
+    - name: Verify partial replacement is a strict subset
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state == 'subset'
+
+    - name: Build reordered exact replacement handoff configuration
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_state_exact_reordered: >-
+          {{
+            switch_refresh_sda_fabric_border_state_expected |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_state_expected.borders_settings |
+                  combine(
+                    {
+                      'layer2_handoff':
+                        switch_refresh_sda_fabric_border_state_expected.borders_settings.layer2_handoff |
+                        reverse | list
+                    }
+                  )
+              },
+              recursive=true
+            )
+          }}
+
+    - name: Classify exact reordered replacement handoffs
+      ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_expected }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_exact_reordered }}
+
+    - name: Verify list ordering does not change exact classification
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state == 'exact'
+
+    - name: Verify reordered live source remains semantically unchanged
+      ansible.builtin.include_tasks: ../tasks/verify_generated_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_verify_request:
+          expected_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_expected }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_exact_reordered }}
+          context: offline live source drift revalidation
+          require_empty_handoffs: false
+          fail_on_mismatch: true
+
+    - name: Verify semantic source comparison accepted generator list reordering
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_verify_result.match | bool
+
+    - name: Build replacement configuration with unexpected handoff
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_state_divergent: >-
+          {{
+            switch_refresh_sda_fabric_border_state_expected |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_state_expected.borders_settings |
+                  combine(
+                    {
+                      'layer2_handoff':
+                        switch_refresh_sda_fabric_border_state_expected.borders_settings.layer2_handoff +
+                        [
+                          {
+                            'interface_name': 'HundredGigE1/0/99',
+                            'internal_vlan_id': 1999,
+                            'external_vlan_id': 999
+                          }
+                        ]
+                    }
+                  )
+              },
+              recursive=true
+            )
+          }}
+
+    - name: Classify divergent replacement handoffs
+      ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_expected }}
+          actual_device_config: >-
+            {{ switch_refresh_sda_fabric_border_state_divergent }}
+
+    - name: Verify unexpected handoff is divergent
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state == 'divergent'
+
+    - name: Resolve cutover identities and mapped destination interfaces offline
+      ansible.builtin.include_tasks: ../tasks/resolve_cutover_identities.yml
+      vars:
+        switch_refresh_sda_fabric_border_cutover_identity_request:
+          device_mappings:
+            - old:
+                serial_number: OLD-BORDER-01
+              new_device_management_ip: 192.0.2.10
+              handoff_interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+          expected_new_ips:
+            - 192.0.2.10
+          context: offline identity validation
+        switch_refresh_sda_fabric_border_cutover_identity_records_override:
+          - device_ip: 198.51.100.10
+            device_details:
+              - instanceUuid: old-uuid-01
+                serialNumber: OLD-BORDER-01
+                hostname: old-border-01.example.test
+                macAddress: 00:11:22:33:44:55
+          - device_ip: 192.0.2.10
+            device_details:
+              - instanceUuid: new-uuid-01
+                serialNumber: NEW-BORDER-01
+                hostname: temporary-border-01.example.test
+        switch_refresh_sda_fabric_border_cutover_interface_records_override:
+          - device_ip: 192.0.2.10
+            interface_details:
+              - portName: HundredGigE1/0/1
+
+    - name: Verify exact old/new identity and interface resolution
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings |
+            length == 1
+          - >-
+            switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings[0].old_identity.inventory_uuid ==
+            'old-uuid-01'
+          - >-
+            switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings[0].new_identity.inventory_uuid ==
+            'new-uuid-01'
+
+    - name: Observe ready immutable cutover inventory identities offline
+      ansible.builtin.include_tasks: ../tasks/observe_cutover_inventory.yml
+      vars:
+        switch_refresh_sda_fabric_border_inventory_observation_request:
+          old_identity:
+            management_ip: 198.51.100.10
+            inventory_uuid: old-uuid-01
+            serial_numbers:
+              - OLD-BORDER-01
+          new_identity:
+            management_ip: 192.0.2.10
+            inventory_uuid: new-uuid-01
+            serial_numbers:
+              - NEW-BORDER-01
+          interface_mappings:
+            - source_interface_name: FortyGigabitEthernet1/1/1
+              destination_interface_name: HundredGigE1/0/1
+        switch_refresh_sda_fabric_border_inventory_observation_records_override:
+          - device_ip: 198.51.100.10
+            device_details:
+              - instanceUuid: old-uuid-01
+                serialNumber: OLD-BORDER-01
+          - device_ip: 192.0.2.10
+            device_details:
+              - instanceUuid: new-uuid-01
+                serialNumber: NEW-BORDER-01
+                hostname: temporary-border-01.example.test
+                managementState: Managed
+                reachabilityStatus: Reachable
+                role: BORDER_ROUTER
+        switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
+          - device_ip: 192.0.2.10
+            interface_details:
+              - portName: HundredGigE1/0/1
+
+    - name: Verify runtime observation proves old presence and replacement readiness
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_inventory_observation_result.old_present | bool
+          - switch_refresh_sda_fabric_border_inventory_observation_result.new_present | bool
+          - switch_refresh_sda_fabric_border_inventory_observation_result.new_managed | bool
+          - switch_refresh_sda_fabric_border_inventory_observation_result.new_reachable | bool
+          - >-
+            switch_refresh_sda_fabric_border_inventory_observation_result.new_inventory_role ==
+            'BORDER_ROUTER'
+
+    - name: Verify missing mapped destination fails runtime revalidation
+      block:
+        - name: Observe replacement without required destination interface
+          ansible.builtin.include_tasks: ../tasks/observe_cutover_inventory.yml
+          vars:
+            switch_refresh_sda_fabric_border_inventory_observation_request:
+              old_identity:
+                management_ip: 198.51.100.10
+                inventory_uuid: old-uuid-01
+                serial_numbers:
+                  - OLD-BORDER-01
+              new_identity:
+                management_ip: 192.0.2.10
+                inventory_uuid: new-uuid-01
+                serial_numbers:
+                  - NEW-BORDER-01
+              interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+              validate_replacement_interfaces: true
+            switch_refresh_sda_fabric_border_inventory_observation_records_override:
+              - device_ip: 198.51.100.10
+                device_details:
+                  - instanceUuid: old-uuid-01
+                    serialNumber: OLD-BORDER-01
+              - device_ip: 192.0.2.10
+                device_details:
+                  - instanceUuid: new-uuid-01
+                    serialNumber: NEW-BORDER-01
+                    managementState: Managed
+                    reachabilityStatus: Reachable
+                    role: BORDER_ROUTER
+            switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
+              - device_ip: 192.0.2.10
+                interface_details:
+                  - portName: HundredGigE1/0/99
+
+        - name: Fail when missing mapped destination was accepted
+          ansible.builtin.fail:
+            msg: Missing mapped destination unexpectedly passed runtime validation.
+      rescue:
+        - name: Verify missing mapped destination was rejected before cutover
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Require every mapped destination interface on its replacement'
+
+    - name: Observe SDA-transit-only mapping without interface inventory
+      ansible.builtin.include_tasks: ../tasks/observe_cutover_inventory.yml
+      vars:
+        switch_refresh_sda_fabric_border_inventory_observation_request:
+          old_identity:
+            management_ip: 198.51.100.10
+            inventory_uuid: old-uuid-01
+            serial_numbers:
+              - OLD-BORDER-01
+          new_identity:
+            management_ip: 192.0.2.10
+            inventory_uuid: new-uuid-01
+            serial_numbers:
+              - NEW-BORDER-01
+          interface_mappings: []
+          validate_replacement_interfaces: true
+        switch_refresh_sda_fabric_border_inventory_observation_records_override:
+          - device_ip: 198.51.100.10
+            device_details:
+              - instanceUuid: old-uuid-01
+                serialNumber: OLD-BORDER-01
+          - device_ip: 192.0.2.10
+            device_details:
+              - instanceUuid: new-uuid-01
+                serialNumber: NEW-BORDER-01
+                managementState: Managed
+                reachabilityStatus: Ping Reachable
+                role: BORDER_ROUTER
+
+    - name: Verify SDA-transit-only mapping does not require interface records
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_inventory_observation_result.new_present | bool
+          - switch_refresh_sda_fabric_border_inventory_observation_result.new_reachable | bool
+
+    - name: Verify unreachable replacement fails before destructive cutover
+      block:
+        - name: Observe unreachable replacement inventory state
+          ansible.builtin.include_tasks: ../tasks/observe_cutover_inventory.yml
+          vars:
+            switch_refresh_sda_fabric_border_inventory_observation_request:
+              old_identity:
+                management_ip: 198.51.100.10
+                inventory_uuid: old-uuid-01
+                serial_numbers:
+                  - OLD-BORDER-01
+              new_identity:
+                management_ip: 192.0.2.10
+                inventory_uuid: new-uuid-01
+                serial_numbers:
+                  - NEW-BORDER-01
+              interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+            switch_refresh_sda_fabric_border_inventory_observation_records_override:
+              - device_ip: 198.51.100.10
+                device_details:
+                  - instanceUuid: old-uuid-01
+                    serialNumber: OLD-BORDER-01
+              - device_ip: 192.0.2.10
+                device_details:
+                  - instanceUuid: new-uuid-01
+                    serialNumber: NEW-BORDER-01
+                    managementState: Managed
+                    reachabilityStatus: Unreachable
+                    role: BORDER_ROUTER
+            switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
+              - device_ip: 192.0.2.10
+                interface_details:
+                  - portName: HundredGigE1/0/1
+
+        - name: Fail when unreachable replacement was accepted
+          ansible.builtin.fail:
+            msg: Unreachable replacement unexpectedly passed runtime validation.
+      rescue:
+        - name: Verify unreachable replacement was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Revalidate immutable replacement and any present old identity'
+
+    - name: Load cutover execution wiring offline
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_mapping_source: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/cutover_mapping.yml') }}
+        switch_refresh_sda_fabric_border_cutover_mapping_tasks: >-
+          {{
+            lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/cutover_mapping.yml') |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_border_cutover_batch_source: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/execute_cutover_batch.yml') }}
+        switch_refresh_sda_fabric_border_main_source: >-
+          {{ lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/main.yml') }}
+        switch_refresh_sda_fabric_border_main_tasks: >-
+          {{
+            lookup('ansible.builtin.file', playbook_dir ~ '/../tasks/main.yml') |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_border_preflight_cutover_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/preflight_cutover_batch.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_border_inventory_observation_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/observe_cutover_inventory.yml'
+            ) |
+            from_yaml
+          }}
+
+    - name: Derive cutover execution task order
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_task_names: >-
+          {{ switch_refresh_sda_fabric_border_cutover_mapping_tasks | map(attribute='name') | list }}
+        switch_refresh_sda_fabric_border_redundancy_tasks: >-
+          {{
+            switch_refresh_sda_fabric_border_cutover_mapping_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Validate another operational border before new destructive release'
+            ) |
+            list
+          }}
+        switch_refresh_sda_fabric_border_inventory_query_tasks: >-
+          {{
+            switch_refresh_sda_fabric_border_inventory_observation_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Query current old and replacement inventory records'
+            ) |
+            list
+          }}
+        switch_refresh_sda_fabric_border_direct_absence_tasks: >-
+          {{
+            switch_refresh_sda_fabric_border_inventory_observation_tasks |
+            selectattr(
+              'name',
+              'in',
+              [
+                'Query captured old inventory UUID directly when workflow reports absence',
+                'Query captured old inventory serials directly when workflow reports absence',
+                'Query captured old management IP directly when workflow reports absence',
+                'Prove direct old inventory identity absence'
+              ]
+            ) |
+            list
+          }}
+        switch_refresh_sda_fabric_border_lock_wrapper_tasks: >-
+          {{
+            switch_refresh_sda_fabric_border_main_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Execute border cutover under an exclusive local controller lock'
+            ) |
+            list
+          }}
+        switch_refresh_sda_fabric_border_new_manifest_block_tasks: >-
+          {{
+            (
+              switch_refresh_sda_fabric_border_preflight_cutover_tasks |
+              selectattr(
+                'name',
+                'equalto',
+                'Capture a new immutable cutover plan'
+              ) |
+              first
+            ).block
+          }}
+
+    - name: Verify hard deletion and serial handoff ordering contract
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Reject old border configuration drift before destructive release'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Persist deletion-started recovery boundary before old fabric removal'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Persist deletion-started recovery boundary before old fabric removal'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Remove captured old border from the fabric and release its handoffs'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Remove captured old border from the fabric and release its handoffs'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Prove old fabric membership and handoffs are absent'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Prove old fabric membership and handoffs are absent'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Delete captured old border inventory record'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Require old inventory record is fully absent'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Apply complete expected border handoff configuration to replacement'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Persist old-deleted recovery boundary before handoff apply'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Apply complete expected border handoff configuration to replacement'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Apply complete expected border handoff configuration to replacement'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Verify exact replacement border configuration after apply'
+            )
+          - "'sda_fabric_devices_layer2_handoffs_info' not in switch_refresh_sda_fabric_border_cutover_mapping_source"
+          - "'sda_fabric_devices_layer2_handoffs_ip_transits_info' not in switch_refresh_sda_fabric_border_cutover_mapping_source"
+          - "'sda_fabric_devices_layer2_handoffs_sda_transits_info' not in switch_refresh_sda_fabric_border_cutover_mapping_source"
+          - "'loop:' in switch_refresh_sda_fabric_border_cutover_batch_source"
+          - "'cutover_mapping.yml' in switch_refresh_sda_fabric_border_cutover_batch_source"
+          - switch_refresh_sda_fabric_border_redundancy_tasks | length == 1
+          - >-
+            (
+              switch_refresh_sda_fabric_border_redundancy_tasks[0].vars
+              .switch_refresh_sda_fabric_border_redundancy_request.excluded_device_ips |
+              type_debug
+            ) == 'list'
+          - >-
+            switch_refresh_sda_fabric_border_redundancy_tasks[0].vars
+            .switch_refresh_sda_fabric_border_redundancy_request.excluded_device_ips |
+            length == 2
+          - switch_refresh_sda_fabric_border_inventory_query_tasks | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_inventory_query_tasks[0].vars
+            .network_devices_info_config[0].network_devices[0]
+            .device_identifier[0].ip_address | length == 1
+          - >-
+            'new_identity.management_ip' in
+            switch_refresh_sda_fabric_border_inventory_query_tasks[0].vars
+            .network_devices_info_config[0].network_devices[0]
+            .device_identifier[0].ip_address[0]
+          - >-
+            'old_identity.serial_numbers' in
+            switch_refresh_sda_fabric_border_inventory_query_tasks[0].vars
+            .network_devices_info_config[0].network_devices[0]
+            .device_identifier[1].serial_number
+          - switch_refresh_sda_fabric_border_direct_absence_tasks | length == 4
+          - >-
+            switch_refresh_sda_fabric_border_direct_absence_tasks |
+            map(attribute='name') | list |
+            select('equalto', 'Prove direct old inventory identity absence') |
+            list | length == 1
+          - switch_refresh_sda_fabric_border_lock_wrapper_tasks | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_lock_wrapper_tasks[0].block |
+            map(attribute='name') | list ==
+            [
+              'Acquire exclusive local border cutover lock',
+              'Require exclusive local border cutover lock ownership',
+              'Run locked border cutover workflow'
+            ]
+          - >-
+            switch_refresh_sda_fabric_border_lock_wrapper_tasks[0].always |
+            map(attribute='name') | list ==
+            ['Release owned local border cutover lock']
+          - "'mkdir' in switch_refresh_sda_fabric_border_main_source"
+          - "'workflow.yml' in switch_refresh_sda_fabric_border_main_source"
+          - >-
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Refuse to overwrite an existing cutover recovery manifest') <
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Capture current border intent and replacement base per mapping')
+          - >-
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Persist complete batch cutover manifest before deletion') <
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Reread and validate persisted batch manifest before deletion')
+          - >-
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Reread and validate persisted batch manifest before deletion') <
+            (
+              switch_refresh_sda_fabric_border_new_manifest_block_tasks |
+              map(attribute='name') | list
+            ).index('Append reread immutable normal cutover plan')

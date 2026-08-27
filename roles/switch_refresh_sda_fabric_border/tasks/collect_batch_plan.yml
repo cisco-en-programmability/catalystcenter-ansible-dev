@@ -1,0 +1,132 @@
+---
+# Cutover and manifest recovery intentionally validate only the immutable
+# selector fields they consume. Onboarding, inventory, and provisioning input
+# belongs to prepare and must never block restoration from a valid manifest.
+- name: Validate minimal border cutover batch input
+  ansible.builtin.assert:
+    that:
+      - refresh_item is mapping
+      - refresh_item.name is defined
+      - refresh_item.name is string
+      - refresh_item.name | trim | length > 0
+      - refresh_item.name == (refresh_item.name | trim)
+      - refresh_item.fabric_site_name_hierarchy is defined
+      - refresh_item.fabric_site_name_hierarchy is string
+      - refresh_item.fabric_site_name_hierarchy | trim | length > 0
+      - >-
+        refresh_item.fabric_site_name_hierarchy ==
+        (refresh_item.fabric_site_name_hierarchy | trim)
+      - refresh_item.new_devices is defined
+      - refresh_item.new_devices is mapping
+      - >-
+        (refresh_item.new_devices.device_ips | default([]) | type_debug) == 'list'
+      - refresh_item.new_devices.device_ips | default([]) | length > 0
+      - (refresh_item.device_mapping | default([]) | type_debug) == 'list'
+      - refresh_item.device_mapping | default([]) | length > 0
+    fail_msg: >-
+      Cutover requires only a non-empty batch name, fabric site hierarchy,
+      replacement IP list, and device mapping list.
+
+- name: Initialize minimal border cutover batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_name: "{{ refresh_item.name }}"
+    switch_refresh_sda_fabric_border_batch_file_safe_name: >-
+      {{ refresh_item.name | lower | regex_replace('[^a-z0-9_.-]', '_') }}
+    switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy: >-
+      {{ refresh_item.fabric_site_name_hierarchy }}
+    switch_refresh_sda_fabric_border_batch_device_ips: >-
+      {{ refresh_item.new_devices.device_ips | map('string') | list }}
+    switch_refresh_sda_fabric_border_batch_device_mappings: []
+    switch_refresh_sda_fabric_border_batch_mapping_new_ips: []
+
+- name: Validate cutover replacement management IPs
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_input_ip is string
+      - switch_refresh_sda_fabric_border_cutover_input_ip | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_input_ip ==
+        (switch_refresh_sda_fabric_border_cutover_input_ip | trim)
+      - >-
+        switch_refresh_sda_fabric_border_cutover_input_ip |
+        regex_search(
+          '^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$'
+        ) is not none
+      - >-
+        switch_refresh_sda_fabric_border_cutover_input_ip |
+        split('.') | map('int') | max <= 255
+    fail_msg: >-
+      Every cutover replacement target must be a non-empty canonical IPv4
+      management address.
+  loop: "{{ refresh_item.new_devices.device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_input_ip
+    label: "{{ switch_refresh_sda_fabric_border_cutover_input_ip }}"
+
+- name: Normalize minimal cutover device mappings
+  ansible.builtin.include_tasks: normalize_batch_mapping.yml
+  vars:
+    switch_refresh_sda_fabric_border_input_mapping: >-
+      {{ switch_refresh_sda_fabric_border_cutover_mapping_item }}
+  loop: "{{ refresh_item.device_mapping }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_mapping_item
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_mapping_item
+        .new_device_management_ip | default('invalid-cutover-mapping')
+        if (switch_refresh_sda_fabric_border_cutover_mapping_item is mapping)
+        else 'invalid-cutover-mapping'
+      }}
+
+- name: Derive minimal cutover mapping targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_mapping_new_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_device_mappings |
+        map(attribute='new_device_management_ip') | map('string') | list
+      }}
+
+- name: Validate exact minimal cutover mapping coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_device_ips | unique | length ==
+        switch_refresh_sda_fabric_border_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_device_mappings | length ==
+        switch_refresh_sda_fabric_border_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | unique | length ==
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_mapping_new_ips | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | sort
+      - switch_refresh_sda_fabric_border_batch_file_safe_name not in ['.', '..']
+    fail_msg: >-
+      Cutover mappings must cover each unique replacement IP exactly once and
+      the batch name must produce a safe manifest filename.
+
+- name: Append minimal normalized border cutover batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_plans: >-
+      {{
+        (switch_refresh_sda_fabric_border_batch_plans | default([])) +
+        [
+          {
+            'name': switch_refresh_sda_fabric_border_batch_name,
+            'file_safe_name': switch_refresh_sda_fabric_border_batch_file_safe_name,
+            'fabric_site_name_hierarchy':
+              switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy,
+            'device_ips': switch_refresh_sda_fabric_border_batch_device_ips,
+            'device_mappings':
+              switch_refresh_sda_fabric_border_batch_device_mappings,
+            'manifest_file':
+              switch_refresh_sda_fabric_border_manifest_dir |
+              regex_replace('/+$', '') ~ '/' ~
+              switch_refresh_sda_fabric_border_batch_file_safe_name ~
+              '_border_cutover.yml'
+          }
+        ]
+      }}
+  no_log: true

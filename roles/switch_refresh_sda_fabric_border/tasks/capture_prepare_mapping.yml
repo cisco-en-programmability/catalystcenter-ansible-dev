@@ -1,0 +1,72 @@
+---
+- name: Capture old border configuration for prepare mapping
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.old_management_ip }}
+      capture_file: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_capture_workspace.path ~ '/' ~
+          switch_refresh_sda_fabric_border_batch_file_safe_name ~ '-' ~
+          switch_refresh_sda_fabric_border_prepare_mapping_index ~ '.yml'
+        }}
+      expected_state: present
+      context: >-
+        Prepare preflight for batch
+        {{ switch_refresh_sda_fabric_border_batch_name }}, old border
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.old_management_ip }}
+
+- name: Build prepare and final replacement border records
+  ansible.builtin.include_tasks: build_replacement_configs.yml
+  vars:
+    switch_refresh_sda_fabric_border_transform_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy }}
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      interface_mappings: >-
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.interface_mappings }}
+      original_device_config: >-
+        {{ switch_refresh_sda_fabric_border_capture_result.device_config }}
+
+- name: Add captured prepare mapping to immutable plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_resolved_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_resolved_mappings +
+        [
+          switch_refresh_sda_fabric_border_prepare_mapping |
+          combine(
+            {
+              'original_device_config':
+                switch_refresh_sda_fabric_border_transform_result
+                .original_device_config,
+              'base_new_device_config':
+                switch_refresh_sda_fabric_border_transform_result
+                .base_new_device_config,
+              'expected_new_device_config':
+                switch_refresh_sda_fabric_border_transform_result
+                .expected_new_device_config,
+              'source_config_fingerprint':
+                switch_refresh_sda_fabric_border_transform_result
+                .source_config_fingerprint,
+              'source_handoff_interfaces':
+                switch_refresh_sda_fabric_border_transform_result
+                .source_handoff_interfaces,
+              'l2_handoff_count':
+                switch_refresh_sda_fabric_border_transform_result
+                .l2_handoff_count,
+              'ip_transit_handoff_count':
+                switch_refresh_sda_fabric_border_transform_result
+                .ip_transit_handoff_count,
+              'sda_transit_handoff_count':
+                switch_refresh_sda_fabric_border_transform_result
+                .sda_transit_handoff_count
+            }
+          )
+        ]
+      }}
+  no_log: true

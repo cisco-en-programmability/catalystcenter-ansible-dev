@@ -1,0 +1,122 @@
+---
+- name: Initialize old border matches for mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_mapping_matches: []
+
+- name: Match old border inventory records to selector
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_mapping_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_mapping_matches +
+        [switch_refresh_sda_fabric_border_old_info_entry]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_old_device_info_entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_old_info_entry
+    label: >-
+      {{ switch_refresh_sda_fabric_border_old_info_entry.device_ip | default('old-border') }}
+  when:
+    - switch_refresh_sda_fabric_border_old_info_entry.device_details is defined
+    - >-
+      (switch_refresh_sda_fabric_border_old_info_entry.device_details | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_old_info_entry.device_details | length == 1
+    - >-
+      (
+        switch_refresh_sda_fabric_border_resolve_mapping.old.management_ip is defined and
+        switch_refresh_sda_fabric_border_old_info_entry.device_ip | string ==
+        switch_refresh_sda_fabric_border_resolve_mapping.old.management_ip | string
+      ) or (
+        switch_refresh_sda_fabric_border_resolve_mapping.old.hostname is defined and
+        switch_refresh_sda_fabric_border_old_info_entry.device_details[0].hostname |
+        default('') | string | lower ==
+        switch_refresh_sda_fabric_border_resolve_mapping.old.hostname | string | lower
+      ) or (
+        switch_refresh_sda_fabric_border_resolve_mapping.old.serial_number is defined and
+        switch_refresh_sda_fabric_border_resolve_mapping.old.serial_number | string | upper in
+        (
+          switch_refresh_sda_fabric_border_old_info_entry.device_details[0].serialNumber |
+          default('') | string
+        ).split(',') | map('trim') | map('upper') | list
+      ) or (
+        switch_refresh_sda_fabric_border_resolve_mapping.old.mac_address is defined and
+        switch_refresh_sda_fabric_border_old_info_entry.device_details[0].macAddress |
+        default('') | string | lower | regex_replace('[:-]', '') ==
+        switch_refresh_sda_fabric_border_resolve_mapping.old.mac_address |
+        string | lower | regex_replace('[:-]', '')
+      )
+
+- name: Validate exactly one old border match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_mapping_matches | length == 1
+    fail_msg: >-
+      Expected exactly one old inventory device for replacement
+      {{ switch_refresh_sda_fabric_border_resolve_mapping.new_device_management_ip }}
+      using selector {{ switch_refresh_sda_fabric_border_resolve_mapping.old }},
+      but matched {{ switch_refresh_sda_fabric_border_mapping_matches | length }}.
+
+- name: Select matched old border details
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_matched_old_record: >-
+      {{ switch_refresh_sda_fabric_border_mapping_matches | first }}
+    switch_refresh_sda_fabric_border_matched_old_details: >-
+      {{ (switch_refresh_sda_fabric_border_mapping_matches | first).device_details | first }}
+
+- name: Derive immutable old border identity
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_matched_old_identity:
+      management_ip: "{{ switch_refresh_sda_fabric_border_matched_old_record.device_ip }}"
+      inventory_uuid: >-
+        {{
+          switch_refresh_sda_fabric_border_matched_old_details.instanceUuid |
+          default(switch_refresh_sda_fabric_border_matched_old_details.id | default(''))
+        }}
+      serial_numbers: >-
+        {{
+          (
+            switch_refresh_sda_fabric_border_matched_old_details.serialNumber |
+            default('') | string
+          ).split(',') | map('trim') | reject('equalto', '') | map('upper') | list
+        }}
+      hostname: >-
+        {{
+          switch_refresh_sda_fabric_border_matched_old_details.hostname |
+          default('') | string
+        }}
+
+- name: Validate immutable old border identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_matched_old_identity.inventory_uuid |
+        string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_matched_old_identity.serial_numbers |
+        length > 0
+      - >-
+        not (switch_refresh_sda_fabric_border_hostname_transfer_enabled | bool) or
+        switch_refresh_sda_fabric_border_matched_old_identity.hostname |
+        string | trim | length > 0
+    fail_msg: >-
+      Old border {{ switch_refresh_sda_fabric_border_matched_old_record.device_ip }}
+      must have a stable inventory UUID and at least one serial number before
+      its configuration can be captured. A hostname is also required when
+      optional hostname transfer is enabled.
+
+- name: Add resolved old border mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_resolved_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_resolved_mappings + [
+          {
+            'old_selector': switch_refresh_sda_fabric_border_resolve_mapping.old,
+            'old_management_ip':
+              switch_refresh_sda_fabric_border_matched_old_record.device_ip,
+            'new_management_ip':
+              switch_refresh_sda_fabric_border_resolve_mapping.new_device_management_ip,
+            'interface_mappings':
+              switch_refresh_sda_fabric_border_resolve_mapping.handoff_interface_mappings,
+            'old_identity': switch_refresh_sda_fabric_border_matched_old_identity
+          }
+        ]
+      }}

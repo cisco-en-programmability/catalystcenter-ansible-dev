@@ -1,0 +1,456 @@
+---
+# Execute or resume exactly one mapping. The caller owns serial iteration and
+# supplies the current active batch plan plus a mapping selector.
+- name: Select current active cutover mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_active_cutover_mapping_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings |
+        selectattr(
+          'new_management_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_active_cutover_mapping.new_management_ip |
+          string
+        ) |
+        list
+      }}
+
+- name: Validate current active cutover mapping
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_active_cutover_plan is mapping
+      - switch_refresh_sda_fabric_border_active_cutover_mapping_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_border_active_cutover_mapping_matches[0].status in
+        ['captured', 'deletion_started', 'old_deleted', 'handoff_verified', 'complete']
+      - >-
+        switch_refresh_sda_fabric_border_cutover_approved | bool or
+        switch_refresh_sda_fabric_border_resume_from_manifest | bool
+    fail_msg: Cutover mapping execution requires one manifest-backed active mapping.
+
+- name: Load current cutover mapping and workspace
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_current_cutover_mapping: >-
+      {{ switch_refresh_sda_fabric_border_active_cutover_mapping_matches[0] }}
+    switch_refresh_sda_fabric_border_current_cutover_workspace: >-
+      {{
+        switch_refresh_sda_fabric_border_work_dir |
+        regex_replace('/+$', '') ~ '/' ~
+        switch_refresh_sda_fabric_border_active_cutover_plan.file_safe_name ~
+        '/runtime/' ~
+        (
+          switch_refresh_sda_fabric_border_active_cutover_mapping.new_management_ip |
+          regex_replace('[^A-Za-z0-9_.-]', '_')
+        )
+      }}
+  no_log: true
+
+- name: Create protected per-mapping cutover workspace
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_border_current_cutover_workspace }}"
+    state: directory
+    mode: "0700"
+
+- name: Observe current old and replacement inventory state
+  ansible.builtin.include_tasks: observe_cutover_inventory.yml
+  vars:
+    switch_refresh_sda_fabric_border_inventory_observation_request:
+      old_identity: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_identity }}
+      new_identity: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_identity }}
+      interface_mappings: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.interface_mappings }}
+      validate_replacement_interfaces: true
+      context: >-
+        cutover state for {{
+        switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+
+- name: Observe current old fabric configuration state
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/old_observed.yml' }}
+      expected_state: any
+      context: current old fabric state before roll-forward classification
+
+- name: Preserve current old fabric observation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_current_old_fabric_capture: >-
+      {{ switch_refresh_sda_fabric_border_capture_result }}
+  no_log: true
+
+- name: Classify current old border configuration against captured intent
+  ansible.builtin.include_tasks: classify_replacement_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replacement_classification_request:
+      expected_device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.original_device_config }}
+      actual_device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_old_fabric_capture.device_config }}
+  when: switch_refresh_sda_fabric_border_current_old_fabric_capture.found | bool
+
+- name: Reject old border configuration drift before destructive release
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result.exact_match |
+        bool or
+        (
+          switch_refresh_sda_fabric_border_cutover_approved | bool and
+          switch_refresh_sda_fabric_border_resume_from_manifest | bool and
+          switch_refresh_sda_fabric_border_current_cutover_mapping.status ==
+          'deletion_started' and
+          switch_refresh_sda_fabric_border_replacement_classification_result.state in
+          ['empty', 'subset']
+        )
+    fail_msg: >-
+      The live old-border configuration differs from the manifest. Only an
+      approved continuation at deletion_started may retry when the base is
+      unchanged and captured handoffs are merely missing.
+  when: switch_refresh_sda_fabric_border_current_old_fabric_capture.found | bool
+
+- name: Observe current replacement fabric configuration state
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/new_observed.yml' }}
+      expected_state: present
+      context: current replacement fabric state before roll-forward classification
+
+- name: Preserve current replacement fabric observation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_current_new_fabric_capture: >-
+      {{ switch_refresh_sda_fabric_border_capture_result }}
+  no_log: true
+
+- name: Classify current replacement handoff configuration
+  ansible.builtin.include_tasks: classify_replacement_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replacement_classification_request:
+      expected_device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config }}
+      actual_device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_new_fabric_capture.device_config }}
+
+- name: Preserve current replacement configuration class
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_current_replacement_classification: >-
+      {{ switch_refresh_sda_fabric_border_replacement_classification_result }}
+
+- name: Classify safe cutover roll-forward action
+  ansible.builtin.include_tasks: classify_cutover_entry.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_classification_request:
+      old_fabric_present: >-
+        {{ switch_refresh_sda_fabric_border_current_old_fabric_capture.found | bool }}
+      old_inventory_present: >-
+        {{ switch_refresh_sda_fabric_border_inventory_observation_result.old_present | bool }}
+      replacement_config_state: >-
+        {{ switch_refresh_sda_fabric_border_current_replacement_classification.state }}
+      destructive_approved: >-
+        {{ switch_refresh_sda_fabric_border_cutover_approved | bool }}
+      resume_from_manifest: >-
+        {{ switch_refresh_sda_fabric_border_resume_from_manifest | bool }}
+
+- name: Require a safe cutover roll-forward action
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_classification_result.allowed | bool
+    fail_msg: >-
+      Border cutover stopped for {{
+      switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}:
+      {{ switch_refresh_sda_fabric_border_cutover_classification_result.reason }}.
+
+- name: Validate another operational border before new destructive release
+  ansible.builtin.include_tasks: validate_site_border_redundancy.yml
+  vars:
+    switch_refresh_sda_fabric_border_redundancy_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      excluded_device_ips:
+        - >-
+          {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+        - >-
+          {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      capture_file: >-
+        {{
+          switch_refresh_sda_fabric_border_current_cutover_workspace ~
+          '/redundancy_before_delete.yml'
+        }}
+  when:
+    - >-
+      switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+      'delete_old_fabric_then_inventory'
+    - switch_refresh_sda_fabric_border_cutover_approved | bool
+    - not (switch_refresh_sda_fabric_border_allow_single_border_outage | bool)
+
+- name: Mark old fabric deletion as started in active manifest plan
+  ansible.builtin.include_tasks: update_cutover_plan_entry.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_entry_update_request:
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      status: deletion_started
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+    'delete_old_fabric_then_inventory'
+
+- name: Persist deletion-started recovery boundary before old fabric removal
+  ansible.builtin.include_tasks: persist_cutover_manifest.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_plan: >-
+      {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+    'delete_old_fabric_then_inventory'
+
+- name: Remove captured old border from the fabric and release its handoffs
+  ansible.builtin.include_role:
+    name: sda_fabric_devices
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    sda_fabric_devices_state: deleted
+    sda_fabric_devices_config_verify: false
+    sda_fabric_devices_config:
+      - fabric_devices:
+          fabric_name: >-
+            {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+          device_config:
+            - device_ip: >-
+                {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+    'delete_old_fabric_then_inventory'
+
+- name: Prove old fabric membership and handoffs are absent
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/old_absent.yml' }}
+      expected_state: absent
+      context: old fabric absence before inventory deletion and replacement handoff apply
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action ==
+    'delete_old_fabric_then_inventory'
+
+- name: Unprovision captured old border
+  ansible.builtin.include_role:
+    name: provision
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    provision_state: deleted
+    provision_config_verify: false
+    provision_config:
+      - management_ip_address: >-
+          {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory']
+
+- name: Delete captured old border inventory record
+  ansible.builtin.include_role:
+    name: inventory
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    inventory_state: deleted
+    inventory_config_verify: false
+    inventory_config:
+      - ip_address_list:
+          - >-
+            {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+        clean_config: false
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory']
+
+- name: Prove full old inventory identity absence after deletion
+  ansible.builtin.include_tasks: observe_cutover_inventory.yml
+  vars:
+    switch_refresh_sda_fabric_border_inventory_observation_request:
+      old_identity: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_identity }}
+      new_identity: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_identity }}
+      interface_mappings: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.interface_mappings }}
+      validate_replacement_interfaces: false
+      context: full old inventory absence before replacement handoff apply
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory']
+
+- name: Require old inventory record is fully absent
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_border_inventory_observation_result.old_present | bool)
+    fail_msg: Old inventory identity remains present; replacement handoffs were not submitted.
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory']
+
+- name: Re-prove old fabric absence for manifest-only continuation
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip }}
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/old_resume_absent.yml' }}
+      expected_state: absent
+      context: old fabric absence during manifest roll-forward
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_inventory', 'apply_expected_config', 'verify_expected_config']
+
+- name: Mark full old deletion in active manifest plan
+  ansible.builtin.include_tasks: update_cutover_plan_entry.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_entry_update_request:
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      status: old_deleted
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action !=
+    'verify_expected_config'
+
+- name: Persist old-deleted recovery boundary before handoff apply
+  ansible.builtin.include_tasks: persist_cutover_manifest.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_plan: >-
+      {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action !=
+    'verify_expected_config'
+
+- name: Apply complete expected border handoff configuration to replacement
+  ansible.builtin.include_role:
+    name: sda_fabric_devices
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    sda_fabric_devices_state: merged
+    sda_fabric_devices_config_verify: false
+    sda_fabric_devices_config:
+      - fabric_devices:
+          fabric_name: >-
+            {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+          device_config: >-
+            {{ [switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config] }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory', 'apply_expected_config']
+
+- name: Generate replacement border configuration after handoff apply
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: >-
+        {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
+      device_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/new_verified.yml' }}
+      expected_state: present
+      context: replacement handoff verification after full old deletion
+
+- name: Preserve generated replacement handoff readback
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verified_new_capture: >-
+      {{ switch_refresh_sda_fabric_border_capture_result }}
+  no_log: true
+
+- name: Verify exact replacement border configuration after apply
+  ansible.builtin.include_tasks: verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config }}
+      actual_device_config: >-
+        {{ switch_refresh_sda_fabric_border_verified_new_capture.device_config }}
+      context: >-
+        post-cutover replacement {{
+        switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      require_empty_handoffs: false
+
+- name: Mark replacement handoff verification in active manifest plan
+  ansible.builtin.include_tasks: update_cutover_plan_entry.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_entry_update_request:
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      status: handoff_verified
+
+- name: Persist verified replacement handoff boundary
+  ansible.builtin.include_tasks: persist_cutover_manifest.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_plan: >-
+      {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+
+- name: Finalize optional replacement hostname after handoff restoration
+  ansible.builtin.include_tasks: finalize_hostname.yml
+  vars:
+    switch_refresh_sda_fabric_border_hostname_entry: >-
+      {{ switch_refresh_sda_fabric_border_current_cutover_mapping }}
+
+- name: Mark cutover mapping complete
+  ansible.builtin.include_tasks: update_cutover_plan_entry.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_entry_update_request:
+      new_management_ip: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip }}
+      status: complete
+      hostname_verified: >-
+        {{ switch_refresh_sda_fabric_border_hostname_result.verified | default(false) | bool }}
+
+- name: Persist completed cutover mapping
+  ansible.builtin.include_tasks: persist_cutover_manifest.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_plan: >-
+      {{ switch_refresh_sda_fabric_border_active_cutover_plan }}
+
+- name: Append completed cutover mapping result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_active_cutover_mapping_results: >-
+      {{
+        switch_refresh_sda_fabric_border_active_cutover_mapping_results + [
+          {
+            'old_management_ip':
+              switch_refresh_sda_fabric_border_current_cutover_mapping.old_management_ip,
+            'new_management_ip':
+              switch_refresh_sda_fabric_border_current_cutover_mapping.new_management_ip,
+            'old_deleted': true,
+            'handoff_verified': true,
+            'hostname_verified':
+              switch_refresh_sda_fabric_border_hostname_result.verified |
+              default(false) | bool,
+            'manifest_path':
+              switch_refresh_sda_fabric_border_active_cutover_plan.manifest_file,
+            'status': 'complete'
+          }
+        ]
+      }}

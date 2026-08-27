@@ -1,0 +1,215 @@
+---
+# Load a durable cutover plan without querying the old border. The caller must
+# set refresh_item and must have recomputed the canonical input fingerprint.
+- name: Validate border cutover manifest load selector
+  ansible.builtin.assert:
+    that:
+      - refresh_item is mapping
+      - refresh_item.name | default('') | string | trim | length > 0
+      - >-
+        refresh_item.fabric_site_name_hierarchy |
+        default('') | string | trim | length > 0
+      - refresh_item.new_devices is mapping
+      - (refresh_item.new_devices.device_ips | default([]) | type_debug) == 'list'
+      - refresh_item.new_devices.device_ips | default([]) | length > 0
+      - (refresh_item.device_mapping | default([]) | type_debug) == 'list'
+      - refresh_item.device_mapping | default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_input_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_cutover_manifest_file |
+        default('') | string | regex_search('^/') is not none
+    fail_msg: Manifest loading requires the complete original batch selector and fingerprint.
+
+- name: Inspect durable border cutover manifest
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_cutover_manifest_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_cutover_manifest_load_stat
+
+- name: Validate border cutover manifest file protection
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_manifest_load_stat.stat.exists | bool
+      - >-
+        switch_refresh_sda_fabric_border_cutover_manifest_load_stat.stat.isreg |
+        default(false)
+      - >-
+        not (switch_refresh_sda_fabric_border_cutover_manifest_load_stat.stat.islnk |
+        default(false))
+      - switch_refresh_sda_fabric_border_cutover_manifest_load_stat.stat.mode == '0600'
+    fail_msg: >-
+      Manifest continuation requires a regular, non-symlink mode-0600 file:
+      {{ switch_refresh_sda_fabric_border_cutover_manifest_file }}.
+
+- name: Load durable border cutover manifest data
+  ansible.builtin.include_vars:
+    file: "{{ switch_refresh_sda_fabric_border_cutover_manifest_file }}"
+    name: switch_refresh_sda_fabric_border_loaded_cutover_manifest
+  no_log: true
+
+- name: Validate border cutover manifest envelope
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_loaded_cutover_manifest is mapping
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.schema_version |
+        default(0) | int == 1
+      - switch_refresh_sda_fabric_border_loaded_cutover_manifest.controller is mapping
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.controller.host |
+        default('') | string | trim | lower ==
+        catalystcenter_host | string | trim | lower
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.controller.port |
+        default(0) | int == catalystcenter_port | default(443) | int
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.batch_name |
+        default('') | string == refresh_item.name | string
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.fabric_site_name_hierarchy |
+        default('') | string ==
+        refresh_item.fabric_site_name_hierarchy | string
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.input_fingerprint |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_cutover_input_fingerprint | string
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.source_config_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.status |
+        default('') | string in
+        ['captured', 'deletion_started', 'old_deleted', 'handoff_verified', 'complete']
+      - >-
+        (switch_refresh_sda_fabric_border_loaded_cutover_manifest.devices |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.devices |
+        default([]) | length > 0
+    fail_msg: >-
+      Cutover manifest controller, batch, site, input fingerprint, or envelope
+      does not match the current request.
+
+- name: Validate loaded cutover manifest device entries
+  ansible.builtin.include_tasks: validate_cutover_manifest_entries.yml
+  vars:
+    switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+      entries: >-
+        {{ switch_refresh_sda_fabric_border_loaded_cutover_manifest.devices }}
+      expected_new_ips: "{{ refresh_item.new_devices.device_ips }}"
+      context: "loaded manifest for {{ refresh_item.name }}"
+
+- name: Derive loaded cutover manifest aggregate status
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_loaded_cutover_manifest_expected_status: >-
+      {{
+        'captured'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'captured') | list | length > 0
+        )
+        else 'deletion_started'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'deletion_started') | list | length > 0
+        )
+        else 'old_deleted'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'old_deleted') | list | length > 0
+        )
+        else 'handoff_verified'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'handoff_verified') | list | length > 0
+        )
+        else 'complete'
+      }}
+
+- name: Validate loaded manifest aggregate integrity
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.source_config_fingerprint |
+        string ==
+        switch_refresh_sda_fabric_border_manifest_entry_validation_result.source_config_fingerprint |
+        string
+      - >-
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest.status | string ==
+        switch_refresh_sda_fabric_border_loaded_cutover_manifest_expected_status | string
+    fail_msg: The loaded manifest payload fingerprint or aggregate status is inconsistent.
+
+- name: Initialize loaded cutover resolved mappings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_loaded_cutover_mappings: []
+
+- name: Convert loaded manifest devices to immutable cutover mappings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_loaded_cutover_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_loaded_cutover_mappings + [
+          {
+            'old_selector':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.old_selector |
+              default(
+                {
+                  'management_ip':
+                    switch_refresh_sda_fabric_border_loaded_cutover_entry.old.management_ip
+                }
+              ),
+            'old_management_ip':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.old.management_ip,
+            'new_management_ip':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.new.management_ip,
+            'interface_mappings':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.interface_mappings |
+              default([]),
+            'old_identity': switch_refresh_sda_fabric_border_loaded_cutover_entry.old,
+            'new_identity': switch_refresh_sda_fabric_border_loaded_cutover_entry.new,
+            'original_device_config':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.original_device_config,
+            'base_new_device_config':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.base_new_device_config,
+            'expected_new_device_config':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.expected_new_device_config,
+            'source_config_fingerprint':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.source_config_fingerprint,
+            'source_handoff_interfaces':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.source_handoff_interfaces |
+              default([]),
+            'status': switch_refresh_sda_fabric_border_loaded_cutover_entry.status
+          }
+        ]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_loaded_cutover_entry
+    label: >-
+      {{ switch_refresh_sda_fabric_border_loaded_cutover_entry.new.management_ip }}
+  no_log: true
+
+- name: Publish validated manifest continuation cutover plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_loaded_cutover_plan:
+      name: "{{ refresh_item.name | string }}"
+      file_safe_name: >-
+        {{ refresh_item.name | string | lower | regex_replace('[^a-z0-9_.-]', '_') }}
+      fabric_site_name_hierarchy: >-
+        {{ refresh_item.fabric_site_name_hierarchy | string }}
+      new_management_ips: >-
+        {{ refresh_item.new_devices.device_ips | map('string') | list }}
+      resolved_mappings: >-
+        {{ switch_refresh_sda_fabric_border_loaded_cutover_mappings }}
+      manifest_file: "{{ switch_refresh_sda_fabric_border_cutover_manifest_file }}"
+      input_fingerprint: >-
+        {{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}
+      source_config_fingerprint: >-
+        {{
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.source_config_fingerprint
+        }}
+      status: >-
+        {{ switch_refresh_sda_fabric_border_loaded_cutover_manifest.status }}
+  no_log: true

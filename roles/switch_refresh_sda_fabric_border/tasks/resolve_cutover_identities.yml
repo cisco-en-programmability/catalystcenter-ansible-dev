@@ -1,0 +1,255 @@
+---
+# Input:
+#   switch_refresh_sda_fabric_border_cutover_identity_request:
+#     device_mappings: [...normalized mappings...]
+#     expected_new_ips: [...]
+#     context: text
+# Output:
+#   switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings
+- name: Validate cutover identity resolution request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_identity_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings |
+        default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_identity_request.expected_new_ips |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_request.expected_new_ips |
+        default([]) | length ==
+        switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings |
+        default([]) | length
+    fail_msg: A non-empty normalized mapping set is required for cutover identity resolution.
+
+- name: Initialize cutover identity lookup inputs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_identifiers: []
+    switch_refresh_sda_fabric_border_cutover_identity_records: []
+    switch_refresh_sda_fabric_border_cutover_interface_records: []
+    switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings: []
+
+- name: Add old selectors to cutover identity lookup
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_identifiers: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_identity_identifiers + [
+          {'ip_address': [switch_refresh_sda_fabric_border_cutover_identity_mapping.old.management_ip]}
+          if (switch_refresh_sda_fabric_border_cutover_identity_mapping.old.management_ip is defined)
+          else {'hostname': [switch_refresh_sda_fabric_border_cutover_identity_mapping.old.hostname]}
+          if (switch_refresh_sda_fabric_border_cutover_identity_mapping.old.hostname is defined)
+          else {'serial_number': [switch_refresh_sda_fabric_border_cutover_identity_mapping.old.serial_number]}
+          if (switch_refresh_sda_fabric_border_cutover_identity_mapping.old.serial_number is defined)
+          else {'mac_address': [switch_refresh_sda_fabric_border_cutover_identity_mapping.old.mac_address]}
+        ]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_identity_mapping
+    label: >-
+      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new_device_management_ip }}
+
+- name: Add replacement IPs to cutover identity lookup
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_identifiers: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_identity_identifiers +
+        [{'ip_address': [switch_refresh_sda_fabric_border_cutover_identity_new_ip | string]}]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_cutover_identity_request.expected_new_ips }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_identity_new_ip
+
+- name: Resolve current old and replacement inventory identities
+  ansible.builtin.include_role:
+    name: network_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_cutover
+  vars:
+    network_devices_info_state: gathered
+    network_devices_info_config_verify: false
+    network_devices_info_config:
+      - network_devices:
+          - device_identifier: >-
+              {{ switch_refresh_sda_fabric_border_cutover_identity_identifiers }}
+            timeout: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_timeout }}
+            retries: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_retries }}
+            interval: >-
+              {{ switch_refresh_sda_fabric_border_device_info_lookup_interval }}
+            requested_info: >-
+              {{
+                ['device_info', 'interface_info']
+                if (
+                  switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings |
+                  map(attribute='handoff_interface_mappings') | flatten | length > 0
+                )
+                else ['device_info']
+              }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_identity_records_override is not defined
+
+- name: Extract cutover inventory identity records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_records: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_identity_records +
+        switch_refresh_sda_fabric_border_cutover_identity_response_item[0].device_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_identity_response_item
+    label: cutover-device-info-response
+  when:
+    - switch_refresh_sda_fabric_border_cutover_identity_records_override is not defined
+    - >-
+      (switch_refresh_sda_fabric_border_cutover_identity_response_item | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_cutover_identity_response_item | length > 0
+    - switch_refresh_sda_fabric_border_cutover_identity_response_item[0] is mapping
+    - switch_refresh_sda_fabric_border_cutover_identity_response_item[0].device_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_cutover_identity_response_item[0].device_info |
+      type_debug) == 'list'
+
+- name: Use injected cutover identity records for offline validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_records: >-
+      {{ switch_refresh_sda_fabric_border_cutover_identity_records_override }}
+  when: switch_refresh_sda_fabric_border_cutover_identity_records_override is defined
+
+- name: Extract replacement interface records for cutover validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_interface_records: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_interface_records +
+        switch_refresh_sda_fabric_border_cutover_interface_response_item[0].interface_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_interface_response_item
+    label: cutover-interface-info-response
+  when:
+    - switch_refresh_sda_fabric_border_cutover_interface_records_override is not defined
+    - >-
+      (switch_refresh_sda_fabric_border_cutover_interface_response_item | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_cutover_interface_response_item | length > 0
+    - switch_refresh_sda_fabric_border_cutover_interface_response_item[0] is mapping
+    - switch_refresh_sda_fabric_border_cutover_interface_response_item[0].interface_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_cutover_interface_response_item[0].interface_info |
+      type_debug) == 'list'
+
+- name: Use injected replacement interface records for offline validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_interface_records: >-
+      {{ switch_refresh_sda_fabric_border_cutover_interface_records_override }}
+  when: switch_refresh_sda_fabric_border_cutover_interface_records_override is defined
+
+- name: Validate cutover inventory identity record envelopes
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_identity_record is mapping
+      - switch_refresh_sda_fabric_border_cutover_identity_record.device_ip is defined
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_record.device_ip |
+        string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_identity_record.device_details |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_record.device_details |
+        default([]) | length == 1
+      - switch_refresh_sda_fabric_border_cutover_identity_record.device_details[0] is mapping
+    fail_msg: Cutover identity lookup returned an ambiguous or malformed inventory record.
+  loop: "{{ switch_refresh_sda_fabric_border_cutover_identity_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_identity_record
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_identity_record.device_ip |
+        default('inventory-record')
+      }}
+
+- name: Resolve each cutover mapping identity
+  ansible.builtin.include_tasks: resolve_cutover_identity_mapping.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_mapping: >-
+      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_identity_mapping
+    label: >-
+      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new_device_management_ip }}
+
+- name: Validate mapped replacement interfaces exist before manifest persistence
+  ansible.builtin.include_tasks: validate_cutover_destination_interfaces.yml
+  vars:
+    switch_refresh_sda_fabric_border_cutover_interface_validation_request:
+      resolved_mappings: >-
+        {{ switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings }}
+      interface_records: >-
+        {{ switch_refresh_sda_fabric_border_cutover_interface_records }}
+      context: >-
+        {{
+          switch_refresh_sda_fabric_border_cutover_identity_request.context |
+          default('cutover identity resolution')
+        }}
+
+- name: Validate cutover identity coverage and uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings | length ==
+        switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='new_management_ip') | list | sort ==
+        switch_refresh_sda_fabric_border_cutover_identity_request.expected_new_ips |
+        map('string') | list | sort
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='old_management_ip') | unique | list | length ==
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='old_identity') | map(attribute='inventory_uuid') |
+        map('lower') | unique | list | length ==
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='new_identity') | map(attribute='inventory_uuid') |
+        map('lower') | unique | list | length ==
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='old_management_ip') | list |
+        intersect(
+          switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+          map(attribute='new_management_ip') | list
+        ) | length == 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+        map(attribute='old_identity') | map(attribute='inventory_uuid') |
+        map('lower') | list |
+        intersect(
+          switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
+          map(attribute='new_identity') | map(attribute='inventory_uuid') |
+          map('lower') | list
+        ) | length == 0
+    fail_msg: Cutover inventory resolution did not produce unique, exact old/new coverage.
+
+- name: Publish resolved cutover identities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_identity_result:
+      resolved_mappings: >-
+        {{ switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings }}
+  no_log: true

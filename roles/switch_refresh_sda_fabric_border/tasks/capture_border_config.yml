@@ -1,0 +1,360 @@
+---
+# Generate and parse one device-scoped SDA fabric configuration. The existing
+# generator is intentionally the only source for border settings and handoffs.
+#
+# Input:
+#   switch_refresh_sda_fabric_border_capture_request:
+#     fabric_name: <site hierarchy>
+#     device_ip: <management IP>
+#     capture_file: <absolute YAML path>
+#     expected_state: present | absent | any
+#     context: <operator-facing description>
+# Output:
+#   switch_refresh_sda_fabric_border_capture_result
+
+- name: Validate border configuration capture request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_capture_request is mapping
+      - switch_refresh_sda_fabric_border_capture_request.fabric_name is defined
+      - switch_refresh_sda_fabric_border_capture_request.fabric_name is string
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.fabric_name |
+        trim | length > 0
+      - switch_refresh_sda_fabric_border_capture_request.device_ip is defined
+      - switch_refresh_sda_fabric_border_capture_request.device_ip is string
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.device_ip |
+        trim | length > 0
+      - switch_refresh_sda_fabric_border_capture_request.capture_file is defined
+      - switch_refresh_sda_fabric_border_capture_request.capture_file is string
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.capture_file |
+        trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.capture_file |
+        regex_search('^/') is not none
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.capture_file |
+        basename not in ['', '.', '..', '/']
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.expected_state |
+        default('present') in ['present', 'absent', 'any']
+      - switch_refresh_sda_fabric_border_capture_request.context is defined
+      - >-
+        switch_refresh_sda_fabric_border_capture_request.context |
+        string | trim | length > 0
+    fail_msg: >-
+      Border configuration capture requires a non-empty fabric name, device
+      IP, absolute capture file, context, and expected_state of present,
+      absent, or any.
+
+- name: Normalize border configuration capture request
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_fabric_name: >-
+      {{ switch_refresh_sda_fabric_border_capture_request.fabric_name }}
+    switch_refresh_sda_fabric_border_capture_device_ip: >-
+      {{ switch_refresh_sda_fabric_border_capture_request.device_ip }}
+    switch_refresh_sda_fabric_border_capture_file: >-
+      {{ switch_refresh_sda_fabric_border_capture_request.capture_file }}
+    switch_refresh_sda_fabric_border_capture_expected_state: >-
+      {{ switch_refresh_sda_fabric_border_capture_request.expected_state | default('present') }}
+    switch_refresh_sda_fabric_border_capture_context: >-
+      {{ switch_refresh_sda_fabric_border_capture_request.context | string }}
+
+- name: Create protected border configuration capture directory
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_border_capture_file | dirname }}"
+    state: directory
+    mode: "0700"
+
+- name: Remove prior unique border configuration capture artifact
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_border_capture_file }}"
+    state: absent
+
+- name: Generate device-scoped border configuration
+  ansible.builtin.include_role:
+    name: sda_fabric_devices_config_generator
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+        - switch_refresh_sda_fabric_border_cutover
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    sda_fabric_devices_config_generator_state: gathered
+    sda_fabric_devices_config_generator_file_mode: overwrite
+    sda_fabric_devices_config_generator_file_path: >-
+      {{ switch_refresh_sda_fabric_border_capture_file }}
+    sda_fabric_devices_config_generator_config:
+      component_specific_filters:
+        components_list:
+          - fabric_devices
+        fabric_devices:
+          - fabric_name: >-
+              {{ switch_refresh_sda_fabric_border_capture_fabric_name }}
+            device_ip: >-
+              {{ switch_refresh_sda_fabric_border_capture_device_ip }}
+            device_roles:
+              - BORDER_NODE
+  no_log: true
+
+- name: Inspect generated border configuration artifact
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_capture_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_capture_stat
+
+- name: Validate generated border configuration artifact type
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_border_capture_stat.stat.exists | bool) or
+        (
+          switch_refresh_sda_fabric_border_capture_stat.stat.isreg |
+          default(false) | bool
+        )
+      - >-
+        not (switch_refresh_sda_fabric_border_capture_stat.stat.islnk |
+        default(false) | bool)
+    fail_msg: >-
+      The generator capture path must be a regular, non-symlink file during
+      {{ switch_refresh_sda_fabric_border_capture_context }}.
+
+- name: Protect generated border configuration artifact
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_border_capture_file }}"
+    state: file
+    mode: "0600"
+  when: switch_refresh_sda_fabric_border_capture_stat.stat.exists | bool
+
+- name: Read generated border configuration
+  ansible.builtin.slurp:
+    src: "{{ switch_refresh_sda_fabric_border_capture_file }}"
+  register: switch_refresh_sda_fabric_border_capture_slurp
+  no_log: true
+  when: switch_refresh_sda_fabric_border_capture_stat.stat.exists | bool
+
+- name: Initialize absent generated border configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_document:
+      config: []
+  no_log: true
+
+- name: Parse generated border configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_document: >-
+      {{ switch_refresh_sda_fabric_border_capture_slurp.content | b64decode | from_yaml }}
+  no_log: true
+  when: switch_refresh_sda_fabric_border_capture_stat.stat.exists | bool
+
+- name: Validate generated border document envelope
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_capture_document is mapping
+      - switch_refresh_sda_fabric_border_capture_document.config is defined
+      - >-
+        (switch_refresh_sda_fabric_border_capture_document.config |
+        type_debug) == 'list'
+    fail_msg: >-
+      The SDA fabric-device generator returned an invalid YAML envelope during
+      {{ switch_refresh_sda_fabric_border_capture_context }}.
+
+- name: Initialize generated border fabric records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_fabric_records: []
+    switch_refresh_sda_fabric_border_capture_device_records: []
+  no_log: true
+
+- name: Validate generated fabric configuration records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_generated_config_item is mapping
+      - switch_refresh_sda_fabric_border_generated_config_item.fabric_devices is defined
+      - switch_refresh_sda_fabric_border_generated_config_item.fabric_devices is mapping
+      - >-
+        switch_refresh_sda_fabric_border_generated_config_item.fabric_devices.fabric_name |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_generated_config_item.fabric_devices.device_config |
+        default([]) | type_debug) == 'list'
+    fail_msg: >-
+      The SDA fabric-device generator returned a malformed fabric record during
+      {{ switch_refresh_sda_fabric_border_capture_context }}.
+  loop: "{{ switch_refresh_sda_fabric_border_capture_document.config }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_generated_config_item
+    label: generated-fabric-record
+
+- name: Select generated records for the requested fabric
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_fabric_records: >-
+      {{
+        switch_refresh_sda_fabric_border_capture_fabric_records +
+        [switch_refresh_sda_fabric_border_generated_config_item.fabric_devices]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_capture_document.config }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_generated_config_item
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_generated_config_item
+        .fabric_devices.fabric_name
+      }}
+  when: >-
+    switch_refresh_sda_fabric_border_generated_config_item
+    .fabric_devices.fabric_name ==
+    switch_refresh_sda_fabric_border_capture_fabric_name
+  no_log: true
+
+- name: Collect generated device records in the requested fabric
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_device_records: >-
+      {{
+        switch_refresh_sda_fabric_border_capture_device_records +
+        switch_refresh_sda_fabric_border_generated_fabric_item.device_config
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_capture_fabric_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_generated_fabric_item
+    label: >-
+      {{ switch_refresh_sda_fabric_border_generated_fabric_item.fabric_name }}
+  no_log: true
+
+- name: Validate generated device record types
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_generated_device_item is mapping
+      - switch_refresh_sda_fabric_border_generated_device_item.device_ip is defined
+      - switch_refresh_sda_fabric_border_generated_device_item.device_ip is string
+    fail_msg: >-
+      The SDA fabric-device generator returned a malformed device record during
+      {{ switch_refresh_sda_fabric_border_capture_context }}.
+  loop: "{{ switch_refresh_sda_fabric_border_capture_device_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_generated_device_item
+    label: >-
+      {{ switch_refresh_sda_fabric_border_generated_device_item.device_ip |
+      default('invalid-device') }}
+
+- name: Select exact generated border device record
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_capture_device_records |
+        selectattr(
+          'device_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_capture_device_ip
+        ) |
+        list
+      }}
+  no_log: true
+
+- name: Validate generated border device cardinality
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_capture_matches | length <= 1
+      - >-
+        switch_refresh_sda_fabric_border_capture_expected_state != 'present' or
+        switch_refresh_sda_fabric_border_capture_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_border_capture_expected_state != 'absent' or
+        switch_refresh_sda_fabric_border_capture_matches | length == 0
+    fail_msg: >-
+      Expected {{ switch_refresh_sda_fabric_border_capture_expected_state }}
+      border device {{ switch_refresh_sda_fabric_border_capture_device_ip }} in
+      {{ switch_refresh_sda_fabric_border_capture_fabric_name }} during
+      {{ switch_refresh_sda_fabric_border_capture_context }}, but the generator
+      returned {{ switch_refresh_sda_fabric_border_capture_matches | length }}
+      exact records.
+
+- name: Load generated border device record
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_device_config: >-
+      {{
+        switch_refresh_sda_fabric_border_capture_matches[0]
+        if (switch_refresh_sda_fabric_border_capture_matches | length == 1)
+        else {}
+      }}
+  no_log: true
+
+- name: Validate supported generated border configuration
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([]) | sort == ['BORDER_NODE']
+      - switch_refresh_sda_fabric_border_capture_device_config.borders_settings is defined
+      - switch_refresh_sda_fabric_border_capture_device_config.borders_settings is mapping
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_settings is defined
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_settings is mapping
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_settings.local_autonomous_system_number |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer2_handoff | default([]) | type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_handoff_ip_transit | default([]) |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_handoff_sda_transit is not defined or
+        switch_refresh_sda_fabric_border_capture_device_config
+        .borders_settings.layer3_handoff_sda_transit is mapping
+    fail_msg: >-
+      Generated device {{ switch_refresh_sda_fabric_border_capture_device_ip }}
+      must be a pure BORDER_NODE with manager-ready Layer 3 border settings.
+      Combined fabric roles are not supported by this initial implementation.
+  when: switch_refresh_sda_fabric_border_capture_matches | length == 1
+
+- name: Publish generated border configuration capture
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capture_result:
+      fabric_name: "{{ switch_refresh_sda_fabric_border_capture_fabric_name }}"
+      device_ip: "{{ switch_refresh_sda_fabric_border_capture_device_ip }}"
+      found: "{{ switch_refresh_sda_fabric_border_capture_matches | length == 1 }}"
+      generated_document: "{{ switch_refresh_sda_fabric_border_capture_document }}"
+      generated_config: >-
+        {{ switch_refresh_sda_fabric_border_capture_document.config }}
+      device_config: "{{ switch_refresh_sda_fabric_border_capture_device_config }}"
+      l2_handoff_count: >-
+        {{
+          switch_refresh_sda_fabric_border_capture_device_config
+          .borders_settings.layer2_handoff |
+          default([]) | length
+          if (switch_refresh_sda_fabric_border_capture_matches | length == 1)
+          else 0
+        }}
+      ip_transit_handoff_count: >-
+        {{
+          switch_refresh_sda_fabric_border_capture_device_config
+          .borders_settings.layer3_handoff_ip_transit |
+          default([]) | length
+          if (switch_refresh_sda_fabric_border_capture_matches | length == 1)
+          else 0
+        }}
+      sda_transit_handoff_count: >-
+        {{
+          1
+          if (
+            switch_refresh_sda_fabric_border_capture_matches | length == 1 and
+            switch_refresh_sda_fabric_border_capture_device_config
+            .borders_settings.layer3_handoff_sda_transit |
+            default({}) | length > 0
+          )
+          else 0
+        }}
+  no_log: true

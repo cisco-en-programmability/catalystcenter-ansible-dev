@@ -1,0 +1,228 @@
+---
+# Persist switch_refresh_sda_fabric_border_cutover_plan. The same helper is
+# used for the initial capture and every progress-state update.
+- name: Validate border cutover plan before manifest persistence
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_plan is mapping
+      - switch_refresh_sda_fabric_border_cutover_plan.name | default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_plan.fabric_site_name_hierarchy |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_plan.new_management_ips |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_cutover_plan.new_management_ips | default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_plan.resolved_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_plan.resolved_mappings |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_plan.manifest_file |
+        default('') | string | regex_search('^/') is not none
+      - >-
+        switch_refresh_sda_fabric_border_cutover_plan.input_fingerprint |
+        default('') | string | regex_search('^[0-9a-f]{64}$') is not none
+    fail_msg: A complete immutable cutover plan is required before manifest persistence.
+
+- name: Convert cutover plan mappings to manifest entries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_manifest_entries: []
+
+- name: Build cutover manifest device entries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_manifest_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_manifest_entries + [
+          {
+            'old': switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_identity,
+            'new': switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_identity,
+            'old_selector':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector |
+              default({}),
+            'interface_mappings':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.interface_mappings |
+              default([]),
+            'original_device_config':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.original_device_config,
+            'base_new_device_config':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.base_new_device_config,
+            'expected_new_device_config':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.expected_new_device_config,
+            'source_config_fingerprint':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.source_config_fingerprint,
+            'base_new_config_fingerprint':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.base_new_device_config |
+              to_json(sort_keys=true) |
+              hash('sha256'),
+            'expected_new_config_fingerprint':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.expected_new_device_config |
+              to_json(sort_keys=true) |
+              hash('sha256'),
+            'source_handoff_interfaces':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.source_handoff_interfaces |
+              default([]),
+            'immutable_payload_fingerprint':
+              {
+                'old':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_identity,
+                'new':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_identity,
+                'old_selector':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector |
+                  default({}),
+                'interface_mappings':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.interface_mappings |
+                  default([]),
+                'original_device_config':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.original_device_config,
+                'base_new_device_config':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.base_new_device_config,
+                'expected_new_device_config':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.expected_new_device_config,
+                'source_config_fingerprint':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.source_config_fingerprint,
+                'source_handoff_interfaces':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.source_handoff_interfaces |
+                  default([])
+              } |
+              to_json(sort_keys=true) |
+              hash('sha256'),
+            'status':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.status |
+              default('captured')
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_cutover_plan.resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_manifest_mapping
+    label: >-
+      {{ switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_management_ip }}
+  no_log: true
+
+- name: Validate cutover manifest entries before persistence
+  ansible.builtin.include_tasks: validate_cutover_manifest_entries.yml
+  vars:
+    switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+      entries: "{{ switch_refresh_sda_fabric_border_cutover_manifest_entries }}"
+      expected_new_ips: >-
+        {{ switch_refresh_sda_fabric_border_cutover_plan.new_management_ips }}
+      context: >-
+        cutover plan {{ switch_refresh_sda_fabric_border_cutover_plan.name }}
+
+- name: Derive aggregate cutover manifest status
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_manifest_status: >-
+      {{
+        'captured'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'captured') | list | length > 0
+        )
+        else 'deletion_started'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'deletion_started') | list | length > 0
+        )
+        else 'old_deleted'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'old_deleted') | list | length > 0
+        )
+        else 'handoff_verified'
+        if (
+          switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries |
+          selectattr('status', 'equalto', 'handoff_verified') | list | length > 0
+        )
+        else 'complete'
+      }}
+
+- name: Build durable border cutover manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_manifest:
+      schema_version: 1
+      controller:
+        host: "{{ catalystcenter_host | string }}"
+        port: "{{ catalystcenter_port | default(443) | int }}"
+      batch_name: "{{ switch_refresh_sda_fabric_border_cutover_plan.name | string }}"
+      fabric_site_name_hierarchy: >-
+        {{ switch_refresh_sda_fabric_border_cutover_plan.fabric_site_name_hierarchy | string }}
+      input_fingerprint: >-
+        {{ switch_refresh_sda_fabric_border_cutover_plan.input_fingerprint | string }}
+      source_config_fingerprint: >-
+        {{ switch_refresh_sda_fabric_border_manifest_entry_validation_result.source_config_fingerprint }}
+      status: "{{ switch_refresh_sda_fabric_border_cutover_manifest_status }}"
+      devices: >-
+        {{ switch_refresh_sda_fabric_border_manifest_entry_validation_result.entries }}
+  no_log: true
+
+- name: Create protected border cutover manifest directory
+  ansible.builtin.file:
+    path: >-
+      {{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file | dirname }}
+    state: directory
+    mode: "0700"
+
+- name: Inspect existing border cutover manifest target
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_cutover_manifest_existing_stat
+
+- name: Reject unsafe existing cutover manifest target
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_border_cutover_manifest_existing_stat.stat.exists | bool) or
+        (
+          switch_refresh_sda_fabric_border_cutover_manifest_existing_stat.stat.isreg |
+          default(false)
+        )
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_cutover_manifest_existing_stat.stat.islnk |
+          default(false)
+        )
+    fail_msg: >-
+      Refusing to replace a non-regular or symlink manifest target:
+      {{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file }}.
+
+# ansible.builtin.copy stages a temporary file and atomically replaces dest.
+- name: Atomically persist durable border cutover manifest
+  ansible.builtin.copy:
+    dest: "{{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file }}"
+    content: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_manifest |
+        to_nice_yaml(indent=2, width=4096, sort_keys=false)
+      }}
+    mode: "0600"
+  no_log: true
+
+- name: Inspect persisted border cutover manifest
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_border_cutover_manifest_persisted_stat
+
+- name: Validate persisted cutover manifest protection
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_manifest_persisted_stat.stat.exists | bool
+      - switch_refresh_sda_fabric_border_cutover_manifest_persisted_stat.stat.isreg | bool
+      - >-
+        not (switch_refresh_sda_fabric_border_cutover_manifest_persisted_stat.stat.islnk |
+        default(false))
+      - switch_refresh_sda_fabric_border_cutover_manifest_persisted_stat.stat.mode == '0600'
+    fail_msg: The durable cutover manifest was not persisted as a protected regular file.
+
+- name: Publish persisted border cutover manifest facts
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_persisted_cutover_manifest: >-
+      {{ switch_refresh_sda_fabric_border_cutover_manifest }}
+    switch_refresh_sda_fabric_border_persisted_cutover_manifest_file: >-
+      {{ switch_refresh_sda_fabric_border_cutover_plan.manifest_file }}
+  no_log: true

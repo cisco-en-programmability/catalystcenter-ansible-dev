@@ -1,0 +1,132 @@
+---
+# Replace exactly one entry in the mutable runtime copy of an immutable plan.
+- name: Validate cutover plan entry update request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_entry_update_request is mapping
+      - >-
+        switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_entry_update_request.status in
+        ['captured', 'deletion_started', 'old_deleted', 'handoff_verified', 'complete']
+      - switch_refresh_sda_fabric_border_active_cutover_plan is mapping
+    fail_msg: A target replacement and valid forward cutover state are required.
+
+- name: Select current cutover plan entry for update
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_entry_update_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings |
+        selectattr(
+          'new_management_ip',
+          'equalto',
+          switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+          string
+        ) |
+        list
+      }}
+
+- name: Validate cutover plan entry update target
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_entry_update_matches | length == 1
+    fail_msg: Cutover manifest state updates must target exactly one entry.
+
+- name: Derive monotonic idempotent cutover entry state
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_entry_effective_status: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_entry_update_matches[0].status
+        if (
+          {
+            'captured': 0,
+            'deletion_started': 1,
+            'old_deleted': 2,
+            'handoff_verified': 3,
+            'complete': 4
+          }[switch_refresh_sda_fabric_border_cutover_entry_update_matches[0].status] >=
+          {
+            'captured': 0,
+            'deletion_started': 1,
+            'old_deleted': 2,
+            'handoff_verified': 3,
+            'complete': 4
+          }[switch_refresh_sda_fabric_border_cutover_entry_update_request.status]
+        )
+        else switch_refresh_sda_fabric_border_cutover_entry_update_request.status
+      }}
+
+- name: Rebuild active cutover mapping list with updated entry
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_updated_mappings: []
+
+- name: Add updated active cutover mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_updated_mappings: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_updated_mappings + [
+          switch_refresh_sda_fabric_border_cutover_update_mapping |
+          combine(
+            {
+              'status': switch_refresh_sda_fabric_border_cutover_entry_effective_status,
+              'hostname_verified':
+                switch_refresh_sda_fabric_border_cutover_entry_update_request.hostname_verified |
+                default(
+                  switch_refresh_sda_fabric_border_cutover_update_mapping.hostname_verified |
+                  default(false)
+                )
+            },
+            recursive=true
+          )
+          if (
+            switch_refresh_sda_fabric_border_cutover_update_mapping.new_management_ip | string ==
+            switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+            string
+          )
+          else switch_refresh_sda_fabric_border_cutover_update_mapping
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_update_mapping
+    label: "{{ switch_refresh_sda_fabric_border_cutover_update_mapping.new_management_ip }}"
+  no_log: true
+
+- name: Publish updated active cutover plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_active_cutover_plan: >-
+      {{
+        switch_refresh_sda_fabric_border_active_cutover_plan |
+        combine(
+          {
+            'resolved_mappings':
+              switch_refresh_sda_fabric_border_cutover_updated_mappings,
+            'status':
+              'captured'
+              if (
+                switch_refresh_sda_fabric_border_cutover_updated_mappings |
+                selectattr('status', 'equalto', 'captured') | list | length > 0
+              )
+              else 'deletion_started'
+              if (
+                switch_refresh_sda_fabric_border_cutover_updated_mappings |
+                selectattr('status', 'equalto', 'deletion_started') | list |
+                length > 0
+              )
+              else 'old_deleted'
+              if (
+                switch_refresh_sda_fabric_border_cutover_updated_mappings |
+                selectattr('status', 'equalto', 'old_deleted') | list | length > 0
+              )
+              else 'handoff_verified'
+              if (
+                switch_refresh_sda_fabric_border_cutover_updated_mappings |
+                selectattr('status', 'equalto', 'handoff_verified') | list | length > 0
+              )
+              else 'complete'
+          },
+          recursive=true
+        )
+      }}
+  no_log: true

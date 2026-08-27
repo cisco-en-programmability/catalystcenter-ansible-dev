@@ -1,0 +1,146 @@
+---
+# Pure recovery state machine. No controller operation is performed here.
+# Input switch_refresh_sda_fabric_border_cutover_classification_request:
+#   old_fabric_present: bool
+#   old_inventory_present: bool
+#   replacement_config_state: empty|subset|exact|divergent
+#   destructive_approved: bool
+#   resume_from_manifest: bool
+- name: Validate cutover recovery classification request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_classification_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present |
+        type_debug) == 'bool'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state
+        in ['empty', 'subset', 'exact', 'divergent']
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_classification_request.destructive_approved |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_classification_request.resume_from_manifest |
+        type_debug) == 'bool'
+    fail_msg: Cutover recovery classification received an invalid live-state envelope.
+
+- name: Derive border cutover recovery action
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_classification_result:
+      allowed: >-
+        {{
+          false
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state ==
+            'divergent'
+          )
+          else false
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else false
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state
+            in ['subset', 'exact']
+          )
+          else false
+          if (
+            (
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present or
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+            ) and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.destructive_approved
+          )
+          else true
+        }}
+      action: >-
+        {{
+          'stop_divergent_replacement'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state ==
+            'divergent'
+          )
+          else 'stop_inconsistent_old_state'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else 'stop_split_handoff_ownership'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state
+            in ['subset', 'exact']
+          )
+          else 'stop_destructive_approval_required'
+          if (
+            (
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present or
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+            ) and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.destructive_approved
+          )
+          else 'delete_old_fabric_then_inventory'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else 'delete_old_inventory'
+          if (
+            not switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else 'apply_expected_config'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state
+            in ['empty', 'subset']
+          )
+          else 'verify_expected_config'
+        }}
+      effective_status: >-
+        {{
+          'captured'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present or
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else 'handoff_verified'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state ==
+            'exact'
+          )
+          else 'old_deleted'
+        }}
+      reason: >-
+        {{
+          'replacement configuration is divergent or contains unexpected handoffs'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state ==
+            'divergent'
+          )
+          else 'old fabric membership exists without the captured inventory identity'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+          )
+          else 'old and replacement devices both own border handoff intent'
+          if (
+            switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present and
+            switch_refresh_sda_fabric_border_cutover_classification_request.replacement_config_state
+            in ['subset', 'exact']
+          )
+          else 'remaining old-device deletion requires destructive approval'
+          if (
+            (
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_fabric_present or
+              switch_refresh_sda_fabric_border_cutover_classification_request.old_inventory_present
+            ) and
+            not switch_refresh_sda_fabric_border_cutover_classification_request.destructive_approved
+          )
+          else 'live state is safe for the selected roll-forward action'
+        }}
+

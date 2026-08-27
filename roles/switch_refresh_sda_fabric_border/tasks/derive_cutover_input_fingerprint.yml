@@ -1,0 +1,22 @@
+---
+# Keep this fingerprint limited to canonical user input. It must be possible to
+# recompute it after the old device and its configuration have been deleted.
+- name: Build canonical border cutover input fingerprint
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_input_fingerprint: >-
+      {{
+        {
+          'batch_name': refresh_item.name | string,
+          'site': refresh_item.fabric_site_name_hierarchy | string,
+          'new_management_ips':
+            refresh_item.new_devices.device_ips |
+            map('string') |
+            sort,
+          'device_mapping':
+            refresh_item.device_mapping |
+            sort(attribute='new_device_management_ip')
+        } |
+        to_json(sort_keys=true) |
+        hash('sha256')
+      }}
+

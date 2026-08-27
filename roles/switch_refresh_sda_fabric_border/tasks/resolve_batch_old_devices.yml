@@ -1,0 +1,135 @@
+---
+- name: Initialize old border inventory lookup
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_old_device_identifiers: []
+    switch_refresh_sda_fabric_border_batch_old_device_info_entries: []
+    switch_refresh_sda_fabric_border_batch_resolved_mappings: []
+
+- name: Build old border inventory lookup identifiers
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_old_device_identifiers: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_old_device_identifiers + [
+          {'ip_address': [switch_refresh_sda_fabric_border_old_mapping.old.management_ip]}
+          if (switch_refresh_sda_fabric_border_old_mapping.old.management_ip is defined)
+          else {'hostname': [switch_refresh_sda_fabric_border_old_mapping.old.hostname]}
+          if (switch_refresh_sda_fabric_border_old_mapping.old.hostname is defined)
+          else {
+            'serial_number': [
+              switch_refresh_sda_fabric_border_old_mapping.old.serial_number
+            ]
+          }
+          if (switch_refresh_sda_fabric_border_old_mapping.old.serial_number is defined)
+          else {'mac_address': [switch_refresh_sda_fabric_border_old_mapping.old.mac_address]}
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_old_mapping
+    label: "{{ switch_refresh_sda_fabric_border_old_mapping.new_device_management_ip }}"
+
+- name: Resolve old border inventory records
+  ansible.builtin.include_role:
+    name: network_devices_info
+  vars:
+    network_devices_info_state: gathered
+    network_devices_info_config_verify: false
+    network_devices_info_config:
+      - network_devices:
+          - device_identifier: >-
+              {{ switch_refresh_sda_fabric_border_batch_old_device_identifiers }}
+            timeout: >-
+              {{
+                refresh_item.device_info_lookup_timeout |
+                default(switch_refresh_sda_fabric_border_device_info_lookup_timeout)
+              }}
+            retries: >-
+              {{
+                refresh_item.device_info_lookup_retries |
+                default(switch_refresh_sda_fabric_border_device_info_lookup_retries)
+              }}
+            interval: >-
+              {{
+                refresh_item.device_info_lookup_interval |
+                default(switch_refresh_sda_fabric_border_device_info_lookup_interval)
+              }}
+            requested_info:
+              - device_info
+
+- name: Extract old border inventory records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_old_device_info_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_old_device_info_entries +
+        switch_refresh_sda_fabric_border_old_lookup_response[0].device_info
+      }}
+  loop: "{{ (network_devices_info_result | default({})).response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_old_lookup_response
+    label: old-border-device-info
+  when:
+    - (switch_refresh_sda_fabric_border_old_lookup_response | type_debug) == 'list'
+    - switch_refresh_sda_fabric_border_old_lookup_response | length > 0
+    - switch_refresh_sda_fabric_border_old_lookup_response[0] is mapping
+    - switch_refresh_sda_fabric_border_old_lookup_response[0].device_info is defined
+    - >-
+      (switch_refresh_sda_fabric_border_old_lookup_response[0].device_info |
+      type_debug) == 'list'
+
+- name: Validate old border inventory response records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_old_info is mapping
+      - switch_refresh_sda_fabric_border_old_info.device_ip is defined
+      - switch_refresh_sda_fabric_border_old_info.device_ip is string
+      - switch_refresh_sda_fabric_border_old_info.device_ip | trim | length > 0
+      - switch_refresh_sda_fabric_border_old_info.device_details is defined
+      - >-
+        (switch_refresh_sda_fabric_border_old_info.device_details | type_debug) == 'list'
+      - switch_refresh_sda_fabric_border_old_info.device_details | length == 1
+      - switch_refresh_sda_fabric_border_old_info.device_details[0] is mapping
+    fail_msg: >-
+      An old border selector did not resolve to exactly one structured inventory
+      record. No fabric change was made.
+  loop: "{{ switch_refresh_sda_fabric_border_batch_old_device_info_entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_old_info
+    label: >-
+      {{ switch_refresh_sda_fabric_border_old_info.device_ip | default('old-border') }}
+
+- name: Resolve each old-to-new border mapping
+  ansible.builtin.include_tasks: resolve_batch_mapping.yml
+  vars:
+    switch_refresh_sda_fabric_border_resolve_mapping: >-
+      {{ switch_refresh_sda_fabric_border_mapping_to_resolve }}
+  loop: "{{ switch_refresh_sda_fabric_border_batch_device_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_mapping_to_resolve
+    label: >-
+      {{ switch_refresh_sda_fabric_border_mapping_to_resolve.new_device_management_ip }}
+
+- name: Validate resolved old border coverage and uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_resolved_mappings | length ==
+        switch_refresh_sda_fabric_border_batch_device_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_resolved_mappings |
+        map(attribute='new_management_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips | map('string') | list | sort
+      - >-
+        switch_refresh_sda_fabric_border_batch_resolved_mappings |
+        map(attribute='old_management_ip') | unique | list | length ==
+        switch_refresh_sda_fabric_border_batch_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_batch_resolved_mappings |
+        map(attribute='old_management_ip') | map('string') | list |
+        intersect(
+          switch_refresh_sda_fabric_border_all_batch_device_ips |
+          default(switch_refresh_sda_fabric_border_batch_device_ips)
+        ) | length == 0
+    fail_msg: >-
+      Every replacement in batch {{ switch_refresh_sda_fabric_border_batch_name }}
+      must resolve to exactly one unique old border, and an old border cannot
+      also be a replacement in this run.

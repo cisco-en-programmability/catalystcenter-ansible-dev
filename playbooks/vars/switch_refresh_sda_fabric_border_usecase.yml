@@ -1,0 +1,50 @@
+---
+# Define vault_* variables in an encrypted Ansible Vault file or another
+# inventory-backed secret store. Never put real credentials in this file.
+catalystcenter_host: "{{ vault_catalystcenter_host }}"
+catalystcenter_port: 443
+catalystcenter_username: "{{ vault_catalystcenter_username }}"
+catalystcenter_password: "{{ vault_catalystcenter_password }}"
+catalystcenter_version: "2.3.7.9"
+catalystcenter_verify: true
+catalystcenter_debug: false
+catalystcenter_log: false
+
+# Change to true only for the explicitly approved normal cutover or approved
+# manifest continuation. Leave false for prepare and non-destructive resume.
+switch_refresh_sda_fabric_border_cutover_approved: false
+switch_refresh_sda_fabric_border_resume_from_manifest: false
+switch_refresh_sda_fabric_border_manifest_dir: >-
+  /var/lib/catalystcenter/switch_refresh_sda_fabric_border
+switch_refresh_sda_fabric_border_allow_single_border_outage: false
+switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
+
+switch_refresh_sda_fabric_border_inventory_credentials:
+  username: "{{ vault_switch_cli_username }}"
+  password: "{{ vault_switch_cli_password }}"
+  enable_password: "{{ vault_switch_enable_password }}"
+  cli_transport: ssh
+  type: NETWORK_DEVICE
+
+switch_refresh_sda_fabric_border_batches:
+  - name: blr-border-refresh
+    fabric_site_name_hierarchy: Global/India/BLR/Fabric
+    onboarding_method: discovery
+
+    new_devices:
+      device_ips:
+        - "192.0.2.20"
+
+      # Optional complete custom configurations may be provided here as
+      # discovery_config, inventory_config, and provision_config. For LAN
+      # Automation, change onboarding_method and provide lan_automation_config.
+
+    device_mapping:
+      - old:
+          serial_number: OLD-BORDER-01
+        new_device_management_ip: "192.0.2.20"
+        handoff_interface_mappings:
+          - source_interface_name: FortyGigabitEthernet1/1/1
+            destination_interface_name: HundredGigE1/0/1
+          - source_interface_name: FortyGigabitEthernet1/1/2
+            destination_interface_name: HundredGigE1/0/2

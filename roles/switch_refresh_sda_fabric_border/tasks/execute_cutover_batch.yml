@@ -1,0 +1,66 @@
+---
+# Input: switch_refresh_sda_fabric_border_cutover_execution_plan
+# Output: appends one batch result to switch_refresh_sda_fabric_border_cutover_results.
+- name: Validate serial border cutover execution plan
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_cutover_execution_plan is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_cutover_execution_plan.resolved_mappings |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_cutover_execution_plan.resolved_mappings |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_cutover_execution_plan.manifest_file |
+        default('') | string | regex_search('^/') is not none
+    fail_msg: Serial cutover execution requires one validated manifest-backed batch plan.
+
+- name: Initialize active serial border cutover batch
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_active_cutover_plan: >-
+      {{ switch_refresh_sda_fabric_border_cutover_execution_plan }}
+    switch_refresh_sda_fabric_border_active_cutover_mapping_results: []
+  no_log: true
+
+- name: Execute border cutovers one mapping at a time
+  ansible.builtin.include_tasks: cutover_mapping.yml
+  vars:
+    switch_refresh_sda_fabric_border_active_cutover_mapping: >-
+      {{ switch_refresh_sda_fabric_border_cutover_mapping_selector }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_cutover_execution_plan.resolved_mappings }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_cutover_mapping_selector
+    label: >-
+      {{ switch_refresh_sda_fabric_border_cutover_mapping_selector.new_management_ip }}
+
+- name: Require every serial mapping reached complete state
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_active_cutover_mapping_results | length ==
+        switch_refresh_sda_fabric_border_cutover_execution_plan.resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings |
+        rejectattr('status', 'equalto', 'complete') | list | length == 0
+    fail_msg: One or more mappings did not reach complete state; later cutovers were stopped.
+
+- name: Append completed border cutover batch result
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_results: >-
+      {{
+        (switch_refresh_sda_fabric_border_cutover_results | default([])) + [
+          {
+            'batch_name': switch_refresh_sda_fabric_border_active_cutover_plan.name,
+            'fabric_site_name_hierarchy':
+              switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy,
+            'manifest_path':
+              switch_refresh_sda_fabric_border_active_cutover_plan.manifest_file,
+            'mappings':
+              switch_refresh_sda_fabric_border_active_cutover_mapping_results,
+            'status': 'complete'
+          }
+        ]
+      }}
+
