@@ -32,7 +32,9 @@ Generate YAML playbooks for RMA device replacement workflows from existing confi
 
 ### Role-Specific Variables
 - `rma_config_generator_state` the desired state for the module operation. Only C(gathered) state is supported to generate YAML playbooks from existing RMA configurations. Choices: `gathered`. Default: `gathered`.
-- `rma_config_generator_config` a list of configuration filters for generating YAML playbooks compatible with the C(rma_workflow_manager) module. Each configuration entry can include file path specification, component filters, and auto-discovery settings. Multiple configuration entries can be provided to generate separate playbooks with different filter criteria. Optional; omitted when left unset.
+- `rma_config_generator_file_path` path where the YAML configuration file will be saved. If not provided, the file will be saved in the current working directory with a default file name. Optional; omitted when left unset.
+- `rma_config_generator_file_mode` controls how the YAML file is written when C(file_path) is specified. C(overwrite) replaces any existing file content. C(append) adds new configurations to the end of an existing file. Choices: `overwrite`, `append`. Optional; omitted when left unset.
+- `rma_config_generator_config` a dictionary of configuration filters for generating YAML playbooks compatible with the C(rma_workflow_manager) module. The configuration can include component filters and global filters. Optional; omitted when left unset.
 
 ## Dependencies
 
@@ -48,9 +50,10 @@ None
         catalystcenter_host: "{{ vault_catalystcenter_host }}"
         catalystcenter_username: "{{ vault_catalystcenter_username }}"
         catalystcenter_password: "{{ vault_catalystcenter_password }}"
+        rma_config_generator_file_path: "/tmp/rma_config_generator.yml"
         rma_config_generator_config:
-          - file_path: "tmp/rma_config_generator.yml"
-            global_filters: {}
+          component_specific_filters:
+            components_list: ["device_replacement_workflows"]
 ```
 
 <!-- BEGIN WORKFLOW README ENHANCEMENTS -->
@@ -69,7 +72,7 @@ No matching workflow documentation folder was found for `rma_config_generator` i
         catalystcenter_username: "{{ vault_catalystcenter_username }}"
         catalystcenter_password: "{{ vault_catalystcenter_password }}"
         rma_config_generator_state: "gathered"
-        rma_config_generator_config: []
+        rma_config_generator_config: {}
 ```
 <!-- END WORKFLOW README ENHANCEMENTS -->
 

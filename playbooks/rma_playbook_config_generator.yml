@@ -20,10 +20,10 @@
         catalystcenter_api_task_timeout: 1000
         catalystcenter_task_poll_interval: 1
         state: gathered
+        file_path: "/tmp/rma_playbook_config.yml"
         config:
-          - file_path: "/Users/priyadharshini/Downloads/rma_info"
-            component_specific_filters:
-              components_list: ["device_replacement_workflows"]
-              device_replacement_workflows:
-                - replacement_device_serial_number: "9TRQFABSFR2"
-                - replacement_status: "REPLACED"
+          component_specific_filters:
+            components_list: ["device_replacement_workflows"]
+            device_replacement_workflows:
+              - replacement_device_serial_number: "9TRQFABSFR2"
+              - replacement_status: "REPLACED"
