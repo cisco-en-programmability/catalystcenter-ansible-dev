@@ -115,6 +115,48 @@ Parameters
   * - .. raw:: html
 
         <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-activation_poll_interval"></div>
+
+      .. _ansible_collections.cisco.catalystcenter.swim_workflow_manager_module__parameter-activation_poll_interval:
+
+      .. rst-class:: ansible-option-title
+
+      **activation_poll_interval**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-activation_poll_interval" title="Permalink to this option"></a>
+
+      .. rst-class:: ansible-option-type-line
+
+      :ansible-option-type:`integer`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Interval in seconds between successive status polls of an image activation task.
+
+      The value must be at least 1 second.
+
+      Increase this value to lower the API request frequency and help avoid rate-limiting (HTTP 429) during activations that involve device reboots.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-default-bold:`Default:` :ansible-option-default:`30`
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
         <div class="ansibleOptionAnchor" id="parameter-catalystcenter_api_task_timeout"></div>
         <div class="ansibleOptionAnchor" id="parameter-dnac_api_task_timeout"></div>
 
@@ -3215,6 +3257,50 @@ Parameters
       - :ansible-option-choices-entry-default:`false` :ansible-option-choices-default-mark:`← (default)`
       - :ansible-option-choices-entry:`true`
 
+
+      .. raw:: html
+
+        </div>
+
+  * - .. raw:: html
+
+        <div class="ansible-option-cell">
+        <div class="ansibleOptionAnchor" id="parameter-distribution_poll_interval"></div>
+
+      .. _ansible_collections.cisco.catalystcenter.swim_workflow_manager_module__parameter-distribution_poll_interval:
+
+      .. rst-class:: ansible-option-title
+
+      **distribution_poll_interval**
+
+      .. raw:: html
+
+        <a class="ansibleOptionLink" href="#parameter-distribution_poll_interval" title="Permalink to this option"></a>
+
+      .. rst-class:: ansible-option-type-line
+
+      :ansible-option-type:`integer`
+
+      .. raw:: html
+
+        </div>
+
+    - .. raw:: html
+
+        <div class="ansible-option-cell">
+
+      Interval in seconds between successive status polls of an image distribution task.
+
+      The value must be at least 1 second.
+
+      Also applies to the distribution phase that runs implicitly during an activation when \ :literal:`distribute\_if\_needed`\  is set.
+
+      Increase this value to lower the API request frequency and help avoid rate-limiting (HTTP 429) during large or long-running distributions.
+
+
+      .. rst-class:: ansible-option-line
+
+      :ansible-option-default-bold:`Default:` :ansible-option-default:`30`
 
       .. raw:: html
 
