@@ -422,3 +422,11 @@ releases:
         - Changes in sda_host_port_onboarding_playbook_config_generator module
         - Changes in swim_workflow_manager module
         - Changes in wireless_design_workflow_manager module
+  2.11.0:
+    release_date: "2026-09-02"
+    changes:
+      release_summary: Changes in workflow, config generator modules
+      bugfixes:
+        - Changes in provision_workflow_manager module
+        - Changes in swim_workflow_manager module
+        - Added attributes 'distribution_poll_interval', 'activation_poll_interval', 'distribution_batch_size', 'activation_batch_size', 'device_ip_addresses', 'device_hostnames', 'device_mac_addresses' in swim_workflow_manager module
