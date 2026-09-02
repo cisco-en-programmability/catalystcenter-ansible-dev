@@ -1658,7 +1658,7 @@ You need further requirements to be able to use this module,
 see <a class="reference internal" href="#ansible-collections-cisco-catalystcenter-swim-workflow-manager-module-requirements"><span class="std std-ref">Requirements</span></a> for details.</p>
 <p>To use it in a playbook, specify: <code class="code docutils literal notranslate"><span class="pre">cisco.catalystcenter.swim_workflow_manager</span></code>.</p>
 </div>
-<p class="ansible-version-added">New in cisco.catalystcenter 6.6.0</p>
+<p class="ansible-version-added">New in cisco.catalystcenter 1.0.0</p>
 <nav class="contents local" id="contents">
 <ul class="simple">
 <li><p><a class="reference internal" href="#synopsis" id="id89">Synopsis</a></p></li>
@@ -2084,7 +2084,6 @@ in 'device_ip_address' is merged into this list and duplicate entries are remove
 <tr class="row-even"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/image_activation_details/device_series_name"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-swim-workflow-manager-module-parameter-config-image-activation-details-device-series-name"><strong>device_series_name</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/image_activation_details/device_series_name" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">string</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>This parameter specifies the name of the device series. It is used to identify a specific series of devices, such as Cisco Catalyst 9300 Series Switches, within the Cisco Catalyst Center.</p>
 </div></td>
@@ -2141,8 +2140,7 @@ before timing out, including device reboot and startup verification.</p>
 for successful but slow activation processes.</p>
 <p>Note: This timeout is independent of the global 'catalystcenter_api_task_timeout' parameter</p>
 <p>type: int
-default: 1800
-version_added: 3.1.3.0</p>
+default: 1800</p>
 </dd>
 </dl>
 </div></td>
@@ -2344,7 +2342,6 @@ in 'device_ip_address' is merged into this list and duplicate entries are remove
 <tr class="row-odd"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/image_distribution_details/device_series_name"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-swim-workflow-manager-module-parameter-config-image-distribution-details-device-series-name"><strong>device_series_name</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/image_distribution_details/device_series_name" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">string</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>This parameter specifies the name of the device series. It is used to identify a specific series of devices, such as Cisco Catalyst 9300 Series Switches, within the Cisco Catalyst Center.</p>
 </div></td>
@@ -2380,8 +2377,7 @@ including image transfer to target devices, network propagation, and distributio
 <p>Note: This timeout is independent of the global 'catalystcenter_api_task_timeout' parameter
 and specifically applies to distribution operations only.</p>
 <p>default: 1800
-type: int
-version_added: 3.1.3.0</p>
+type: int</p>
 </dd>
 </dl>
 </div></td>

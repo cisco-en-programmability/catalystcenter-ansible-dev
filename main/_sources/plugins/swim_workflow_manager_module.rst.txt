@@ -54,7 +54,7 @@ cisco.catalystcenter.swim_workflow_manager module -- Module to manage SWIM (Soft
 
 .. rst-class:: ansible-version-added
 
-New in cisco.catalystcenter 6.6.0
+New in cisco.catalystcenter 1.0.0
 
 .. contents::
    :local:
@@ -1491,9 +1491,6 @@ Parameters
 
       :ansible-option-type:`string`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.12.0`
-
-
       .. raw:: html
 
         </div>
@@ -1675,7 +1672,6 @@ Parameters
           
           type: int
           default: 1800
-          version\_added: 3.1.3.0
           
 
 
@@ -2330,9 +2326,6 @@ Parameters
 
       :ansible-option-type:`string`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.12.0`
-
-
       .. raw:: html
 
         </div>
@@ -2435,7 +2428,6 @@ Parameters
           
           default: 1800
           type: int
-          version\_added: 3.1.3.0
           
 
 
