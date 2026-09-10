@@ -1120,7 +1120,7 @@ Notes
    - Templates, projects, images, and advanced claim parameters are not included in output.
    - Devices without a site or PnP claim type in the API response remain in the generated output, with the unavailable config-level field omitted.
    - Module supports both check mode and normal execution mode with identical behavior.
-   - Generated playbooks are compatible with pnp\_workflow\_manager module v6.40.0+.
+   - Generated playbooks are compatible with the pnp\_workflow\_manager module.
    - Device transformation skips devices missing required fields (serial\_number, pid).
    - Operation tracking includes success and failure details for all processed devices.
    - Device state defaults to "Unclaimed" when not provided by API response.

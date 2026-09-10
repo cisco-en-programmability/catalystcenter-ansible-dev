@@ -2507,9 +2507,6 @@ Parameters
 
       :ansible-option-type:`string` / :ansible-option-required:`required`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.12.0`
-
-
       .. raw:: html
 
         </div>
@@ -2547,9 +2544,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`integer`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.12.0`
-
 
       .. raw:: html
 
@@ -2594,9 +2588,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`integer`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.12.0`
-
 
       .. raw:: html
 
@@ -3987,11 +3978,6 @@ Notes
    - Enhanced provisioning features available in Catalyst Center \>= 2.3.5.3.
    - Primary SDK Methods - devices.Devices.add\_device, devices.Devices.delete\_device\_by\_id, devices.Devices.sync\_devices.
    - REST Endpoints - POST /dna/intent/api/v1/network-device, DELETE /dna/intent/api/v1/network-device/{id}, PUT /dna/intent/api/v1/network-device.
-   - Parameter 'ip\_address' renamed to 'ip\_address\_list' in v6.12.0.
-   - Removed 'managementIpAddress' options in v4.3.0.
-   - Removed parameters in v6.12.0 'serial\_number', 'device\_added', 'role\_source'.
-   - Added in v6.13.1 - 'add\_user\_defined\_field', 'update\_interface\_details', 'export\_device\_list', 'admin\_status'.
-   - Removed in v6.13.1 - 'provision\_wireless\_device', 'reprovision\_wired\_device', 'device\_updated'.
    - Use strong passwords for device access and file encryption (8+ characters, mixed case, numbers, symbols).
    - Enable SNMP v3 with AUTHPRIV mode for secure device monitoring.
    - Regularly rotate device credentials and update in Catalyst Center.

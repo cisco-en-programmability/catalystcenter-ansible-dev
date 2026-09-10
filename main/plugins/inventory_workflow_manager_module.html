@@ -2539,7 +2539,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <tr class="row-even"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/provision_wired_device/device_ip"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-inventory-workflow-manager-module-parameter-config-provision-wired-device-device-ip"><strong>device_ip</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/provision_wired_device/device_ip" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">string</span> / <span class="ansible-option-required">required</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>IP address of device to provision.</p>
 <p>Specifies the IP address of the wired device. This is a string value that should be in the format of standard IPv4 or IPv6 addresses.</p>
@@ -2549,7 +2548,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <tr class="row-odd"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/provision_wired_device/resync_retry_count"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-inventory-workflow-manager-module-parameter-config-provision-wired-device-resync-retry-count"><strong>resync_retry_count</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/provision_wired_device/resync_retry_count" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">integer</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Retry attempts for managed state verification.</p>
 <p>Determines the total number of retry attempts for checking if the device has reached a managed state during the provisioning process.</p>
@@ -2561,7 +2559,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <tr class="row-even"><td><div class="ansible-option-indent"></div><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/provision_wired_device/resync_retry_interval"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-inventory-workflow-manager-module-parameter-config-provision-wired-device-resync-retry-interval"><strong>resync_retry_interval</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/provision_wired_device/resync_retry_interval" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">integer</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Seconds between managed state checks.</p>
 <p>Sets the interval, in seconds, at which the system will recheck the device status throughout the provisioning process.</p>
@@ -2940,11 +2937,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <li><p>Enhanced provisioning features available in Catalyst Center &gt;= 2.3.5.3.</p></li>
 <li><p>Primary SDK Methods - devices.Devices.add_device, devices.Devices.delete_device_by_id, devices.Devices.sync_devices.</p></li>
 <li><p>REST Endpoints - POST /dna/intent/api/v1/network-device, DELETE /dna/intent/api/v1/network-device/{id}, PUT /dna/intent/api/v1/network-device.</p></li>
-<li><p>Parameter 'ip_address' renamed to 'ip_address_list' in v6.12.0.</p></li>
-<li><p>Removed 'managementIpAddress' options in v4.3.0.</p></li>
-<li><p>Removed parameters in v6.12.0 'serial_number', 'device_added', 'role_source'.</p></li>
-<li><p>Added in v6.13.1 - 'add_user_defined_field', 'update_interface_details', 'export_device_list', 'admin_status'.</p></li>
-<li><p>Removed in v6.13.1 - 'provision_wireless_device', 'reprovision_wired_device', 'device_updated'.</p></li>
 <li><p>Use strong passwords for device access and file encryption (8+ characters, mixed case, numbers, symbols).</p></li>
 <li><p>Enable SNMP v3 with AUTHPRIV mode for secure device monitoring.</p></li>
 <li><p>Regularly rotate device credentials and update in Catalyst Center.</p></li>

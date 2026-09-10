@@ -2151,7 +2151,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <tr class="row-odd"><td><div class="ansible-option-indent"></div><div class="ansible-option-cell">
 <div class="ansibleOptionAnchor" id="parameter-config/global_credentials"></div><p class="ansible-option-title" id="ansible-collections-cisco-catalystcenter-discovery-workflow-manager-module-parameter-config-global-credentials"><strong>global_credentials</strong></p>
 <a class="ansibleOptionLink" href="#parameter-config/global_credentials" title="Permalink to this option"></a><p class="ansible-option-type-line"><span class="ansible-option-type">dictionary</span></p>
-<p><span class="ansible-option-versionadded">added in cisco.catalystcenter 6.12.0</span></p>
 </div></td>
 <td><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell"><p>Set of various credential types, including CLI, SNMP, HTTP, and NETCONF, that a user has pre-configured in the Device Credentials section of the Cisco Catalyst Center.</p>
 <p>If user doesn't pass any global credentials in the playbook, then by default, we will use all the global credentials present in the Cisco Catalyst Center of each type for performing discovery. (Max 5 allowed)</p>
@@ -2418,7 +2417,6 @@ see <a class="reference internal" href="#ansible-collections-cisco-catalystcente
 <ul class="simple">
 <li><p>SDK Method used are discovery.Discovery.get_all_global_credentials, discovery.Discovery.start_discovery, task.Task.get_task_by_id, discovery.Discovery.get_discoveries_by_range, discovery.Discovery.get_discovered_network_devices_by_discovery_id', discovery.Discovery.delete_discovery_by_id discovery.Discovery.delete_all_discovery discovery.Discovery.get_count_of_all_discovery_jobs</p></li>
 <li><p>Paths used are get /dna/intent/api/v2/global-credential post /dna/intent/api/v1/discovery get /dna/intent/api/v1/task/{taskId} get /dna/intent/api/v1/discovery/{startIndex}/{recordsToReturn} get /dna/intent/api/v1/discovery/{id}/network-device delete /dna/intent/api/v1/discovery/{id} delete /dna/intent/api/v1/delete get /dna/intent/api/v1/discovery/count</p></li>
-<li><p>Removed 'global_cli_len' option in v6.12.0.</p></li>
 <li><p>Does not support <code class="docutils literal notranslate"><span class="pre">check_mode</span></code></p></li>
 <li><p>The plugin runs on the control node and does not use any ansible connection plugins instead embedded connection manager from Cisco Catalyst Center SDK</p></li>
 <li><p>Requires Python &gt;= 3.10, matching the controller Python versions supported by the collection's minimum ansible-core version (see the collection README for the current ansible-core / Python compatibility range)</p></li>

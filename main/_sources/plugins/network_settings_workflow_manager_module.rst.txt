@@ -1436,9 +1436,6 @@ Parameters
 
       :ansible-option-type:`string`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
-
       .. raw:: html
 
         </div>
@@ -1474,9 +1471,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
@@ -1555,9 +1549,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
@@ -2181,9 +2172,6 @@ Parameters
 
       :ansible-option-type:`string`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
-
       .. raw:: html
 
         </div>
@@ -2219,9 +2207,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
@@ -2300,9 +2285,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
@@ -3119,9 +3101,6 @@ Parameters
 
       :ansible-option-type:`string`
 
-      :ansible-option-versionadded:`added in cisco.catalystcenter 4.0.0`
-
-
       .. raw:: html
 
         </div>
@@ -3193,9 +3172,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
@@ -3689,9 +3665,6 @@ Parameters
       .. rst-class:: ansible-option-type-line
 
       :ansible-option-type:`string`
-
-      :ansible-option-versionadded:`added in cisco.catalystcenter 6.14.0`
-
 
       .. raw:: html
 
