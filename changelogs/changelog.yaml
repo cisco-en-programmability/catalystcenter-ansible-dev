@@ -430,3 +430,11 @@ releases:
         - Changes in provision_workflow_manager module
         - Changes in swim_workflow_manager module
         - Added attributes 'distribution_poll_interval', 'activation_poll_interval', 'distribution_batch_size', 'activation_batch_size', 'device_ip_addresses', 'device_hostnames', 'device_mac_addresses' in swim_workflow_manager module
+  2.12.0:
+    release_date: "2026-09-11"
+    changes:
+      release_summary: Changes in workflow, config generator modules
+      bugfixes:
+        - Changes in swim_workflow_manager module
+        - Changes in ise_radius_integration_playbook_config_generator module
+        - Added attributes 'force_distribution', 'force_activation' in swim_workflow_manager module
