@@ -1,0 +1,70 @@
+---
+- name: Gather topology information from Cisco Catalyst Center
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - credentials.yml
+  tasks:
+    - name: Gather topology information without creating a file
+      cisco.catalystcenter.topology_info_workflow_manager:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify }}"
+        catalystcenter_port: "{{ catalystcenter_port }}"
+        catalystcenter_version: "{{ catalystcenter_version }}"
+        catalystcenter_debug: "{{ catalystcenter_debug }}"
+        catalystcenter_log: true
+        catalystcenter_log_level: DEBUG
+        state: gathered
+        config:
+          - requested_info:
+              - site_topology
+              - physical_topology
+              - network_health
+              - vlan_details
+            node_type: device
+            output_file_info:
+              file_path: "{{ playbook_dir }}/output/topology_snapshot"
+              file_format: json
+              file_mode: w
+              timestamp: true
+      # register: topology_result
+
+    # - name: Display the gathered topology information
+    #   ansible.builtin.debug:
+    #     var: topology_result.response
+
+    # - name: Gather selected Layer 2 and Layer 3 topologies and export them
+    #   cisco.catalystcenter.topology_info_workflow_manager:
+    #     catalystcenter_host: "{{ catalystcenter_host }}"
+    #     catalystcenter_username: "{{ catalystcenter_username }}"
+    #     catalystcenter_password: "{{ catalystcenter_password }}"
+    #     catalystcenter_verify: "{{ catalystcenter_verify }}"
+    #     catalystcenter_port: "{{ catalystcenter_port }}"
+    #     catalystcenter_version: "{{ catalystcenter_version }}"
+    #     catalystcenter_debug: "{{ catalystcenter_debug }}"
+    #     catalystcenter_log: true
+    #     catalystcenter_log_level: DEBUG
+    #     state: gathered
+    #     config:
+    #       - requested_info:
+    #           - layer_2_topology
+    #           - layer_3_topology
+    #         vlan_ids:
+    #           - Vlan10
+    #           - Vlan20
+    #         topology_types:
+    #           - OSPF
+    #           - ISIS
+    #         output_file_info:
+    #           file_path: "{{ playbook_dir }}/output/topology_snapshot"
+    #           file_format: json
+    #           file_mode: w
+    #           timestamp: true
+    #   register: exported_topology_result
+
+    # - name: Display the exported topology file path
+    #   ansible.builtin.debug:
+    #     var: exported_topology_result.output_files
