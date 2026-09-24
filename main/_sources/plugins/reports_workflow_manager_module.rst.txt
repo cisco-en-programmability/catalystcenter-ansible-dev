@@ -90,6 +90,7 @@ The below requirements are needed on the host that executes this module.
 
 - catalystcentersdk \>= 3.2.3.0.0
 - python \>= 3.12
+- pytz
 
 
 
@@ -1651,6 +1652,10 @@ Parameters
         <div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell">
 
       Time zone identifier for the schedule.
+
+      Validation uses the IANA time zone database through \ :literal:`pytz`\ .
+
+      The \ :literal:`pytz`\  package must be installed on the Ansible control node.
 
       Uses standard time zone identifiers like \ :literal:`Asia/Calcutta`\ , \ :literal:`America/New\_York`\ , etc. For a complete list of supported time zones, please refer to the time\_zone field in the Inventory Workflow Manager documentation https://galaxy.ansible.com/ui/repo/published/cisco/catalystcenter/content/module/inventory\_workflow\_manager.
 
