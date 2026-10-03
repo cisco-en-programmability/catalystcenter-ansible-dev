@@ -113,6 +113,7 @@ plugins/modules/tags_playbook_config_generator.py import-2.7!skip
 plugins/modules/tags_workflow_manager.py import-2.7!skip
 plugins/modules/template_playbook_config_generator.py import-2.7!skip
 plugins/modules/template_workflow_manager.py import-2.7!skip
+plugins/modules/topology_info_workflow_manager.py import-2.7!skip
 plugins/modules/user_role_playbook_config_generator.py import-2.7!skip
 plugins/modules/user_role_workflow_manager.py import-2.7!skip
 plugins/modules/wired_campus_automation_playbook_config_generator.py import-2.7!skip
