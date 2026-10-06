@@ -75,11 +75,19 @@
           - switch_refresh_sda_fabric_border_batch_lan_automation_config | length == 0
           - switch_refresh_sda_fabric_border_batch_inventory_execution_config | length == 1
           - >-
-            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
-            'BORDER_ROUTER'
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role
+            is not defined
           - >-
             switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].ip_address_list ==
             switch_refresh_sda_fabric_border_batch_device_ips
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+            [
+              {
+                'ip_address_list': switch_refresh_sda_fabric_border_batch_device_ips,
+                'role': 'BORDER_ROUTER'
+              }
+            ]
           - switch_refresh_sda_fabric_border_batch_provision_config | length == 2
           - >-
             switch_refresh_sda_fabric_border_batch_provision_config |
@@ -148,7 +156,10 @@
             switch_refresh_sda_fabric_border_batch_lan_automation_serial_numbers ==
             ['NEW-BORDER-0001', 'NEW-BORDER-0002']
           - >-
-            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role
+            is not defined
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config[0].role ==
             'BORDER_ROUTER'
 
     - name: Set valid custom-stage border batch
@@ -202,11 +213,95 @@
             switch_refresh_sda_fabric_border_batch_discovery_config ==
             refresh_item.new_devices.discovery_config
           - >-
-            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role ==
-            'BORDER_ROUTER'
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role
+            is not defined
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].username ==
+            'custom-user'
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+            [
+              {
+                'ip_address_list': ['192.0.2.40', '192.0.2.41'],
+                'role': 'BORDER_ROUTER'
+              }
+            ]
           - >-
             switch_refresh_sda_fabric_border_batch_provision_config ==
             refresh_item.new_devices.provision_config
+
+    - name: Configure role-only inventory planning
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_inventory_enabled: false
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
+
+    - name: Set valid role-only inventory border batch
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: valid-border-role-only-inventory
+          fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - "192.0.2.42"
+          device_mapping:
+            - old:
+                serial_number: OLD-BORDER-0042
+              new_device_management_ip: "192.0.2.42"
+              handoff_interface_mappings: []
+
+    - name: Build valid role-only inventory border plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify role-only inventory planning remains staged
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_batch_inventory_execution_config == []
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+            [
+              {
+                'ip_address_list': ['192.0.2.42'],
+                'role': 'BORDER_ROUTER'
+              }
+            ]
+
+    - name: Configure inventory planning without role mutation
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_inventory_enabled: true
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled: false
+
+    - name: Set valid inventory-without-role-update border batch
+      ansible.builtin.set_fact:
+        refresh_item:
+          name: valid-border-no-role-update
+          fabric_site_name_hierarchy: Global/India/Bangalore/Fabric
+          onboarding_method: discovery
+          new_devices:
+            device_ips:
+              - "192.0.2.43"
+          device_mapping:
+            - old:
+                serial_number: OLD-BORDER-0043
+              new_device_management_ip: "192.0.2.43"
+              handoff_interface_mappings: []
+
+    - name: Build valid inventory-without-role-update border plan
+      ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
+
+    - name: Verify disabled role mutation produces no role payload
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_batch_inventory_execution_config | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role
+            is not defined
+          - switch_refresh_sda_fabric_border_batch_inventory_role_execution_config == []
+
+    - name: Restore default inventory planning controls
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_inventory_enabled: true
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
 
     - name: Verify duplicate interface mappings are rejected
       block:

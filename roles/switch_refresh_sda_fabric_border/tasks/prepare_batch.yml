@@ -51,6 +51,11 @@
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
         .inventory_execution_config
       }}
+    switch_refresh_sda_fabric_border_prepare_inventory_role_config: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .inventory_role_execution_config
+      }}
     switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout: >-
       {{
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
@@ -130,7 +135,7 @@
     - switch_refresh_sda_fabric_border_lan_automation_enabled | bool
   no_log: true
 
-- name: Add replacement border batch to inventory
+- name: Add replacement border batch to inventory without role mutation
   ansible.builtin.include_role:
     name: inventory
     apply:
@@ -148,8 +153,60 @@
   when: switch_refresh_sda_fabric_border_prepare_inventory_config | length > 0
   no_log: true
 
-- name: Wait for replacement borders to become inventory-ready
+- name: Wait for replacement border inventory synchronization
   ansible.builtin.include_tasks: wait_for_prepare_inventory.yml
+  vars:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+      expected_ips: "{{ switch_refresh_sda_fabric_border_prepare_device_ips }}"
+      required_role: ""
+      context: >-
+        Prepare batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
+        before BORDER_ROUTER assignment
+      timeout: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
+        }}
+      poll_interval: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval
+        }}
+
+- name: Assign replacement border inventory role
+  ansible.builtin.include_role:
+    name: inventory
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    inventory_state: merged
+    inventory_config_verify: >-
+      {{ switch_refresh_sda_fabric_border_inventory_config_verify }}
+    inventory_config: >-
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_role_config }}
+  when: >-
+    switch_refresh_sda_fabric_border_prepare_inventory_role_config | length > 0
+  no_log: true
+
+- name: Wait for replacement borders to report BORDER_ROUTER
+  ansible.builtin.include_tasks: wait_for_prepare_inventory.yml
+  vars:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+      expected_ips: "{{ switch_refresh_sda_fabric_border_prepare_device_ips }}"
+      required_role: BORDER_ROUTER
+      context: >-
+        Prepare batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
+        after BORDER_ROUTER assignment
+      timeout: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
+        }}
+      poll_interval: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval
+        }}
 
 - name: Provision replacement border batch
   ansible.builtin.include_role:

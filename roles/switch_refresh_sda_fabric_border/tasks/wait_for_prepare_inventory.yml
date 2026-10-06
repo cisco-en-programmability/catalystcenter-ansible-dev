@@ -1,36 +1,100 @@
 ---
-- name: Validate replacement inventory readiness inputs
+# Inventory addition completes before Catalyst Center finishes collecting the
+# device. Keep collection readiness separate from the later protected role
+# mutation so BORDER_ROUTER is never submitted for a partially scanned device.
+- name: Validate replacement border inventory readiness request
   ansible.builtin.assert:
     that:
       - >-
-        (switch_refresh_sda_fabric_border_prepare_device_ips | type_debug) == 'list'
-      - switch_refresh_sda_fabric_border_prepare_device_ips | length > 0
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        is mapping
       - >-
-        switch_refresh_sda_fabric_border_prepare_device_ips | unique | length ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | length
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips is defined
       - >-
-        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout |
-        int) > 0
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .expected_ips | type_debug
+        ) == 'list'
       - >-
-        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval |
-        int) > 0
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | map('string') | map('trim') |
+        reject('equalto', '') | unique | list | length ==
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role is not defined or
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .required_role | type_debug
+        ) == 'str'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role | default('') | string | trim | upper |
+        replace(' ', '_') in ['', 'BORDER_ROUTER']
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context is defined
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .timeout is defined
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .timeout | int) > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .poll_interval is defined
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .poll_interval | int) > 0
     fail_msg: >-
-      Replacement readiness requires unique management IPs and positive timeout
-      and polling values.
+      Replacement border inventory readiness requires unique non-empty
+      management IPs, an optional BORDER_ROUTER role policy, a context, and
+      positive timeout and polling values.
 
-- name: Derive replacement inventory readiness retries
+- name: Normalize replacement border inventory readiness request
   ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | map('string') | list
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role | default('') | string | trim | upper |
+        replace(' ', '_')
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_context: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context | string | trim
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_interval: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .poll_interval | int
+      }}
     switch_refresh_sda_fabric_border_prepare_inventory_readiness_retries: >-
       {{
         (
-          (switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout | int) +
-          (switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval | int) -
-          1
+          (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .timeout | int) +
+          (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .poll_interval | int) - 1
         ) //
-        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval | int)
+        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .poll_interval | int)
       }}
 
-- name: Wait for replacement inventory readiness
+- name: Poll replacement border inventory readiness
   cisco.catalystcenter.network_device_info:
     catalystcenter_host: "{{ catalystcenter_host }}"
     catalystcenter_username: "{{ catalystcenter_username }}"
@@ -40,110 +104,190 @@
     catalystcenter_version: "{{ catalystcenter_version | default('2.3.7.9') }}"
     catalystcenter_debug: false
     managementIpAddress: >-
-      {{ switch_refresh_sda_fabric_border_prepare_device_ips }}
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips }}
     limit: 500
-  register: switch_refresh_sda_fabric_border_prepare_inventory_lookup
+  register: switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
   until:
     - >-
-      not (switch_refresh_sda_fabric_border_prepare_inventory_lookup.failed |
-      default(false) | bool)
+      not (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .failed | default(false) | bool
+      )
     - >-
       (
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) | type_debug
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ) is mapping
+    - >-
+      (
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+          .catalystcenter_response | default({})
+        ).response | default([]) | type_debug
       ) == 'list'
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) | length ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | length
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) |
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
       map(attribute='managementIpAddress', default='') |
-      map('string') | unique | list | sort ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | map('string') | list | sort
+      map('default', '', true) | map('string') | list | sort ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      sort
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) |
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
       map(attribute='collectionStatus', default='') |
-      map('string') | map('upper') |
+      map('default', '', true) | map('string') | map('upper') |
       select('equalto', 'MANAGED') | list | length ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | length
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) |
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
       map(attribute='managementState', default='') |
-      map('string') | map('upper') |
+      map('default', '', true) | map('string') | map('upper') |
       select('equalto', 'MANAGED') | list | length ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | length
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) |
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
       map(attribute='reachabilityStatus', default='') |
-      map('string') | map('upper') |
+      map('default', '', true) | map('string') | map('upper') |
       select('in', ['REACHABLE', 'PING REACHABLE']) | list | length ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | length
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
     - >-
-      switch_refresh_sda_fabric_border_prepare_inventory_lookup
-      .catalystcenter_response.response | default([]) |
-      map(attribute='role', default='') |
-      map('string') | map('upper') |
-      map('replace', ' ', '_') |
-      select('equalto', 'BORDER_ROUTER') | list | length ==
-      switch_refresh_sda_fabric_border_prepare_device_ips | length
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
+      map(attribute='family', default='') |
+      map('default', '', true) | map('string') | map('upper') |
+      select('in', ['SWITCHES AND HUBS', 'ROUTERS']) | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
+      map(attribute='inventoryStatusDetail', default='') |
+      map('default', '', true) | map('string') | map('upper') |
+      map('regex_replace', '[^A-Z=]', '') |
+      select('search', 'GENERALCODE=SUCCESS') | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      (
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+          .catalystcenter_response | default({})
+        ).response | default([]) |
+        map(attribute='instanceUuid', default='') |
+        map('default', '', true) | map('string') | map('trim') | list
+      ) |
+      zip(
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+          .catalystcenter_response | default({})
+        ).response | default([]) |
+        map(attribute='id', default='') |
+        map('default', '', true) | map('string') | map('trim') | list
+      ) |
+      map('join', '') | map('trim') | reject('equalto', '') | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
+      map(attribute='serialNumber', default='') |
+      map('default', '', true) | map('string') | map('trim') |
+      reject('equalto', '') | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
+      map(attribute='platformId', default='') |
+      map('default', '', true) | map('string') | map('trim') |
+      reject('equalto', '') | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      (
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+        .catalystcenter_response | default({})
+      ).response | default([]) |
+      map(attribute='deviceSupportLevel', default='') |
+      map('default', '', true) | map('string') | map('trim') | map('upper') |
+      reject('in', ['', 'UNSUPPORTED']) | list | length ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
+    - >-
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role |
+      length == 0 or
+      (
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup
+          .catalystcenter_response | default({})
+        ).response | default([]) |
+        map(attribute='role', default='') |
+        map('default', '', true) | map('string') | map('upper') |
+        map('replace', ' ', '_') |
+        select(
+          'equalto',
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role
+        ) | list | length
+      ) ==
+      switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+      length
   retries: >-
     {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_retries | int }}
   delay: >-
-    {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval | int }}
+    {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_interval | int }}
   failed_when: false
   no_log: true
 
-- name: Validate replacement inventory became ready
-  ansible.builtin.assert:
-    that:
-      - >-
-        not (switch_refresh_sda_fabric_border_prepare_inventory_lookup.failed |
-        default(false) | bool)
-      - >-
-        (switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response | default({})) is mapping
-      - >-
-        (switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) | type_debug) == 'list'
-      - >-
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) |
-        map(attribute='managementIpAddress', default='') |
-        map('string') | list | sort ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | map('string') | list | sort
-      - >-
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) |
-        map(attribute='collectionStatus', default='') |
-        map('string') | map('upper') |
-        select('equalto', 'MANAGED') | list | length ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | length
-      - >-
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) |
-        map(attribute='managementState', default='') |
-        map('string') | map('upper') |
-        select('equalto', 'MANAGED') | list | length ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | length
-      - >-
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) |
-        map(attribute='reachabilityStatus', default='') |
-        map('string') | map('upper') |
-        select('in', ['REACHABLE', 'PING REACHABLE']) | list | length ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | length
-      - >-
-        switch_refresh_sda_fabric_border_prepare_inventory_lookup
-        .catalystcenter_response.response | default([]) |
-        map(attribute='role', default='') |
-        map('string') | map('upper') | map('replace', ' ', '_') |
-        select('equalto', 'BORDER_ROUTER') | list | length ==
-        switch_refresh_sda_fabric_border_prepare_device_ips | length
-    fail_msg: >-
-      Replacement devices did not all become Managed, Reachable or Ping
-      Reachable, and BORDER_ROUTER before the readiness timeout.
+# Ansible marks the registered result failed when `until` exhausts. Clear only
+# that outer marker so the pure evaluator can report the last sanitized device
+# state; malformed and API-error responses still fail its shape assertions.
+- name: Evaluate replacement border inventory readiness
+  ansible.builtin.include_tasks: validate_prepare_inventory_readiness_result.yml
+  vars:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+      expected_ips: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips
+        }}
+      required_role: >-
+        {{
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role
+        }}
+      context: >-
+        {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_context }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result: >-
+      {{
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup |
+          default({})
+        ) | combine({'failed': false})
+      }}

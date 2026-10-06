@@ -13,9 +13,10 @@ modules.
 ## Phases
 
 `prepare` is non-destructive. It resolves and captures each old border,
-onboards the replacement, assigns inventory role `BORDER_ROUTER`, provisions
-it, and adds it to the fabric as a `BORDER_NODE` with the captured Layer 3
-border settings but no handoffs.
+onboards the replacement, waits for Catalyst Center inventory collection to
+finish, assigns and confirms inventory role `BORDER_ROUTER`, provisions it,
+and adds it to the fabric as a `BORDER_NODE` with the captured Layer 3 border
+settings but no handoffs.
 
 Normal `cutover` captures every source again and persists every batch manifest
 before the first deletion. Manifest continuation loads and validates the
@@ -152,6 +153,25 @@ A LAN Automation batch supplies `new_devices.lan_automation_config`. Complete
 custom inventory and provisioning configurations may be supplied under
 `new_devices.inventory_config` and `new_devices.provision_config`; every custom
 configuration must cover exactly the replacement IP set.
+
+## Prepare inventory synchronization
+
+Inventory addition and role assignment are separate prepare stages. The first
+inventory payload contains only device-addition and connection fields; even an
+allowed custom `role: BORDER_ROUTER` is withheld from that payload. Prepare
+waits until every replacement has exact inventory coverage, completed
+collection and management state, wired-device classification, successful
+inventory status, stable identity and platform fields, a non-empty device
+support level other than `Unsupported`, and `Reachable` or `Ping Reachable`
+status. It then submits one protected role-only payload and waits for every
+replacement to report `BORDER_ROUTER` before provisioning.
+
+Both readiness barriers use
+`switch_refresh_sda_fabric_border_inventory_readiness_timeout` and
+`switch_refresh_sda_fabric_border_inventory_readiness_poll_interval`. A batch
+failure or rerun is safe: an existing inventory record and an already assigned
+`BORDER_ROUTER` role are treated idempotently, while provisioning remains
+blocked until both barriers pass.
 
 ## Mandatory safety checks
 
