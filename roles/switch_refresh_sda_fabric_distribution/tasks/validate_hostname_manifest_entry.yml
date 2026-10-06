@@ -1,0 +1,41 @@
+---
+- name: Validate durable distribution hostname manifest entry
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_entry is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.keys() | list | sort ==
+        [
+          'desired_hostname', 'new_device_id', 'new_management_ip',
+          'new_serial_number', 'old_device_id', 'old_management_ip',
+          'old_serial_number', 'status', 'submitted_hostname'
+        ] | sort
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_entry_value | type_debug) == 'str'
+      - switch_refresh_sda_fabric_distribution_hostname_entry_value | trim | length > 0
+    fail_msg: >-
+      Hostname manifest entries require the exact schema and non-empty string
+      identity, address, serial, and hostname fields.
+  loop:
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.desired_hostname | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_device_id | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_serial_number | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_device_id | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_management_ip | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_serial_number | default('') }}"
+    - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.submitted_hostname | default('') }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry_value
+    label: manifest-entry-value
+
+- name: Validate durable distribution hostname manifest entry state
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.submitted_hostname |
+        length <= 63
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.status in
+        ['pending', 'completed']
+    fail_msg: Hostname manifest labels must be at most 63 characters with valid state.

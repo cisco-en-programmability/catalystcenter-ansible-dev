@@ -1,0 +1,83 @@
+---
+# Pure evaluator: callers inject an expected-link list and a raw topology result.
+- name: Validate distribution topology evaluator input
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_topology_expectations |
+        type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_topology_expectations | length > 0
+      - switch_refresh_sda_fabric_distribution_topology_raw_result is mapping
+      - >-
+        not (switch_refresh_sda_fabric_distribution_topology_raw_result.failed |
+        default(false) | bool)
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_result.catalystcenter_response
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_result.catalystcenter_response.response
+        is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_topology_raw_result.catalystcenter_response.response.links |
+        default([]) | type_debug) == 'list'
+    fail_msg: Physical topology lookup returned an invalid response; verification failed closed.
+
+- name: Initialize normalized distribution topology evidence
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_evidence: []
+    switch_refresh_sda_fabric_distribution_relevant_topology_links: []
+    switch_refresh_sda_fabric_distribution_relevant_topology_device_ids: >-
+      {{
+        (
+          switch_refresh_sda_fabric_distribution_topology_expectations |
+          map(attribute='distribution_device_id') | list
+        ) +
+        (
+          switch_refresh_sda_fabric_distribution_topology_expectations |
+          map(attribute='peer_device_id') | list
+        ) | unique | list
+      }}
+
+- name: Select only topology records touching pinned devices
+  ansible.builtin.include_tasks:
+    file: select_relevant_topology_link.yml
+    apply:
+      tags: [always]
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_topology_raw_result.catalystcenter_response.response.links
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_candidate_topology_link
+    label: topology-link
+
+- name: Normalize physical topology evidence
+  ansible.builtin.include_tasks:
+    file: normalize_topology_link.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_relevant_topology_links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_topology_raw_link
+    label: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_raw_link.id |
+      default('physical-link') }}
+
+- name: Evaluate exact distribution topology expectations
+  ansible.builtin.include_tasks:
+    file: evaluate_topology_expectation.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_topology_expectations }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_topology_expectation
+    label: >-
+      {{
+        switch_refresh_sda_fabric_distribution_topology_expectation.distribution_management_ip ~
+        ':' ~
+        switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name ~
+        ' <-> ' ~
+        switch_refresh_sda_fabric_distribution_topology_expectation.peer_management_ip ~
+        ':' ~
+        switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name
+      }}

@@ -1,0 +1,35 @@
+---
+- name: Match resolved replacement distribution for topology preflight
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_new_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_new_records |
+        selectattr(
+          'management_ip', 'equalto',
+          switch_refresh_sda_fabric_distribution_preflight_link.new_management_ip
+        ) | list
+      }}
+
+- name: Validate resolved replacement distribution topology mapping
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_topology_new_matches | length == 1
+    fail_msg: Unable to associate an exact resolved replacement with a declared link.
+
+- name: Build active replacement distribution topology expectation
+  ansible.builtin.include_tasks:
+    file: build_topology_expectation.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_topology_link: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_ip: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_new_matches[0].management_ip }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_id: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_new_matches[0].device_id }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_interface: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link.new_link.distribution_interface_name }}
+    switch_refresh_sda_fabric_distribution_topology_peer_interface: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link.new_link.peer_interface_name }}
+    switch_refresh_sda_fabric_distribution_topology_state: active

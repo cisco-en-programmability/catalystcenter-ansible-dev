@@ -1,0 +1,252 @@
+---
+- name: Validate distribution refresh batch planning offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_distribution_onboarding_method: discovery
+    switch_refresh_sda_fabric_distribution_valid_link:
+      peer_management_ip: "192.0.2.10"
+      old_link:
+        peer_interface_name: GigabitEthernet1/0/1
+        distribution_interface_name: GigabitEthernet1/0/47
+      new_link:
+        peer_interface_name: GigabitEthernet1/0/2
+        distribution_interface_name: GigabitEthernet1/0/47
+        ip_pool_name: LAN_AUTO_P2P
+    switch_refresh_sda_fabric_distribution_valid_batch:
+      name: san-jose-distribution-refresh
+      fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+      onboarding_method: discovery
+      new_devices:
+        device_ips:
+          - "192.0.2.20"
+      device_mapping:
+        - old:
+            hostname: old-distribution.example.test
+          new:
+            management_ip: "192.0.2.20"
+          links:
+            - peer_management_ip: "192.0.2.10"
+              old_link:
+                peer_interface_name: GigabitEthernet1/0/1
+                distribution_interface_name: GigabitEthernet1/0/47
+              new_link:
+                peer_interface_name: GigabitEthernet1/0/2
+                distribution_interface_name: GigabitEthernet1/0/47
+                ip_pool_name: LAN_AUTO_P2P
+
+  tasks:
+    - name: Build a valid Discovery distribution batch plan
+      ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_batch_input: >-
+          {{ switch_refresh_sda_fabric_distribution_valid_batch }}
+
+    - name: Verify Discovery batch normalization and replacement role
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.name ==
+            'san-jose-distribution-refresh'
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.onboarding_method ==
+            'discovery'
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.new_management_ips ==
+            ['192.0.2.20']
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.discovery_config |
+            length == 1
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.discovery_config[0].ip_address_list ==
+            ['192.0.2.20']
+          - >-
+            'inventory_config' not in
+            switch_refresh_sda_fabric_distribution_validated_batch
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.provision_config ==
+            [
+              {
+                'site_name_hierarchy': 'Global/USA/San Jose/BLDG23',
+                'management_ip_address': '192.0.2.20'
+              }
+            ]
+          - switch_refresh_sda_fabric_distribution_validated_batch.links | length == 1
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.link_add_config ==
+            switch_refresh_sda_fabric_distribution_batch_link_add_config
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.link_delete_config ==
+            switch_refresh_sda_fabric_distribution_batch_link_delete_config
+
+    - name: Build a valid LAN Automation distribution batch plan
+      ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_batch_input:
+          name: san-jose-la-distribution-refresh
+          fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+          onboarding_method: lan_automation
+          new_devices:
+            device_ips:
+              - "192.0.2.20"
+            lan_automation_config:
+              - lan_automation:
+                  launch_and_wait: true
+                  primary_device_management_ip_address: "192.0.2.10"
+                  primary_device_interface_names:
+                    - GigabitEthernet1/0/2
+                  ip_pools:
+                    - ip_pool_name: LAN_AUTO_MAIN
+                      ip_pool_role: MAIN_POOL
+                    - ip_pool_name: LAN_AUTO_P2P
+                      ip_pool_role: PHYSICAL_LINK_POOL
+                  discovered_device_site_name_hierarchy: Global/USA/San Jose
+                  discovery_devices:
+                    - device_serial_number: NEW-DIST-20
+                      device_management_ip_address: "192.0.2.20"
+                      device_site_name_hierarchy: Global/USA/San Jose/BLDG23
+          device_mapping: >-
+            {{ switch_refresh_sda_fabric_distribution_valid_batch.device_mapping }}
+
+    - name: Verify LAN Automation onboarding plan
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.onboarding_method ==
+            'lan_automation'
+          - >-
+            switch_refresh_sda_fabric_distribution_validated_batch.new_devices.lan_automation_config[0].lan_automation.launch_and_wait
+            is sameas true
+          - >-
+            'inventory_config' not in
+            switch_refresh_sda_fabric_distribution_validated_batch
+
+    - name: Reject LAN Automation onboarding without its configuration
+      block:
+        - name: Build LAN Automation batch missing lan_automation_config
+          ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_batch_input: >-
+              {{
+                switch_refresh_sda_fabric_distribution_valid_batch |
+                combine({'onboarding_method': 'lan_automation'})
+              }}
+
+        - name: Fail when missing LAN Automation configuration was accepted
+          ansible.builtin.fail:
+            msg: LAN Automation onboarding unexpectedly accepted no configuration.
+      rescue:
+        - name: Confirm missing LAN Automation configuration was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate LAN Automation onboarding configuration'
+
+    - name: Reject a non-IPv4 replacement address
+      block:
+        - name: Build batch with an IPv6 replacement address
+          ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_batch_input:
+              name: invalid-ipv6-replacement
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "2001:db8::20"
+              device_mapping:
+                - old:
+                    hostname: old-distribution.example.test
+                  new:
+                    management_ip: "2001:db8::20"
+                  links:
+                    - "{{ switch_refresh_sda_fabric_distribution_valid_link }}"
+
+        - name: Fail when non-IPv4 replacement was accepted
+          ansible.builtin.fail:
+            msg: A non-IPv4 replacement unexpectedly passed.
+      rescue:
+        - name: Confirm non-IPv4 replacement was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate replacement distribution IPv4 addresses'
+
+    - name: Reject duplicate physical interface endpoints
+      block:
+        - name: Build batch that reuses a replacement interface
+          ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_batch_input:
+              name: duplicate-replacement-interface
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.20"
+              device_mapping:
+                - old:
+                    management_ip: "198.51.100.20"
+                  new:
+                    management_ip: "192.0.2.20"
+                  links:
+                    - "{{ switch_refresh_sda_fabric_distribution_valid_link }}"
+                    - peer_management_ip: "192.0.2.11"
+                      old_link:
+                        peer_interface_name: GigabitEthernet1/0/3
+                        distribution_interface_name: GigabitEthernet1/0/48
+                      new_link:
+                        peer_interface_name: GigabitEthernet1/0/4
+                        distribution_interface_name: GigabitEthernet1/0/47
+                        ip_pool_name: LAN_AUTO_P2P
+
+        - name: Fail when duplicate physical endpoint was accepted
+          ansible.builtin.fail:
+            msg: A duplicate replacement interface unexpectedly passed.
+      rescue:
+        - name: Confirm duplicate physical endpoint was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution mapping coverage and endpoint uniqueness'
+
+    - name: Reject reuse of an old peer port for the new link
+      block:
+        - name: Build batch without a spare peer interface
+          ansible.builtin.include_tasks: ../tasks/validate_batch.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_batch_input:
+              name: reused-peer-interface
+              fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+              onboarding_method: discovery
+              new_devices:
+                device_ips:
+                  - "192.0.2.20"
+              device_mapping:
+                - old:
+                    management_ip: "198.51.100.20"
+                  new:
+                    management_ip: "192.0.2.20"
+                  links:
+                    - peer_management_ip: "192.0.2.10"
+                      old_link:
+                        peer_interface_name: GigabitEthernet1/0/1
+                        distribution_interface_name: GigabitEthernet1/0/47
+                      new_link:
+                        peer_interface_name: GigabitEthernet1/0/1
+                        distribution_interface_name: GigabitEthernet1/0/47
+                        ip_pool_name: LAN_AUTO_P2P
+
+        - name: Fail when old peer port reuse was accepted
+          ansible.builtin.fail:
+            msg: A new link unexpectedly reused the old link's peer port.
+      rescue:
+        - name: Confirm old and new peer endpoint overlap was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution mapping coverage and endpoint uniqueness'
