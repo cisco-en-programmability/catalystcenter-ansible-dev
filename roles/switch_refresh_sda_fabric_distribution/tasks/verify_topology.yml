@@ -1,0 +1,19 @@
+---
+- name: Initialize bounded distribution topology convergence check
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_attempt: 1
+    switch_refresh_sda_fabric_distribution_topology_max_attempts: >-
+      {{
+        (
+          (switch_refresh_sda_fabric_distribution_topology_validation_timeout | int) +
+          (switch_refresh_sda_fabric_distribution_topology_validation_poll_interval | int) - 1
+        ) //
+        (switch_refresh_sda_fabric_distribution_topology_validation_poll_interval | int)
+      }}
+    switch_refresh_sda_fabric_distribution_topology_verified: false
+
+- name: Poll exact distribution topology to convergence
+  ansible.builtin.include_tasks:
+    file: verify_topology_attempt.yml
+    apply:
+      tags: [always]

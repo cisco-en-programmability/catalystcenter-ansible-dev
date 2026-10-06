@@ -1,0 +1,195 @@
+---
+- name: Validate distribution refresh link planning offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_distribution_batch_device_ips:
+      - "192.0.2.20"
+    switch_refresh_sda_fabric_distribution_valid_mapping:
+      old:
+        management_ip: "198.51.100.20"
+      new:
+        management_ip: "192.0.2.20"
+      links:
+        - peer_management_ip: "192.0.2.10"
+          old_link:
+            peer_interface_name: GigabitEthernet1/0/1
+            distribution_interface_name: GigabitEthernet1/0/47
+          new_link:
+            peer_interface_name: GigabitEthernet1/0/2
+            distribution_interface_name: GigabitEthernet1/0/47
+            ip_pool_name: LAN_AUTO_P2P
+        - peer_management_ip: "192.0.2.11"
+          old_link:
+            peer_interface_name: TenGigabitEthernet1/1/1
+            distribution_interface_name: TenGigabitEthernet1/1/1
+          new_link:
+            peer_interface_name: TenGigabitEthernet1/1/2
+            distribution_interface_name: TenGigabitEthernet1/1/1
+            ip_pool_name: LAN_AUTO_P2P
+
+  tasks:
+    - name: Initialize distribution link-plan facts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_batch_mappings: []
+        switch_refresh_sda_fabric_distribution_batch_links: []
+        switch_refresh_sda_fabric_distribution_batch_link_add_config: []
+        switch_refresh_sda_fabric_distribution_batch_link_delete_config: []
+        switch_refresh_sda_fabric_distribution_batch_old_identity_keys: []
+        switch_refresh_sda_fabric_distribution_batch_mapping_new_ips: []
+        switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys: []
+        switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys: []
+        switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys: []
+        switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys: []
+
+    - name: Normalize a valid distribution mapping
+      ansible.builtin.include_tasks: ../tasks/validate_mapping.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_mapping_input: >-
+          {{ switch_refresh_sda_fabric_distribution_valid_mapping }}
+
+    - name: Verify normalized mapping and exact LAN Automation payloads
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_distribution_batch_mappings | length == 1
+          - switch_refresh_sda_fabric_distribution_batch_links | length == 2
+          - >-
+            switch_refresh_sda_fabric_distribution_batch_mappings[0].old_identity_key ==
+            'management_ip:198.51.100.20'
+          - >-
+            switch_refresh_sda_fabric_distribution_batch_link_add_config ==
+            [
+              {
+                'lan_automated_device_update': {
+                  'link_add': {
+                    'source_device_management_ip_address': '192.0.2.20',
+                    'source_device_interface_name': 'GigabitEthernet1/0/47',
+                    'destination_device_management_ip_address': '192.0.2.10',
+                    'destination_device_interface_name': 'GigabitEthernet1/0/2',
+                    'ip_pool_name': 'LAN_AUTO_P2P'
+                  }
+                }
+              },
+              {
+                'lan_automated_device_update': {
+                  'link_add': {
+                    'source_device_management_ip_address': '192.0.2.20',
+                    'source_device_interface_name': 'TenGigabitEthernet1/1/1',
+                    'destination_device_management_ip_address': '192.0.2.11',
+                    'destination_device_interface_name': 'TenGigabitEthernet1/1/2',
+                    'ip_pool_name': 'LAN_AUTO_P2P'
+                  }
+                }
+              }
+            ]
+          - >-
+            switch_refresh_sda_fabric_distribution_batch_link_delete_config ==
+            [
+              {
+                'lan_automated_device_update': {
+                  'link_delete': {
+                    'source_device_management_ip_address': '198.51.100.20',
+                    'source_device_interface_name': 'GigabitEthernet1/0/47',
+                    'destination_device_management_ip_address': '192.0.2.10',
+                    'destination_device_interface_name': 'GigabitEthernet1/0/1'
+                  }
+                }
+              },
+              {
+                'lan_automated_device_update': {
+                  'link_delete': {
+                    'source_device_management_ip_address': '198.51.100.20',
+                    'source_device_interface_name': 'TenGigabitEthernet1/1/1',
+                    'destination_device_management_ip_address': '192.0.2.11',
+                    'destination_device_interface_name': 'TenGigabitEthernet1/1/1'
+                  }
+                }
+              }
+            ]
+
+    - name: Reject multiple old-device selectors
+      block:
+        - name: Validate mapping with ambiguous old-device identity
+          ansible.builtin.include_tasks: ../tasks/validate_mapping.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_mapping_input: >-
+              {{
+                switch_refresh_sda_fabric_distribution_valid_mapping |
+                combine(
+                  {
+                    'old': {
+                      'management_ip': '198.51.100.20',
+                      'serial_number': 'OLD-DIST-20'
+                    }
+                  },
+                  recursive=true
+                )
+              }}
+
+        - name: Fail when ambiguous old-device identity was accepted
+          ansible.builtin.fail:
+            msg: A mapping with multiple old-device selectors unexpectedly passed.
+      rescue:
+        - name: Confirm ambiguous old-device identity was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution device mapping identifiers'
+
+    - name: Reject a non-IPv4 peer
+      block:
+        - name: Validate link with an IPv6 peer
+          ansible.builtin.include_tasks: ../tasks/validate_link.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_mapping_old: >-
+              {{ switch_refresh_sda_fabric_distribution_valid_mapping.old }}
+            switch_refresh_sda_fabric_distribution_mapping_new: >-
+              {{ switch_refresh_sda_fabric_distribution_valid_mapping.new }}
+            switch_refresh_sda_fabric_distribution_mapping_old_key: >-
+              management_ip:198.51.100.20
+            switch_refresh_sda_fabric_distribution_mapping_links: []
+            switch_refresh_sda_fabric_distribution_link_input: >-
+              {{
+                switch_refresh_sda_fabric_distribution_valid_mapping.links[0] |
+                combine({'peer_management_ip': '2001:db8::10'})
+              }}
+
+        - name: Fail when a non-IPv4 peer was accepted
+          ansible.builtin.fail:
+            msg: A non-IPv4 peer unexpectedly passed.
+      rescue:
+        - name: Confirm non-IPv4 peer was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate distribution link IPv4 peer'
+
+    - name: Reject a link without an IPv4 pool name
+      block:
+        - name: Validate link missing its pool name
+          ansible.builtin.include_tasks: ../tasks/validate_link.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_mapping_old: >-
+              {{ switch_refresh_sda_fabric_distribution_valid_mapping.old }}
+            switch_refresh_sda_fabric_distribution_mapping_new: >-
+              {{ switch_refresh_sda_fabric_distribution_valid_mapping.new }}
+            switch_refresh_sda_fabric_distribution_mapping_old_key: >-
+              management_ip:198.51.100.20
+            switch_refresh_sda_fabric_distribution_mapping_links: []
+            switch_refresh_sda_fabric_distribution_link_input:
+              peer_management_ip: "192.0.2.10"
+              old_link:
+                peer_interface_name: GigabitEthernet1/0/1
+                distribution_interface_name: GigabitEthernet1/0/47
+              new_link:
+                peer_interface_name: GigabitEthernet1/0/2
+                distribution_interface_name: GigabitEthernet1/0/47
+
+        - name: Fail when a missing pool name was accepted
+          ansible.builtin.fail:
+            msg: A link without ip_pool_name unexpectedly passed.
+      rescue:
+        - name: Confirm missing pool name was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate distribution link mapping structure'

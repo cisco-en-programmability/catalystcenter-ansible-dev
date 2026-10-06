@@ -1,0 +1,138 @@
+---
+- name: Derive distribution hostname recovery manifest identity
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest_file: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir ~ '/' ~
+        switch_refresh_sda_fabric_distribution_plan.file_safe_name ~
+        '_hostname_transfer.yml'
+      }}
+    switch_refresh_sda_fabric_distribution_hostname_input_fingerprint: >-
+      {{
+        {
+          'batch': switch_refresh_sda_fabric_distribution_plan.name,
+          'catalystcenter_host': catalystcenter_host,
+          'site': switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy,
+          'mappings': switch_refresh_sda_fabric_distribution_plan.mappings
+        } | to_json | hash('sha256')
+      }}
+
+- name: Inspect distribution hostname recovery directory without following links
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir }}"
+    follow: false
+  register: switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat
+
+- name: Validate distribution hostname recovery directory
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat.stat.exists | default(false)
+      - switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat.stat.isdir | default(false)
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat.stat.islnk |
+        default(false))
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat.stat.mode |
+        default('') == '0700'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_resume_dir_stat.stat.writeable |
+        default(false)
+    fail_msg: >-
+      Hostname recovery requires the writable original manifest directory
+      secured with mode 0700.
+
+- name: Inspect distribution hostname recovery manifest without following links
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_distribution_hostname_resume_stat
+
+- name: Validate distribution hostname recovery manifest path
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_resume_stat.stat.exists | bool
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_resume_stat.stat.isreg |
+        default(false)
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_resume_stat.stat.islnk |
+        default(false))
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_resume_stat.stat.mode |
+        default('') == '0600'
+    fail_msg: >-
+      Hostname recovery requires the original regular manifest file:
+      {{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}.
+
+- name: Load durable distribution hostname recovery manifest
+  ansible.builtin.include_vars:
+    file: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    name: switch_refresh_sda_fabric_distribution_loaded_hostname_document
+
+- name: Select durable distribution hostname recovery manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest: >-
+      {{ switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest | default({}) }}
+  no_log: true
+
+- name: Validate durable distribution hostname recovery manifest
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_manifest is mapping
+      - switch_refresh_sda_fabric_distribution_hostname_manifest.schema_version | int == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.role ==
+        'switch_refresh_sda_fabric_distribution'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.batch_name ==
+        switch_refresh_sda_fabric_distribution_plan.name
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.catalystcenter_host ==
+        catalystcenter_host
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.fabric_site_name_hierarchy ==
+        switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.input_fingerprint ==
+        switch_refresh_sda_fabric_distribution_hostname_input_fingerprint
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.status in
+        ['pending', 'completed']
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_management_ip') | list | sort ==
+        switch_refresh_sda_fabric_distribution_plan.new_management_ips | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='old_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+    fail_msg: >-
+      Hostname recovery manifest does not match the current batch input,
+      site, or pinned immutable identities. Recovery failed closed.
+
+- name: Validate distribution hostname recovery manifest entries
+  ansible.builtin.include_tasks:
+    file: validate_hostname_manifest.yml
+    apply:
+      tags: [always]
+
+- name: Save preflighted distribution hostname recovery manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_preflight_manifests: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests + [
+          {
+            'name': switch_refresh_sda_fabric_distribution_plan.name,
+            'file': switch_refresh_sda_fabric_distribution_hostname_manifest_file,
+            'manifest': switch_refresh_sda_fabric_distribution_hostname_manifest
+          }
+        ]
+      }}
+  no_log: true

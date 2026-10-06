@@ -1,0 +1,40 @@
+---
+# Pure evaluator: callers inject expected peer IPs and normalized fabric records.
+- name: Validate peer fabric result structure
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_expected_peer_ips | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_expected_peer_ips | length > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_peer_validation_records |
+        type_debug) == 'list'
+      - >-
+        (switch_refresh_sda_fabric_distribution_expected_peer_records |
+        type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_expected_peer_records |
+        map(attribute='management_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_distribution_expected_peer_ips | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_validation_records | length ==
+        switch_refresh_sda_fabric_distribution_expected_peer_ips | length
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_validation_records |
+        map(attribute='device_ip') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_distribution_expected_peer_ips | sort
+    fail_msg: >-
+      Every declared peer must resolve as exactly one device in the requested
+      fabric site.
+
+- name: Validate peer fabric roles
+  ansible.builtin.include_tasks:
+    file: validate_peer_entry.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_peer_validation_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_peer_record
+    label: >-
+      {{ switch_refresh_sda_fabric_distribution_peer_record.device_ip |
+      default('invalid-peer') }}

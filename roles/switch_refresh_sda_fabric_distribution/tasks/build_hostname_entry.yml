@@ -1,0 +1,58 @@
+---
+- name: Match replacement identity for hostname transfer
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_new_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.new_records |
+        selectattr(
+          'management_ip', 'equalto',
+          switch_refresh_sda_fabric_distribution_hostname_mapping.new.management_ip
+        ) | list
+      }}
+
+- name: Validate hostname transfer identity match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_new_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_mapping.old_hostname |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_mapping.old_device_id !=
+        switch_refresh_sda_fabric_distribution_hostname_new_matches[0].device_id
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_mapping.old_serial_number |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_new_matches[0].serial_number |
+        default('') | string | trim | length > 0
+    fail_msg: >-
+      Hostname transfer requires one pinned replacement and one non-empty live
+      old-device hostname and immutable serial identities for each mapping.
+
+- name: Add durable distribution hostname transfer entry
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_entries: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_entries + [
+          {
+            'old_management_ip':
+              switch_refresh_sda_fabric_distribution_hostname_mapping.old_management_ip,
+            'old_device_id':
+              switch_refresh_sda_fabric_distribution_hostname_mapping.old_device_id,
+            'old_serial_number':
+              switch_refresh_sda_fabric_distribution_hostname_mapping.old_serial_number,
+            'new_management_ip':
+              switch_refresh_sda_fabric_distribution_hostname_new_matches[0].management_ip,
+            'new_device_id':
+              switch_refresh_sda_fabric_distribution_hostname_new_matches[0].device_id,
+            'new_serial_number':
+              switch_refresh_sda_fabric_distribution_hostname_new_matches[0].serial_number,
+            'desired_hostname':
+              switch_refresh_sda_fabric_distribution_hostname_mapping.old_hostname,
+            'submitted_hostname':
+              switch_refresh_sda_fabric_distribution_hostname_mapping.old_hostname.split('.')[0],
+            'status': 'pending'
+          }
+        ]
+      }}

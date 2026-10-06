@@ -1,0 +1,48 @@
+---
+- name: Validate physical topology link evidence structure
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_topology_raw_link is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_link.source |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_link.target |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_link.startPortName |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_raw_link.endPortName |
+        default('') | string | trim | length > 0
+    fail_msg: Physical topology returned a malformed link record; verification failed closed.
+
+- name: Normalize directional physical topology evidence
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_evidence: >-
+      {{
+        switch_refresh_sda_fabric_distribution_topology_evidence + [
+          {
+            'source_device_id':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.source | string,
+            'source_interface_name':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.startPortName | string,
+            'source_interface_id':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.startPortID |
+              default('') | string,
+            'destination_device_id':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.target | string,
+            'destination_interface_name':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.endPortName | string,
+            'destination_interface_id':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.endPortID |
+              default('') | string,
+            'link_id':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.id |
+              default('') | string,
+            'status':
+              switch_refresh_sda_fabric_distribution_topology_raw_link.linkStatus |
+              default('') | string | upper
+          }
+        ]
+      }}
