@@ -47,6 +47,7 @@
     switch_refresh_sda_fabric_border_batch_inventory_credentials: {}
     switch_refresh_sda_fabric_border_batch_inventory_config: []
     switch_refresh_sda_fabric_border_batch_inventory_execution_config: []
+    switch_refresh_sda_fabric_border_batch_inventory_role_execution_config: []
     switch_refresh_sda_fabric_border_batch_provision_config: []
     switch_refresh_sda_fabric_border_custom_discovery_target_ips: []
     switch_refresh_sda_fabric_border_custom_discovery_names: []
@@ -685,18 +686,17 @@
   when: switch_refresh_sda_fabric_border_batch_new_devices.inventory_config is defined
   no_log: true
 
-- name: Build protected inventory execution configuration
+- name: Build role-free inventory add execution configuration
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_batch_inventory_execution_config: >-
       {{
         switch_refresh_sda_fabric_border_batch_inventory_execution_config +
         [
           switch_refresh_sda_fabric_border_inventory_execution_item |
-          combine(
-            {'role': 'BORDER_ROUTER'}
-            if (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool)
-            else {}
-          )
+          dict2items |
+          rejectattr('key', 'equalto', 'role') |
+          list |
+          items2dict
         ]
       }}
   loop: >-
@@ -712,12 +712,33 @@
 
 - name: Build protected inventory role-only configuration
   ansible.builtin.set_fact:
-    switch_refresh_sda_fabric_border_batch_inventory_execution_config:
+    switch_refresh_sda_fabric_border_batch_inventory_role_execution_config:
       - ip_address_list: "{{ switch_refresh_sda_fabric_border_batch_device_ips }}"
         role: BORDER_ROUTER
-  when:
-    - not (switch_refresh_sda_fabric_border_inventory_enabled | bool)
-    - switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
+  when: switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
+  no_log: true
+
+- name: Validate protected staged inventory configurations
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_execution_config |
+        selectattr('role', 'defined') | list | length == 0
+      - >-
+        not (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool) or
+        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+        [
+          {
+            'ip_address_list': switch_refresh_sda_fabric_border_batch_device_ips,
+            'role': 'BORDER_ROUTER'
+          }
+        ]
+      - >-
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool or
+        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config | length == 0
+    fail_msg: >-
+      Inventory preparation must keep add and credential payloads role-free and
+      must isolate BORDER_ROUTER assignment in one protected role-only payload.
   no_log: true
 
 - name: Set replacement provisioning site

@@ -94,6 +94,8 @@
               switch_refresh_sda_fabric_border_batch_lan_automation_config,
             'inventory_execution_config':
               switch_refresh_sda_fabric_border_batch_inventory_execution_config,
+            'inventory_role_execution_config':
+              switch_refresh_sda_fabric_border_batch_inventory_role_execution_config,
             'inventory_readiness_timeout':
               switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout,
             'inventory_readiness_poll_interval':

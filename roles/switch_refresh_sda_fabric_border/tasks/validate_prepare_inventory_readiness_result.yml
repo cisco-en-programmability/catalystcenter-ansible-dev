@@ -1,0 +1,234 @@
+---
+# Pure evaluator for a direct network_device_info result. Keeping controller
+# access outside this file makes readiness behavior testable with canned data.
+- name: Validate replacement border inventory readiness evaluator inputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips is defined
+      - >-
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .expected_ips | type_debug
+        ) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | map('string') | map('trim') |
+        reject('equalto', '') | unique | list | length ==
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role is not defined or
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+          .required_role | type_debug
+        ) == 'str'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role | default('') | string | trim | upper |
+        replace(' ', '_') in ['', 'BORDER_ROUTER']
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context is defined
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result
+        is mapping
+      - >-
+        not (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result
+          .failed | default(false) | bool
+        )
+      - >-
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result
+          .catalystcenter_response | default({})
+        ) is mapping
+      - >-
+        (
+          (
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result
+            .catalystcenter_response | default({})
+          ).response | default(none) | type_debug
+        ) == 'list'
+    fail_msg: >-
+      Inventory readiness evaluation requires a successful, structured
+      network_device_info response during
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .context | default('replacement border inventory validation')
+      }}.
+
+- name: Normalize replacement border inventory readiness response
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_entries: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result
+        .catalystcenter_response.response
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | map('string') | list
+      }}
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .required_role | default('') | string | trim | upper |
+        replace(' ', '_')
+      }}
+  no_log: true
+
+- name: Validate replacement border inventory readiness response records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry is mapping
+    fail_msg: >-
+      Inventory readiness received a non-record response during
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request.context
+      }}.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+    label: inventory-readiness-record
+
+- name: Validate exact replacement border inventory readiness coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entries |
+        map(attribute='managementIpAddress', default='') |
+        map('default', '', true) | map('string') | list | sort ==
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips |
+        sort
+    fail_msg: >-
+      Inventory readiness did not return exactly the requested replacement IPs
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_expected_ips }}
+      during
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request.context
+      }}.
+
+- name: Validate replacement border inventory readiness record details
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .collectionStatus | default('', true) | string | upper == 'MANAGED'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .managementState | default('', true) | string | upper == 'MANAGED'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .reachabilityStatus | default('', true) | string | upper in
+        ['REACHABLE', 'PING REACHABLE']
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .family | default('', true) | string | upper in
+        ['SWITCHES AND HUBS', 'ROUTERS']
+      - >-
+        'GENERALCODE=SUCCESS' in
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .inventoryStatusDetail | default('', true) | string | upper |
+          regex_replace('[^A-Z=]', '')
+        )
+      - >-
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .instanceUuid | default('', true) | string | trim | length > 0
+        ) or
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .id | default('', true) | string | trim | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .serialNumber | default('', true) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .platformId | default('', true) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .deviceSupportLevel | default('', true) | string | trim | upper not in
+        ['', 'UNSUPPORTED']
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role |
+        length == 0 or
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .role | default('', true) | string | upper | replace(' ', '_')
+        ) ==
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role
+    fail_msg: >-
+      Replacement inventory is not ready during
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request.context
+      }}: IP={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .managementIpAddress | default('unknown', true)
+      }}, collectionStatus={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .collectionStatus | default('missing', true)
+      }}, managementState={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .managementState | default('missing', true)
+      }}, reachabilityStatus={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .reachabilityStatus | default('missing', true)
+      }}, family={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .family | default('missing', true)
+      }}, inventorySuccessful={{
+        'GENERALCODE=SUCCESS' in
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .inventoryStatusDetail | default('', true) | string | upper |
+          regex_replace('[^A-Z=]', '')
+        )
+      }}, stableIdentityPresent={{
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .instanceUuid | default('', true) | string | trim | length > 0
+        ) or
+        (
+          switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+          .id | default('', true) | string | trim | length > 0
+        )
+      }}, serialPresent={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .serialNumber | default('', true) | string | trim | length > 0
+      }}, platformPresent={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .platformId | default('', true) | string | trim | length > 0
+      }}, deviceSupportLevel={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .deviceSupportLevel | default('missing', true)
+      }}, requiredRole={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role |
+        default('none', true)
+      }}, role={{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .role | default('missing', true)
+      }}.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .managementIpAddress | default('replacement-border', true)
+      }}
