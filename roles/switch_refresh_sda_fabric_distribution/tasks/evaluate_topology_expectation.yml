@@ -1,0 +1,149 @@
+---
+- name: Select forward exact distribution topology evidence
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_forward_topology_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_topology_evidence |
+        selectattr(
+          'source_device_id', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.distribution_device_id
+        ) |
+        selectattr(
+          'source_interface_name', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name
+        ) |
+        selectattr(
+          'destination_device_id', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.peer_device_id
+        ) |
+        selectattr(
+          'destination_interface_name', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name
+        ) | list
+      }}
+    switch_refresh_sda_fabric_distribution_reverse_topology_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_topology_evidence |
+        selectattr(
+          'source_device_id', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.peer_device_id
+        ) |
+        selectattr(
+          'source_interface_name', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name
+        ) |
+        selectattr(
+          'destination_device_id', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.distribution_device_id
+        ) |
+        selectattr(
+          'destination_interface_name', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name
+        ) | list
+      }}
+
+- name: Derive exact active distribution topology evidence
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_exact_topology_matches: >-
+      {{
+        (
+          switch_refresh_sda_fabric_distribution_forward_topology_matches +
+          switch_refresh_sda_fabric_distribution_reverse_topology_matches
+        ) |
+        selectattr('status', 'in', ['UP', 'ACTIVE']) | list
+      }}
+    switch_refresh_sda_fabric_distribution_active_distribution_endpoint_matches: >-
+      {{
+        ((
+          switch_refresh_sda_fabric_distribution_topology_evidence |
+          selectattr(
+            'source_device_id', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.distribution_device_id
+          ) |
+          selectattr(
+            'source_interface_name', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name
+          ) | list
+        ) +
+        (
+          switch_refresh_sda_fabric_distribution_topology_evidence |
+          selectattr(
+            'destination_device_id', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.distribution_device_id
+          ) |
+          selectattr(
+            'destination_interface_name', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name
+          ) | list
+        )) |
+        selectattr('status', 'in', ['UP', 'ACTIVE']) | list
+      }}
+    switch_refresh_sda_fabric_distribution_active_peer_endpoint_matches: >-
+      {{
+        ((
+          switch_refresh_sda_fabric_distribution_topology_evidence |
+          selectattr(
+            'source_device_id', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.peer_device_id
+          ) |
+          selectattr(
+            'source_interface_name', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name
+          ) | list
+        ) +
+        (
+          switch_refresh_sda_fabric_distribution_topology_evidence |
+          selectattr(
+            'destination_device_id', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.peer_device_id
+          ) |
+          selectattr(
+            'destination_interface_name', 'equalto',
+            switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name
+          ) | list
+        )) |
+        selectattr('status', 'in', ['UP', 'ACTIVE']) | list
+      }}
+
+- name: Verify exact distribution topology
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          switch_refresh_sda_fabric_distribution_topology_expectation.expected_state ==
+          'active' and
+          switch_refresh_sda_fabric_distribution_exact_topology_matches | length == 1
+        ) or
+        (
+          switch_refresh_sda_fabric_distribution_topology_expectation.expected_state ==
+          'absent' and
+          switch_refresh_sda_fabric_distribution_exact_topology_matches | length == 0
+        )
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_expectation.expected_state !=
+        'active' or
+        (
+          switch_refresh_sda_fabric_distribution_exact_topology_matches[0].source_interface_id |
+          default('') | length > 0 and
+          switch_refresh_sda_fabric_distribution_exact_topology_matches[0].destination_interface_id |
+          default('') | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_expectation.expected_state !=
+        'active' or
+        switch_refresh_sda_fabric_distribution_active_distribution_endpoint_matches |
+        length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_topology_expectation.expected_state !=
+        'active' or
+        switch_refresh_sda_fabric_distribution_active_peer_endpoint_matches |
+        length == 1
+    fail_msg: >-
+      Exact {{ switch_refresh_sda_fabric_distribution_topology_expectation.expected_state }}
+      topology assertion failed between distribution device
+      {{ switch_refresh_sda_fabric_distribution_topology_expectation.distribution_management_ip }}
+      interface
+      {{ switch_refresh_sda_fabric_distribution_topology_expectation.distribution_interface_name }}
+      and peer {{ switch_refresh_sda_fabric_distribution_topology_expectation.peer_management_ip }}
+      interface
+      {{ switch_refresh_sda_fabric_distribution_topology_expectation.peer_interface_name }}.

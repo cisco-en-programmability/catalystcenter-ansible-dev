@@ -1,0 +1,54 @@
+---
+# Pure global guard. All read-only resolution completes before this file is
+# evaluated and before any controller mutation is dispatched.
+- name: Derive globally resolved distribution identity sets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_all_resolved_mappings: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_plans |
+        map(attribute='resolved_mappings') | flatten | list
+      }}
+    switch_refresh_sda_fabric_distribution_all_replacement_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_plans |
+        map(attribute='new_management_ips') | flatten | unique | list
+      }}
+    switch_refresh_sda_fabric_distribution_all_peer_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_plans |
+        map(attribute='links') | flatten |
+        map(attribute='peer_management_ip') | unique | list
+      }}
+
+- name: Validate globally resolved distribution refresh identities
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_resolved_plans | length ==
+        switch_refresh_sda_fabric_distribution_validated_plans | length
+      - >-
+        switch_refresh_sda_fabric_distribution_all_resolved_mappings | length ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='mappings') | flatten | length)
+      - >-
+        switch_refresh_sda_fabric_distribution_all_resolved_mappings |
+        map(attribute='old_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_resolved_mappings | length
+      - >-
+        switch_refresh_sda_fabric_distribution_all_resolved_mappings |
+        map(attribute='old_management_ip') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_resolved_mappings | length
+      - >-
+        (switch_refresh_sda_fabric_distribution_all_resolved_mappings |
+        map(attribute='old_management_ip') | unique | list) |
+        intersect(switch_refresh_sda_fabric_distribution_all_replacement_ips) |
+        length == 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_all_resolved_mappings |
+        map(attribute='old_management_ip') | unique | list) |
+        intersect(switch_refresh_sda_fabric_distribution_all_peer_ips) |
+        length == 0
+    fail_msg: >-
+      Resolved old device UUIDs and management IPs must remain globally unique
+      and cannot identify any replacement or peer device. This guard detects
+      aliases that used different input selector types for the same device.

@@ -1,0 +1,46 @@
+---
+- name: Query replacement SDA fabric-device enrollment
+  cisco.catalystcenter.sda_fabric_devices_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    networkDeviceId: "{{ switch_refresh_sda_fabric_distribution_nonfabric_record.device_id }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_nonfabric_lookup
+  loop: "{{ switch_refresh_sda_fabric_distribution_nonfabric_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_nonfabric_record
+    label: "{{ switch_refresh_sda_fabric_distribution_nonfabric_record.management_ip }}"
+  no_log: true
+
+- name: Validate replacements are not SDA fabric devices
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_nonfabric_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_nonfabric_records | length
+      - >-
+        not (switch_refresh_sda_fabric_distribution_nonfabric_result.failed |
+        default(false) | bool)
+      - >-
+        (switch_refresh_sda_fabric_distribution_nonfabric_result.catalystcenter_response |
+        default({})) is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_nonfabric_result.catalystcenter_response.response |
+        default(none) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_nonfabric_result.catalystcenter_response.response |
+        length == 0
+    fail_msg: >-
+      A replacement distribution device is enrolled as an SDA fabric-role
+      device. This role provisions inventory role DISTRIBUTION to the site only
+      and fails closed on pre-existing fabric enrollment.
+  loop: "{{ switch_refresh_sda_fabric_distribution_nonfabric_lookup.results | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_nonfabric_result
+    label: replacement-fabric-enrollment

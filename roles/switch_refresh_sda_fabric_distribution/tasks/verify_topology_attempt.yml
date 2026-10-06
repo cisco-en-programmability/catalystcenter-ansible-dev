@@ -1,0 +1,60 @@
+---
+- name: Evaluate one exact distribution topology snapshot
+  block:
+    - name: Query physical topology for exact distribution links
+      cisco.catalystcenter.topology_physical_info:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify }}"
+        catalystcenter_port: "{{ catalystcenter_port }}"
+        catalystcenter_version: "{{ catalystcenter_version }}"
+        catalystcenter_debug: false
+      register: switch_refresh_sda_fabric_distribution_topology_lookup
+      no_log: true
+
+    - name: Apply hard exact distribution topology barrier
+      ansible.builtin.include_tasks:
+        file: validate_topology_result.yml
+        apply:
+          tags: [always]
+      vars:
+        switch_refresh_sda_fabric_distribution_topology_raw_result: >-
+          {{ switch_refresh_sda_fabric_distribution_topology_lookup }}
+
+    - name: Mark exact distribution topology verified
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_topology_verified: true
+  rescue:
+    - name: Advance bounded distribution topology attempt
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_topology_attempt: >-
+          {{ switch_refresh_sda_fabric_distribution_topology_attempt | int + 1 }}
+
+    - name: Wait before retrying exact distribution topology
+      ansible.builtin.pause:
+        seconds: >-
+          {{ switch_refresh_sda_fabric_distribution_topology_validation_poll_interval | int }}
+      when: >-
+        switch_refresh_sda_fabric_distribution_topology_attempt | int <=
+        switch_refresh_sda_fabric_distribution_topology_max_attempts | int
+
+    - name: Retry exact distribution topology snapshot
+      ansible.builtin.include_tasks:
+        file: verify_topology_attempt.yml
+        apply:
+          tags: [always]
+      when: >-
+        switch_refresh_sda_fabric_distribution_topology_attempt | int <=
+        switch_refresh_sda_fabric_distribution_topology_max_attempts | int
+
+    - name: Fail closed after distribution topology timeout
+      ansible.builtin.fail:
+        msg: >-
+          Exact distribution topology did not converge within
+          {{ switch_refresh_sda_fabric_distribution_topology_validation_timeout }} seconds.
+          Last failure: {{ ansible_failed_result.msg | default('topology assertion failed') }}
+      when: >-
+        not (switch_refresh_sda_fabric_distribution_topology_verified | bool) and
+        switch_refresh_sda_fabric_distribution_topology_attempt | int >
+        switch_refresh_sda_fabric_distribution_topology_max_attempts | int

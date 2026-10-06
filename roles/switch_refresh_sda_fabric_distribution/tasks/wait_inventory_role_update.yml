@@ -1,0 +1,78 @@
+---
+- name: Poll distribution inventory role update task
+  cisco.catalystcenter.task_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    taskId: "{{ switch_refresh_sda_fabric_distribution_inventory_role_task_id }}"
+  register: switch_refresh_sda_fabric_distribution_inventory_role_task_status
+  until:
+    - >-
+      not (
+        switch_refresh_sda_fabric_distribution_inventory_role_task_status.failed |
+        default(false) | bool
+      )
+    - >-
+      switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response
+      is mapping
+    - >-
+      (switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+      default({})).response | default({}) is mapping
+    - >-
+      (
+        ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+        default({})).response | default({})).isError |
+        default(false) | bool
+      ) or
+      (
+        ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+        default({})).response | default({})).endTime |
+        default(0) | int > 0
+      )
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_inventory_readiness_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int }}"
+  no_log: true
+
+- name: Validate distribution inventory role update task
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response
+        is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+        default({})).response | default({}) is mapping
+      - >-
+        not (
+          ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+          default({})).response | default({})).isError |
+          default(false) | bool
+        )
+      - >-
+        ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+        default({})).response | default({})).endTime |
+        default(0) | int > 0
+    fail_msg: >-
+      Catalyst Center inventory role update task
+      {{ switch_refresh_sda_fabric_distribution_inventory_role_task_id }} failed:
+      {{
+        ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+        default({})).response | default({})).failureReason |
+        default(
+          ((switch_refresh_sda_fabric_distribution_inventory_role_task_status.catalystcenter_response |
+          default({})).response | default({})).progress |
+          default('no failure reason was returned', true),
+          true
+        )
+      }}

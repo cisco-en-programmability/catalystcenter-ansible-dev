@@ -1,0 +1,354 @@
+---
+- name: Validate distribution refresh control variables
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_phase in ['prepare', 'cleanup_old']
+      - >-
+        (switch_refresh_sda_fabric_distribution_batches | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_batches | length > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_cleanup_old | type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest |
+        type_debug) == 'bool'
+    fail_msg: >-
+      phase must be prepare or cleanup_old, batches must be a non-empty list,
+      and workflow switches must be booleans.
+  tags:
+    - always
+
+- name: Require explicit old distribution cleanup approval
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_phase != 'prepare' or
+        not (switch_refresh_sda_fabric_distribution_cleanup_old | bool)
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest |
+        bool) or
+        (
+          switch_refresh_sda_fabric_distribution_phase == 'cleanup_old' and
+          switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool and
+          not (switch_refresh_sda_fabric_distribution_cleanup_old | bool)
+        )
+      - >-
+        switch_refresh_sda_fabric_distribution_phase != 'cleanup_old' or
+        (switch_refresh_sda_fabric_distribution_cleanup_old | bool) or
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool)
+    fail_msg: >-
+      cleanup_old requires switch_refresh_sda_fabric_distribution_cleanup_old=true.
+      Manifest-only hostname recovery instead requires cleanup approval false,
+      hostname transfer enabled, and resume_from_manifest true.
+  tags:
+    - always
+
+- name: Validate distribution refresh safety controls
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_discovery_enabled | type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_lan_automation_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_inventory_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_provision_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_cleanup_unprovision_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_discovery_config_verify |
+        type_debug) == 'bool'
+      - >-
+        (switch_refresh_sda_fabric_distribution_provision_config_verify |
+        type_debug) == 'bool'
+      - (switch_refresh_sda_fabric_distribution_inventory_readiness_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int) > 0
+      - (switch_refresh_sda_fabric_distribution_provision_validation_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_provision_validation_poll_interval | int) > 0
+      - (switch_refresh_sda_fabric_distribution_topology_validation_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_lan_automation_task_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_lan_automation_task_poll_interval | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_topology_validation_poll_interval | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_timeout | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_validation_retries | int) > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_validation_interval | int) > 0
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool) or
+        (
+          (switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir |
+          type_debug) == 'str' and
+          switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir |
+          regex_search('^/') is not none and
+          switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir |
+          trim | length > 1
+        )
+      - >-
+        switch_refresh_sda_fabric_distribution_phase != 'cleanup_old' or
+        not (switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool) or
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool) or
+        (switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled | bool)
+      - >-
+        not (switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled | bool) or
+        (switch_refresh_sda_fabric_distribution_cleanup_unprovision_enabled | bool)
+      - >-
+        switch_refresh_sda_fabric_distribution_phase != 'cleanup_old' or
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool) or
+        (
+          switch_refresh_sda_fabric_distribution_cleanup_unprovision_enabled | bool and
+          switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled | bool
+        )
+    fail_msg: >-
+      Polling controls must be positive. Hostname transfer requires an explicit
+      absolute durable manifest directory, and normal hostname-enabled cleanup
+      must remove old inventory records so the name can be reused.
+  tags:
+    - always
+
+- name: Initialize immutable distribution refresh plans
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_validated_plans: []
+    switch_refresh_sda_fabric_distribution_resolved_plans: []
+    switch_refresh_sda_fabric_distribution_prepare_results: []
+    switch_refresh_sda_fabric_distribution_cleanup_results: []
+    switch_refresh_sda_fabric_distribution_hostname_preflight_manifests: []
+  no_log: true
+  tags:
+    - always
+
+- name: Validate every distribution refresh batch before mutation
+  ansible.builtin.include_tasks:
+    file: validate_batch.yml
+    apply:
+      tags:
+        - always
+  loop: "{{ switch_refresh_sda_fabric_distribution_batches }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_batch_input
+    label: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_input.name |
+        default('invalid-batch')
+        if (switch_refresh_sda_fabric_distribution_batch_input is mapping)
+        else 'invalid-batch'
+      }}
+  tags:
+    - always
+
+- name: Validate cross-batch distribution refresh uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='name') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_validated_plans | length
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='file_safe_name') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_validated_plans | length
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='new_management_ips') | flatten | unique | length ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='new_management_ips') | flatten | length)
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='mappings') | flatten |
+        map(attribute='old_identity_key') | unique | length ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='mappings') | flatten | length)
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='old_peer_endpoint_keys') | flatten | unique | length ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='old_peer_endpoint_keys') | flatten | length)
+      - >-
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='new_peer_endpoint_keys') | flatten | unique | length ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='new_peer_endpoint_keys') | flatten | length)
+      - >-
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='old_peer_endpoint_keys') | flatten) |
+        intersect(
+          switch_refresh_sda_fabric_distribution_validated_plans |
+          map(attribute='new_peer_endpoint_keys') | flatten
+        ) | length == 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='links') | flatten |
+        map(attribute='peer_management_ip') | unique | list) |
+        intersect(
+          switch_refresh_sda_fabric_distribution_validated_plans |
+          map(attribute='new_management_ips') | flatten | unique | list
+        ) | length == 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='discovery_config') | flatten |
+        map(attribute='discovery_name') | map('lower') | unique | list | length) ==
+        (switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='discovery_config') | flatten | list | length)
+    fail_msg: >-
+      Batch names, replacement management IPs, and old-device identifiers must
+      be unique across the complete distribution refresh plan. Discovery job
+      names must also be unique across all discovery batches.
+  tags:
+    - always
+
+- name: Resolve and pin every distribution refresh identity before mutation
+  ansible.builtin.include_tasks:
+    file: resolve_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  loop: "{{ switch_refresh_sda_fabric_distribution_validated_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when: >-
+    not (
+      switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool
+    )
+  tags:
+    - switch_refresh_sda_fabric_distribution_prepare
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Validate all resolved distribution plans before mutation
+  ansible.builtin.include_tasks:
+    file: validate_resolved_plans.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  when: >-
+    not (
+      switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool
+    )
+  tags:
+    - switch_refresh_sda_fabric_distribution_prepare
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Preflight all durable distribution hostname manifests before cleanup
+  ansible.builtin.include_tasks:
+    file: capture_hostname_manifest.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  loop: "{{ switch_refresh_sda_fabric_distribution_resolved_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool
+    - not (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool)
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Validate global distribution hostname transfer plan
+  ansible.builtin.include_tasks:
+    file: validate_global_hostname_preflight.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool
+    - not (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool)
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Prepare replacement distribution batches
+  ansible.builtin.include_tasks:
+    file: prepare_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+  loop: "{{ switch_refresh_sda_fabric_distribution_resolved_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when: switch_refresh_sda_fabric_distribution_phase == 'prepare'
+  tags:
+    - switch_refresh_sda_fabric_distribution_prepare
+
+- name: Clean up old distribution batches
+  ansible.builtin.include_tasks:
+    file: cleanup_batch.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  loop: "{{ switch_refresh_sda_fabric_distribution_resolved_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - not (switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool)
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Preflight all distribution hostname recovery manifests
+  ansible.builtin.include_tasks:
+    file: resume_hostname_transfer.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  loop: "{{ switch_refresh_sda_fabric_distribution_validated_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Validate global distribution hostname recovery plan
+  ansible.builtin.include_tasks:
+    file: validate_global_hostname_preflight.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old
+
+- name: Apply preflighted distribution hostname recovery manifests
+  ansible.builtin.include_tasks:
+    file: apply_preflight_hostname_resume.yml
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  loop: "{{ switch_refresh_sda_fabric_distribution_validated_plans }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_plan
+    label: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+  when:
+    - switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+    - switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest | bool
+  tags:
+    - switch_refresh_sda_fabric_distribution_cleanup_old

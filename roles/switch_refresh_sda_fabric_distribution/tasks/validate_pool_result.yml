@@ -1,0 +1,27 @@
+---
+# Pure evaluator for one batch site's reserved IP pools.
+- name: Validate distribution IPv4 pool evaluator input
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_requested_pool_names | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_requested_pool_names | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_requested_pool_names | unique | length ==
+        switch_refresh_sda_fabric_distribution_requested_pool_names | length
+      - >-
+        (switch_refresh_sda_fabric_distribution_site_pool_records | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_pool_site_id |
+        string | trim | length > 0
+    fail_msg: IPv4 pool validation received an invalid request or response.
+
+- name: Validate each requested distribution IPv4 pool
+  ansible.builtin.include_tasks:
+    file: validate_pool_entry.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_requested_pool_names }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_pool_name
+    label: "{{ switch_refresh_sda_fabric_distribution_pool_name }}"

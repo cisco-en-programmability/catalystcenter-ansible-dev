@@ -1,0 +1,12 @@
+---
+- name: Load globally preflighted distribution hostname recovery manifest
+  ansible.builtin.include_tasks:
+    file: load_preflight_hostname.yml
+    apply:
+      tags: [always]
+
+- name: Apply globally preflighted distribution hostname recovery manifest
+  ansible.builtin.include_tasks:
+    file: apply_hostname_manifest.yml
+    apply:
+      tags: [always]

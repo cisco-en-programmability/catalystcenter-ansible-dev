@@ -1,0 +1,30 @@
+---
+- name: Validate captured old hostname ownership before cleanup
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_old_hostname_owner_result.failed |
+        default(false) | bool)
+      - >-
+        (((switch_refresh_sda_fabric_distribution_old_hostname_owner_result.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+      - >-
+        ((switch_refresh_sda_fabric_distribution_old_hostname_owner_result.catalystcenter_response |
+        default({})).response | default([])) | length == 1
+      - >-
+        ((switch_refresh_sda_fabric_distribution_old_hostname_owner_result.catalystcenter_response |
+        default({})).response | default([]))[0].id |
+        default(
+          ((switch_refresh_sda_fabric_distribution_old_hostname_owner_result.catalystcenter_response |
+          default({})).response | default([]))[0].instanceUuid |
+          default('')
+        ) == switch_refresh_sda_fabric_distribution_old_hostname_owner_entry.old_device_id
+      - >-
+        ((switch_refresh_sda_fabric_distribution_old_hostname_owner_result.catalystcenter_response |
+        default({})).response | default([]))[0].hostname | default('') | lower ==
+        switch_refresh_sda_fabric_distribution_old_hostname_owner_entry.desired_hostname | lower
+    fail_msg: >-
+      Captured hostname {{
+      switch_refresh_sda_fabric_distribution_old_hostname_owner_entry.desired_hostname }}
+      is not owned uniquely by the pinned old distribution UUID. Cleanup failed
+      closed before any destructive operation.

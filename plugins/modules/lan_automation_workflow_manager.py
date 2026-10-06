@@ -3661,9 +3661,9 @@ class LanAutomation(CatalystCenterBase):
             str or None: The device ID if found, otherwise None.
         Description:
             This method retrieves the device ID associated with the provided management IP address
-            by making a call to the API. If an error occurs during the API call or if no device
-            is found, it logs an appropriate message and returns None. If the device is found,
-            it logs the device ID and returns it.
+            by making a call to the API. If an error occurs during the API call or no valid device
+            record is found, it fails the workflow. If the device is found, it logs the device ID
+            and returns it.
         """
 
         try:
@@ -3674,23 +3674,37 @@ class LanAutomation(CatalystCenterBase):
                 op_modifies=False,
             )
         except Exception as e:
-            self.log(
-                "Error fetching device ID for {0}: {1}".format(device_ip, str(e)),
-                "ERROR",
+            self.msg = "Unable to verify device {0}: failed to retrieve its device ID: {1}".format(
+                device_ip, str(e)
             )
+            self.fail_and_exit(self.msg)
             return None
 
         if not response or "response" not in response:
-            self.log("No device found for {0}".format(device_ip), "INFO")
+            self.msg = (
+                "Unable to verify device {0}: Catalyst Center returned no device "
+                "lookup response.".format(device_ip)
+            )
+            self.fail_and_exit(self.msg)
             return None
 
         device_list = response.get("response", [])
         if device_list and len(device_list) > 0:
             device_id = device_list[0].get("id")
+            if not device_id:
+                self.msg = (
+                    "Unable to verify device {0}: the Catalyst Center device "
+                    "record does not contain an ID.".format(device_ip)
+                )
+                self.fail_and_exit(self.msg)
+                return None
             self.log("Device ID for {0} is {1}".format(device_ip, device_id), "INFO")
             return device_id
         else:
-            self.log("No device ID found for {0}".format(device_ip), "INFO")
+            self.msg = "Unable to verify device {0}: no matching device was found in Catalyst Center.".format(
+                device_ip
+            )
+            self.fail_and_exit(self.msg)
             return None
 
     def check_link_details(self, source_device_ip, interface_name):
@@ -3701,18 +3715,23 @@ class LanAutomation(CatalystCenterBase):
             source_device_ip (str): IP address of the source device.
             interface_name (str): Interface name of the source device.
         Returns:
-            bool: True if the link details are valid, False otherwise.
+            bool: True if the interface has LAN Automation link configuration,
+                  False if the interface was found but is not configured.
         Description:
             This method checks the validity of the link details for a specified source device and
             interface by fetching the interface details from the API. It validates that the IPv4
             address is present, IS-IS support is enabled, and that the address list is not empty.
             It logs messages indicating the validity of the link details and returns a boolean value
-            indicating whether the link details are valid.
+            indicating whether the link details are valid. Device and interface lookup failures stop
+            the workflow so that an indeterminate state is not treated as an absent link.
         """
         device_id = self.get_device_id(source_device_ip)
 
         if device_id is None:
-            self.log("Device ID not found for {0}.".format(source_device_ip), "WARNING")
+            self.msg = "Unable to verify link details for {0}/{1}: device ID was not found.".format(
+                source_device_ip, interface_name
+            )
+            self.fail_and_exit(self.msg)
             return False
 
         try:
@@ -3723,25 +3742,28 @@ class LanAutomation(CatalystCenterBase):
                 op_modifies=False,
             )
         except Exception as e:
-            self.log(
-                "Error fetching link details for {0} on {1}: {2}".format(
-                    source_device_ip, interface_name, str(e)
-                ),
-                "ERROR",
+            self.msg = "Unable to verify link details for {0}/{1}: {2}".format(
+                source_device_ip, interface_name, str(e)
             )
+            self.fail_and_exit(self.msg)
             return False
 
         if not response or "response" not in response:
-            self.log(
-                "No response received for {0} on {1}".format(
-                    source_device_ip, interface_name
-                ),
-                "INFO",
+            self.msg = "Unable to verify link details for {0}/{1}: Catalyst Center returned no interface response.".format(
+                source_device_ip, interface_name
             )
+            self.fail_and_exit(self.msg)
             return False
 
         self.log("Received response from 'get_interface_details'{}".format(response))
         interface_details = response.get("response", {})
+        if not isinstance(interface_details, dict) or not interface_details:
+            self.msg = "Unable to verify link details for {0}/{1}: no matching interface was found in Catalyst Center.".format(
+                source_device_ip, interface_name
+            )
+            self.fail_and_exit(self.msg)
+            return False
+
         ipv4_address = interface_details.get("ipv4Address")
         isis_support = interface_details.get("isisSupport", "false")
         address_list = interface_details.get("addresses", [])
@@ -3751,7 +3773,7 @@ class LanAutomation(CatalystCenterBase):
         self.log("IS-IS Support: {0}".format(isis_support), "DEBUG")
         self.log("Address List: {0}".format(address_list), "DEBUG")
 
-        if ipv4_address and isis_support != "false" and address_list:
+        if ipv4_address and str(isis_support).lower() == "true" and address_list:
             self.log(
                 "Valid link details for {0} on {1}".format(
                     source_device_ip, interface_name
@@ -3976,7 +3998,10 @@ class LanAutomation(CatalystCenterBase):
             result_msg_list.append(delete_link_msg)
 
         if self.no_link_deleted:
-            no_link_deleted_msg = "Provided links {} did not need any deletion from Cisco Catalyst Center."
+            no_link_deleted_msg = (
+                "Provided links {} did not need any deletion from Cisco Catalyst "
+                "Center.".format(self.no_link_deleted)
+            )
             result_msg_list.append(no_link_deleted_msg)
 
         port_channel_msgs = self.build_port_channel_result_messages()
@@ -4251,7 +4276,7 @@ class LanAutomation(CatalystCenterBase):
 
     def process_link_addition(self, link_add):
         """
-        Processes link addition and logs the results.
+        Verify that a requested link addition completed successfully.
         Args:
             link_add (dict): A dictionary containing details for adding a link,
                              including "sourceDeviceManagementIPAddress",
@@ -4260,9 +4285,9 @@ class LanAutomation(CatalystCenterBase):
         Returns:
             None
         Description:
-            This method checks the details of the link to be added and verifies
-            whether both source and destination links exist in the system. It
-            logs the result of the link addition attempt.
+            This method checks both endpoints of the specified link. It reports
+            success only when the link configuration exists on both endpoints
+            and fails the workflow when either endpoint remains unconfigured.
         """
         if not link_add:
             self.log(
@@ -4278,34 +4303,39 @@ class LanAutomation(CatalystCenterBase):
         destination_ip_address = link_add.get("destinationDeviceManagementIPAddress")
         destination_interface_name = link_add.get("destinationDeviceInterfaceName")
 
-        if self.check_link_details(
+        source_link_exists = self.check_link_details(
             source_ip_address, source_interface_name
-        ) and self.check_link_details(
+        )
+        destination_link_exists = self.check_link_details(
             destination_ip_address, destination_interface_name
-        ):
-            self.log(
-                "Link between {0}/{1} and {2}/{3} was added successfully in Catalyst Center.".format(
+        )
+
+        if not source_link_exists or not destination_link_exists:
+            self.msg = (
+                "Link addition verification failed for {0}/{1} and {2}/{3}: "
+                "link configuration is missing from at least one endpoint.".format(
                     source_ip_address,
                     source_interface_name,
                     destination_ip_address,
                     destination_interface_name,
-                ),
-                "INFO",
+                )
             )
-        else:
-            self.log(
-                "Link between {0}/{1} and {2}/{3} was not added in Catalyst Center.".format(
-                    source_ip_address,
-                    source_interface_name,
-                    destination_ip_address,
-                    destination_interface_name,
-                ),
-                "WARNING",
-            )
+            self.fail_and_exit(self.msg)
+            return
+
+        self.log(
+            "Link between {0}/{1} and {2}/{3} was added successfully in Catalyst Center.".format(
+                source_ip_address,
+                source_interface_name,
+                destination_ip_address,
+                destination_interface_name,
+            ),
+            "INFO",
+        )
 
     def process_link_deletion(self, link_delete):
         """
-        Processes link deletion and logs the results.
+        Verify that a requested link deletion completed successfully.
         Args:
             link_delete (dict): A dictionary containing details for deleting a link,
                                 including "sourceDeviceManagementIPAddress",
@@ -4314,8 +4344,9 @@ class LanAutomation(CatalystCenterBase):
         Returns:
             None
         Description:
-            This method checks whether the specified link is already removed or
-            still exists in the system. It logs the outcome of the link deletion attempt.
+            This method checks both endpoints of the specified link. It reports
+            success only when the link configuration is absent from both endpoints
+            and fails the workflow when it remains on either endpoint.
         """
         if not link_delete:
             self.log(
@@ -4331,30 +4362,35 @@ class LanAutomation(CatalystCenterBase):
         destination_ip_address = link_delete.get("destinationDeviceManagementIPAddress")
         destination_interface_name = link_delete.get("destinationDeviceInterfaceName")
 
-        if not self.check_link_details(
+        source_link_exists = self.check_link_details(
             source_ip_address, source_interface_name
-        ) and not self.check_link_details(
+        )
+        destination_link_exists = self.check_link_details(
             destination_ip_address, destination_interface_name
-        ):
-            self.log(
-                "Link between {0}/{1} and {2}/{3} has already been removed.".format(
+        )
+
+        if source_link_exists or destination_link_exists:
+            self.msg = (
+                "Link deletion verification failed for {0}/{1} and {2}/{3}: "
+                "link configuration remains on at least one endpoint.".format(
                     source_ip_address,
                     source_interface_name,
                     destination_ip_address,
                     destination_interface_name,
-                ),
-                "INFO",
+                )
             )
-        else:
-            self.log(
-                "Link between {0}/{1} and {2}/{3} still exists and needs to be removed.".format(
-                    source_ip_address,
-                    source_interface_name,
-                    destination_ip_address,
-                    destination_interface_name,
-                ),
-                "WARNING",
-            )
+            self.fail_and_exit(self.msg)
+            return
+
+        self.log(
+            "Link between {0}/{1} and {2}/{3} has been removed.".format(
+                source_ip_address,
+                source_interface_name,
+                destination_ip_address,
+                destination_interface_name,
+            ),
+            "INFO",
+        )
 
     def get_diff_merged(self):
         """
@@ -4479,11 +4515,12 @@ class LanAutomation(CatalystCenterBase):
                 )
                 result_task_ids = action_func(filtered_updates)
 
-                if not result_task_ids:
+                if not result_task_ids or not any(result_task_ids.values()):
                     self.msg = "An error occurred while retrieving task_ids for '{}' operation.".format(
                         action_func.__name__
                     )
-                    self.set_operation_result("failed", False, self.msg, "CRITICAL")
+                    self.fail_and_exit(self.msg)
+                    return self
                 else:
                     self.log("Changes Merged: Task IDs: {}".format(result_task_ids))
                     status_func(result_task_ids).check_return_status()
@@ -5060,11 +5097,14 @@ class LanAutomation(CatalystCenterBase):
                         "destinationDeviceInterfaceName"
                     )
 
-                    if self.check_link_details(
+                    source_link_exists = self.check_link_details(
                         source_ip_address, source_interface_name
-                    ) and self.check_link_details(
+                    )
+                    destination_link_exists = self.check_link_details(
                         destination_ip_address, destination_interface_name
-                    ):
+                    )
+
+                    if source_link_exists and destination_link_exists:
                         self.log(
                             "Link already exists between {}/{} and {}/{}. No update needed.".format(
                                 source_ip_address,
@@ -5079,17 +5119,20 @@ class LanAutomation(CatalystCenterBase):
                     else:
                         filtered_updates[update_key] = updates
 
-                    if not filtered_updates[update_key]:
+                    if not filtered_updates.get(update_key):
                         self.log("No link add updates needed after filtering.", "INFO")
 
                 elif update_type == "link_delete":
-                    if not self.check_link_details(
+                    source_link_exists = self.check_link_details(
                         updates.get("sourceDeviceManagementIPAddress"),
                         updates.get("sourceDeviceInterfaceName"),
-                    ) and not self.check_link_details(
+                    )
+                    destination_link_exists = self.check_link_details(
                         updates.get("destinationDeviceManagementIPAddress"),
                         updates.get("destinationDeviceInterfaceName"),
-                    ):
+                    )
+
+                    if source_link_exists or destination_link_exists:
                         filtered_updates[update_key] = updates
                         self.log(
                             "Link delete updates ready for processing: {}".format(
@@ -5108,6 +5151,16 @@ class LanAutomation(CatalystCenterBase):
                         self.log(
                             "No link delete updates needed after filtering.", "INFO"
                         )
+
+        # List-based updates remain in the mapping as empty lists when every
+        # requested device is already compliant.  Drop those entries so an
+        # idempotent no-op is not mistaken for an API call that failed to
+        # return a task ID.
+        filtered_updates = {
+            update_key: updates
+            for update_key, updates in filtered_updates.items()
+            if updates
+        }
 
         self.log("Filtered updates: {}".format(filtered_updates), "DEBUG")
 
@@ -5159,12 +5212,11 @@ class LanAutomation(CatalystCenterBase):
                         "INFO",
                     )
                 else:
-                    self.log(
-                        "Failed to get task ID for {} update: {}".format(
-                            update_type, updates
-                        ),
-                        "ERROR",
+                    self.msg = "Failed to get a task ID for the requested {} update: {}".format(
+                        update_type, updates
                     )
+                    self.fail_and_exit(self.msg)
+                    return None
             else:
                 self.log(
                     "No updates found for {}, skipping.".format(update_key), "INFO"
@@ -5474,6 +5526,13 @@ class LanAutomation(CatalystCenterBase):
         """
         self.log("Task Ids is: {}".format(task_ids))
 
+        task_timeout = self.params.get("catalystcenter_api_task_timeout", 604800)
+        if task_timeout is None:
+            task_timeout = 604800
+        poll_interval = self.params.get("catalystcenter_task_poll_interval", 30)
+        if poll_interval is None:
+            poll_interval = 30
+
         for update_type, task_id in task_ids.items():
             if task_id is not None:
                 self.log(
@@ -5482,8 +5541,19 @@ class LanAutomation(CatalystCenterBase):
                     ),
                     "INFO",
                 )
+                task_start_time = time.monotonic()
 
                 while True:
+                    if time.monotonic() - task_start_time >= task_timeout:
+                        self.msg = (
+                            "Timed out after {0} seconds while waiting for {1} "
+                            "update task '{2}' to complete.".format(
+                                task_timeout, update_type, task_id
+                            )
+                        )
+                        self.fail_and_exit(self.msg)
+                        return self
+
                     task_details = self.get_task_details(task_id)
                     if not task_details:
                         self.msg = (
@@ -5548,7 +5618,9 @@ class LanAutomation(CatalystCenterBase):
                         "DEBUG",
                     )
 
-                    time.sleep(self.params.get("catalystcenter_task_poll_interval", 30))
+                    elapsed_time = time.monotonic() - task_start_time
+                    remaining_time = max(task_timeout - elapsed_time, 0)
+                    time.sleep(max(0, min(poll_interval, remaining_time)))
 
         return self
 

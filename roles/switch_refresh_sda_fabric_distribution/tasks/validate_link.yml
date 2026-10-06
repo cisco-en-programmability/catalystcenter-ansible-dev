@@ -1,0 +1,178 @@
+---
+- name: Validate distribution link mapping structure
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_link_input is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.keys() |
+        list |
+        sort == ['new_link', 'old_link', 'peer_management_ip']
+      - >-
+        (switch_refresh_sda_fabric_distribution_link_input.peer_management_ip |
+        default('') | type_debug) == 'str'
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip |
+        default('') | trim | length > 0
+      - switch_refresh_sda_fabric_distribution_link_input.old_link is mapping
+      - switch_refresh_sda_fabric_distribution_link_input.new_link is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.old_link.keys() |
+        list |
+        sort == ['distribution_interface_name', 'peer_interface_name']
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.new_link.keys() |
+        list |
+        sort == ['distribution_interface_name', 'ip_pool_name', 'peer_interface_name']
+    fail_msg: >-
+      Each links entry must contain only peer_management_ip, old_link, and
+      new_link. old_link requires peer_interface_name and
+      distribution_interface_name. new_link requires those fields plus
+      ip_pool_name.
+
+- name: Validate distribution link IPv4 peer
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip ==
+        (switch_refresh_sda_fabric_distribution_link_input.peer_management_ip | trim)
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip |
+        regex_search('^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$')
+        is not none
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip.split('.') |
+        map('int') | max <= 255
+      - >-
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip not in
+        switch_refresh_sda_fabric_distribution_batch_device_ips
+    fail_msg: >-
+      peer_management_ip must be a canonical IPv4 address and cannot identify
+      any replacement distribution device in the batch.
+
+- name: Validate distribution link interface and pool values
+  ansible.builtin.assert:
+    that:
+      - (switch_refresh_sda_fabric_distribution_link_value | type_debug) == 'str'
+      - switch_refresh_sda_fabric_distribution_link_value | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_link_value ==
+        (switch_refresh_sda_fabric_distribution_link_value | trim)
+    fail_msg: >-
+      Interface names and ip_pool_name must be non-empty, whitespace-trimmed
+      strings. Interface names must use the complete inventory spelling.
+  loop:
+    - "{{ switch_refresh_sda_fabric_distribution_link_input.old_link.peer_interface_name }}"
+    - "{{ switch_refresh_sda_fabric_distribution_link_input.old_link.distribution_interface_name }}"
+    - "{{ switch_refresh_sda_fabric_distribution_link_input.new_link.peer_interface_name }}"
+    - "{{ switch_refresh_sda_fabric_distribution_link_input.new_link.distribution_interface_name }}"
+    - "{{ switch_refresh_sda_fabric_distribution_link_input.new_link.ip_pool_name }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_link_value
+    label: link-value
+
+- name: Normalize distribution link mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_mapping_links: >-
+      {{
+        switch_refresh_sda_fabric_distribution_mapping_links + [
+          {
+            'peer_management_ip':
+              switch_refresh_sda_fabric_distribution_link_input.peer_management_ip,
+            'old_link': {
+              'peer_interface_name':
+                switch_refresh_sda_fabric_distribution_link_input.old_link.peer_interface_name,
+              'distribution_interface_name':
+                switch_refresh_sda_fabric_distribution_link_input.old_link.distribution_interface_name
+            },
+            'new_link': {
+              'peer_interface_name':
+                switch_refresh_sda_fabric_distribution_link_input.new_link.peer_interface_name,
+              'distribution_interface_name':
+                switch_refresh_sda_fabric_distribution_link_input.new_link.distribution_interface_name,
+              'ip_pool_name':
+                switch_refresh_sda_fabric_distribution_link_input.new_link.ip_pool_name
+            }
+          }
+        ]
+      }}
+
+- name: Build immutable distribution link endpoint keys
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys + [
+          switch_refresh_sda_fabric_distribution_mapping_old_key ~ '|' ~
+          (switch_refresh_sda_fabric_distribution_link_input.old_link.distribution_interface_name |
+          lower)
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys + [
+          switch_refresh_sda_fabric_distribution_link_input.peer_management_ip ~ '|' ~
+          (switch_refresh_sda_fabric_distribution_link_input.old_link.peer_interface_name |
+          lower)
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys: >-
+      {{
+        switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys + [
+          switch_refresh_sda_fabric_distribution_mapping_new.management_ip ~ '|' ~
+          (switch_refresh_sda_fabric_distribution_link_input.new_link.distribution_interface_name |
+          lower)
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys: >-
+      {{
+        switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys + [
+          switch_refresh_sda_fabric_distribution_link_input.peer_management_ip ~ '|' ~
+          (switch_refresh_sda_fabric_distribution_link_input.new_link.peer_interface_name |
+          lower)
+        ]
+      }}
+
+- name: Build distribution LAN Automation link payloads
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_link_add_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_link_add_config + [
+          {
+            'lan_automated_device_update': {
+              'link_add': {
+                'source_device_management_ip_address':
+                  switch_refresh_sda_fabric_distribution_mapping_new.management_ip,
+                'source_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_link_input.new_link.distribution_interface_name,
+                'destination_device_management_ip_address':
+                  switch_refresh_sda_fabric_distribution_link_input.peer_management_ip,
+                'destination_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_link_input.new_link.peer_interface_name,
+                'ip_pool_name':
+                  switch_refresh_sda_fabric_distribution_link_input.new_link.ip_pool_name
+              }
+            }
+          }
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_batch_link_delete_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_link_delete_config + [
+          {
+            'lan_automated_device_update': {
+              'link_delete': {
+                'source_device_management_ip_address':
+                  (
+                    switch_refresh_sda_fabric_distribution_mapping_old.management_ip |
+                    default('')
+                  ),
+                'source_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_link_input.old_link.distribution_interface_name,
+                'destination_device_management_ip_address':
+                  switch_refresh_sda_fabric_distribution_link_input.peer_management_ip,
+                'destination_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_link_input.old_link.peer_interface_name
+              }
+            }
+          }
+        ]
+      }}
