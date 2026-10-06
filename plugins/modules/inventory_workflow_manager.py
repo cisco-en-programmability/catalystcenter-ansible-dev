@@ -6406,13 +6406,17 @@ class Inventory(CatalystCenterBase):
                                     self.msg = "Device role update get failed"
                                 self.log(self.msg, "ERROR")
                                 self.result["response"] = self.msg
-                                break
+                                return self
 
                 except Exception as e:
                     error_message = "Error while updating device role '{0}' in Cisco Catalyst Center: {1}".format(
                         device_role, str(e)
                     )
+                    self.status = "failed"
+                    self.msg = error_message
+                    self.result["response"] = self.msg
                     self.log(error_message, "ERROR")
+                    return self
 
             if role_update_count == len(devices_to_update_role):
                 self.status = "success"
