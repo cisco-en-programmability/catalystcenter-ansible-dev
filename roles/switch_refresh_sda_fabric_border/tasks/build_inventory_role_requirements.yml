@@ -1,0 +1,119 @@
+---
+- name: Initialize inherited inventory role requirements
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_role_requirements: []
+    switch_refresh_sda_fabric_border_batch_inventory_role_execution_config: []
+
+- name: Build inherited inventory role requirements
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_role_requirements: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_inventory_role_requirements +
+        [
+          {
+            'ip_address_list':
+              switch_refresh_sda_fabric_border_batch_resolved_mappings |
+              selectattr(
+                'inventory_role',
+                'equalto',
+                switch_refresh_sda_fabric_border_inventory_role_group
+              ) |
+              map(attribute='new.management_ip') |
+              map('string') |
+              list,
+            'role': switch_refresh_sda_fabric_border_inventory_role_group
+          }
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_batch_resolved_mappings |
+      map(attribute='inventory_role') |
+      unique |
+      list
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_role_group
+    label: "{{ switch_refresh_sda_fabric_border_inventory_role_group }}"
+  no_log: true
+
+- name: Build inherited inventory role-only execution configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_batch_inventory_role_execution_config: >-
+      {{
+        switch_refresh_sda_fabric_border_batch_inventory_role_requirements
+        if (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool)
+        else []
+      }}
+  no_log: true
+
+- name: Validate inherited staged inventory role configurations
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_execution_config |
+        selectattr('role', 'defined') | list | length == 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_role_requirements |
+        map(attribute='role') |
+        difference(['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']) |
+        length == 0
+      - switch_refresh_sda_fabric_border_batch_inventory_role_requirements | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_batch_inventory_role_requirements |
+        map(attribute='ip_address_list') |
+        flatten |
+        map('string') |
+        list |
+        sort ==
+        switch_refresh_sda_fabric_border_batch_device_ips |
+        map('string') |
+        list |
+        sort
+      - >-
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool or
+        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config |
+        length == 0
+      - >-
+        not (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool) or
+        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+        switch_refresh_sda_fabric_border_batch_inventory_role_requirements
+    fail_msg: >-
+      Inventory preparation must keep add and credential payloads role-free,
+      inherit one supported inventory role from every old device, and isolate
+      role assignment in grouped role-only payloads for the replacements.
+  no_log: true
+
+- name: Validate each replacement inherits its matched old inventory role
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_inventory_role_mapping.inventory_role in
+        ['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
+      - >-
+        switch_refresh_sda_fabric_border_inventory_role_mapping.new.management_ip |
+        string in
+        (
+          switch_refresh_sda_fabric_border_batch_inventory_role_requirements |
+          selectattr(
+            'role',
+            'equalto',
+            switch_refresh_sda_fabric_border_inventory_role_mapping.inventory_role
+          ) |
+          map(attribute='ip_address_list') |
+          flatten |
+          map('string') |
+          list
+        )
+    fail_msg: >-
+      Replacement
+      {{ switch_refresh_sda_fabric_border_inventory_role_mapping.new.management_ip |
+      default('unknown') }} must inherit the supported inventory role captured
+      from its matched old device.
+  loop: "{{ switch_refresh_sda_fabric_border_batch_resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_inventory_role_mapping
+    label: >-
+      {{ switch_refresh_sda_fabric_border_inventory_role_mapping.new.management_ip |
+      default('replacement') }}
+  no_log: true

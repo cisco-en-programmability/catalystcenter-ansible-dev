@@ -1,0 +1,586 @@
+---
+- name: Validate border prepare inventory guards offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_border_guard_expected_ips:
+      - "204.1.2.11"
+      - "204.1.2.12"
+    switch_refresh_sda_fabric_border_guard_syncing_record:
+      managementIpAddress: "204.1.2.11"
+      id: new-border-uuid-11
+      instanceUuid: new-border-uuid-11
+      managementState: Never Managed
+      collectionStatus: In Progress
+      reachabilityStatus: Unknown
+      hostname: null
+      family: null
+      platformId: null
+      serialNumber: null
+      deviceSupportLevel: Unsupported
+      inventoryStatusDetail: ""
+      role: ACCESS
+    switch_refresh_sda_fabric_border_guard_ready_access_records:
+      - managementIpAddress: "204.1.2.11"
+        id: new-border-uuid-11
+        instanceUuid: new-border-uuid-11
+        managementState: Managed
+        collectionStatus: Managed
+        reachabilityStatus: Reachable
+        hostname: replacement-border-11.example.test
+        family: Switches and Hubs
+        platformId: C9500-48Y4C
+        serialNumber: FDO00000011
+        deviceSupportLevel: Supported
+        inventoryStatusDetail: '<status><general code="SUCCESS"/></status>'
+        role: ACCESS
+      - managementIpAddress: "204.1.2.12"
+        id: new-border-uuid-12
+        instanceUuid: new-border-uuid-12
+        managementState: Managed
+        collectionStatus: Managed
+        reachabilityStatus: Reachable
+        hostname: replacement-border-12.example.test
+        family: Routers
+        platformId: C8500-12X4QC
+        serialNumber: FDO00000012
+        deviceSupportLevel: Supported
+        inventoryStatusDetail: "<status><general code='SUCCESS'/></status>"
+        role: ACCESS
+
+  tasks:
+    - name: Load border prepare inventory guard contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_guard_prepare_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/prepare_batch.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_border_guard_waiter_source: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/wait_for_prepare_inventory.yml'
+            )
+          }}
+        switch_refresh_sda_fabric_border_guard_waiter_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/wait_for_prepare_inventory.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_border_guard_evaluator_source: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/validate_prepare_inventory_readiness_result.yml'
+            )
+          }}
+
+    - name: Derive border prepare inventory guard tasks
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_guard_prepare_task_names: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_prepare_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_border_guard_add_task: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Add replacement border batch to inventory without role mutation'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_border_guard_base_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Wait for replacement border inventory synchronization'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_border_guard_role_update_task: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Assign replacement border inventory role'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_border_guard_role_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Wait for replacement borders to report inherited inventory roles'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_border_guard_poll_task: >-
+          {{
+            switch_refresh_sda_fabric_border_guard_waiter_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Poll replacement border inventory readiness'
+            ) |
+            first
+          }}
+
+    - name: Verify staged inventory task uniqueness and ordering
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names |
+            select(
+              'equalto',
+              'Add replacement border batch to inventory without role mutation'
+            ) | list | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names |
+            select(
+              'equalto',
+              'Wait for replacement border inventory synchronization'
+            ) | list | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names |
+            select(
+              'equalto',
+              'Assign replacement border inventory role'
+            ) | list | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names |
+            select(
+              'equalto',
+              'Wait for replacement borders to report inherited inventory roles'
+            ) | list | length == 1
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Add replacement border batch to inventory without role mutation'
+            ) <
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Wait for replacement border inventory synchronization'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Wait for replacement border inventory synchronization'
+            ) <
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Assign replacement border inventory role'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Assign replacement border inventory role'
+            ) <
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Wait for replacement borders to report inherited inventory roles'
+            )
+          - >-
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Wait for replacement borders to report inherited inventory roles'
+            ) <
+            switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
+              'Provision replacement border batch'
+            )
+
+    - name: Verify staged inventory payload and role policies
+      ansible.builtin.assert:
+        that:
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_config' in
+            (
+              switch_refresh_sda_fabric_border_guard_add_task.vars.inventory_config |
+              string
+            )
+          - >-
+            'prepare_inventory_role_config' not in
+            (
+              switch_refresh_sda_fabric_border_guard_add_task.vars.inventory_config |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_assignment' in
+            (
+              switch_refresh_sda_fabric_border_guard_role_update_task
+              .vars.inventory_config |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_config' in
+            (switch_refresh_sda_fabric_border_guard_role_update_task.loop | string)
+          - >-
+            switch_refresh_sda_fabric_border_guard_role_update_task
+            .loop_control.loop_var ==
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_assignment'
+          - >-
+            (
+              switch_refresh_sda_fabric_border_guard_base_wait_task.vars
+              .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+              .required_role |
+              string |
+              length
+            ) == 0
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.role' in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.vars
+              .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+              .required_role | string
+            )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.ip_address_list'
+            in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.vars
+              .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+              .expected_ips | string
+            )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirements' in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.loop | string
+            )
+
+    - name: Verify inventory readiness polling contract
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_guard_poll_task[
+              'cisco.catalystcenter.network_device_info'
+            ] is mapping
+          - >-
+            switch_refresh_sda_fabric_border_guard_poll_task.register ==
+            'switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup'
+          - >-
+            (switch_refresh_sda_fabric_border_guard_poll_task.until | type_debug) ==
+            'list'
+          - switch_refresh_sda_fabric_border_guard_poll_task.retries is defined
+          - switch_refresh_sda_fabric_border_guard_poll_task.delay is defined
+          - switch_refresh_sda_fabric_border_guard_poll_task.failed_when is sameas false
+          - switch_refresh_sda_fabric_border_guard_poll_task.no_log is sameas true
+          - >-
+            'validate_prepare_inventory_readiness_result.yml' in
+            switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'required_role' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'collectionStatus' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'managementState' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'reachabilityStatus' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'inventoryStatusDetail' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'deviceSupportLevel' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'serialNumber' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'platformId' in switch_refresh_sda_fabric_border_guard_waiter_source
+          - >-
+            'instanceUuid' in switch_refresh_sda_fabric_border_guard_evaluator_source
+
+    - name: Accept synchronized ACCESS inventory before role assignment
+      ansible.builtin.include_tasks: >-
+        ../tasks/validate_prepare_inventory_readiness_result.yml
+      vars:
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+          expected_ips:
+            - "204.1.2.11"
+          required_role: ""
+          context: ready-access-before-role-offline-test
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              - >-
+                {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+
+    - name: Reject the observed post-discovery synchronization record
+      block:
+        - name: Evaluate the observed post-discovery synchronization record
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: ""
+              context: observed-syncing-record-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{ switch_refresh_sda_fabric_border_guard_syncing_record }}
+
+        - name: Fail when the observed synchronization record was accepted
+          ansible.builtin.fail:
+            msg: The observed post-discovery synchronization record unexpectedly passed.
+      rescue:
+        - name: Confirm the observed synchronization record failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when the observed synchronization record was accepted'
+
+    - name: Reject ACCESS inventory after BORDER_ROUTER assignment
+      block:
+        - name: Evaluate ACCESS inventory after BORDER_ROUTER assignment
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: BORDER_ROUTER
+              context: access-after-role-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+
+        - name: Fail when ACCESS inventory passed the post-role guard
+          ansible.builtin.fail:
+            msg: ACCESS inventory unexpectedly passed the BORDER_ROUTER guard.
+      rescue:
+        - name: Confirm ACCESS inventory failed the post-role guard
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when ACCESS inventory passed the post-role guard'
+
+    - name: Accept synchronized BORDER_ROUTER inventory after role assignment
+      ansible.builtin.include_tasks: >-
+        ../tasks/validate_prepare_inventory_readiness_result.yml
+      vars:
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+          expected_ips:
+            - "204.1.2.11"
+          required_role: BORDER_ROUTER
+          context: border-router-after-role-offline-test
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              - >-
+                {{
+                  switch_refresh_sda_fabric_border_guard_ready_access_records[0] |
+                  combine({'role': 'BORDER_ROUTER'})
+                }}
+
+    - name: Accept synchronized inherited ACCESS inventory
+      ansible.builtin.include_tasks: >-
+        ../tasks/validate_prepare_inventory_readiness_result.yml
+      vars:
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+          expected_ips:
+            - "204.1.2.11"
+          required_role: ACCESS
+          context: inherited-access-role-offline-test
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              - >-
+                {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+
+    - name: Accept Ping Reachable synchronized border inventory
+      ansible.builtin.include_tasks: >-
+        ../tasks/validate_prepare_inventory_readiness_result.yml
+      vars:
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+          expected_ips:
+            - "204.1.2.11"
+          required_role: BORDER_ROUTER
+          context: ping-reachable-border-offline-test
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              - >-
+                {{
+                  switch_refresh_sda_fabric_border_guard_ready_access_records[0] |
+                  combine(
+                    {
+                      'role': 'BORDER ROUTER',
+                      'reachabilityStatus': 'Ping Reachable'
+                    }
+                  )
+                }}
+
+    - name: Reject malformed inventory response
+      block:
+        - name: Evaluate malformed inventory response
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: ""
+              context: malformed-response-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response: {}
+
+        - name: Fail when malformed inventory response was accepted
+          ansible.builtin.fail:
+            msg: Malformed inventory response unexpectedly passed validation.
+      rescue:
+        - name: Confirm malformed inventory response failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when malformed inventory response was accepted'
+
+    - name: Reject missing inventory IP coverage
+      block:
+        - name: Evaluate missing inventory IP coverage
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips: >-
+                {{ switch_refresh_sda_fabric_border_guard_expected_ips }}
+              required_role: ""
+              context: missing-ip-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+
+        - name: Fail when missing inventory IP coverage was accepted
+          ansible.builtin.fail:
+            msg: Missing inventory IP coverage unexpectedly passed validation.
+      rescue:
+        - name: Confirm missing inventory IP coverage failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when missing inventory IP coverage was accepted'
+
+    - name: Reject duplicate inventory IP coverage
+      block:
+        - name: Evaluate duplicate inventory IP coverage
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: ""
+              context: duplicate-ip-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+                  - >-
+                    {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
+
+        - name: Fail when duplicate inventory IP coverage was accepted
+          ansible.builtin.fail:
+            msg: Duplicate inventory IP coverage unexpectedly passed validation.
+      rescue:
+        - name: Confirm duplicate inventory IP coverage failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when duplicate inventory IP coverage was accepted'
+
+    - name: Reject unsupported synchronized inventory
+      block:
+        - name: Evaluate unsupported synchronized inventory
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: ""
+              context: unsupported-inventory-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{
+                      switch_refresh_sda_fabric_border_guard_ready_access_records[0] |
+                      combine({'deviceSupportLevel': 'Unsupported'})
+                    }}
+
+        - name: Fail when unsupported synchronized inventory was accepted
+          ansible.builtin.fail:
+            msg: Unsupported synchronized inventory unexpectedly passed validation.
+      rescue:
+        - name: Confirm unsupported synchronized inventory failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when unsupported synchronized inventory was accepted'
+
+    - name: Reject synchronized inventory with null immutable identity fields
+      block:
+        - name: Evaluate synchronized inventory with null immutable identity fields
+          ansible.builtin.include_tasks: >-
+            ../tasks/validate_prepare_inventory_readiness_result.yml
+          vars:
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+              expected_ips:
+                - "204.1.2.11"
+              required_role: ""
+              context: null-identity-inventory-offline-test
+            switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  - >-
+                    {{
+                      switch_refresh_sda_fabric_border_guard_ready_access_records[0] |
+                      combine(
+                        {
+                          'id': none,
+                          'instanceUuid': none,
+                          'serialNumber': none,
+                          'platformId': none
+                        }
+                      )
+                    }}
+
+        - name: Fail when null immutable identity fields were accepted
+          ansible.builtin.fail:
+            msg: Null immutable identity fields unexpectedly passed validation.
+      rescue:
+        - name: Confirm null immutable identity fields failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name !=
+                'Fail when null immutable identity fields were accepted'
