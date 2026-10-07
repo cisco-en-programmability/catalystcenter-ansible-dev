@@ -5,7 +5,9 @@
     that:
       - switch_refresh_sda_fabric_border_cutover_entry_update_request is mapping
       - >-
-        switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+        switch_refresh_sda_fabric_border_cutover_entry_update_request.new is mapping
+      - >-
+        switch_refresh_sda_fabric_border_cutover_entry_update_request.new.management_ip |
         default('') | string | trim | length > 0
       - >-
         switch_refresh_sda_fabric_border_cutover_entry_update_request.status in
@@ -19,9 +21,9 @@
       {{
         switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings |
         selectattr(
-          'new_management_ip',
+          'new.management_ip',
           'equalto',
-          switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+          switch_refresh_sda_fabric_border_cutover_entry_update_request.new.management_ip |
           string
         ) |
         list
@@ -80,8 +82,8 @@
             recursive=true
           )
           if (
-            switch_refresh_sda_fabric_border_cutover_update_mapping.new_management_ip | string ==
-            switch_refresh_sda_fabric_border_cutover_entry_update_request.new_management_ip |
+            switch_refresh_sda_fabric_border_cutover_update_mapping.new.management_ip | string ==
+            switch_refresh_sda_fabric_border_cutover_entry_update_request.new.management_ip |
             string
           )
           else switch_refresh_sda_fabric_border_cutover_update_mapping
@@ -90,7 +92,7 @@
   loop: "{{ switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_update_mapping
-    label: "{{ switch_refresh_sda_fabric_border_cutover_update_mapping.new_management_ip }}"
+    label: "{{ switch_refresh_sda_fabric_border_cutover_update_mapping.new.management_ip }}"
   no_log: true
 
 - name: Publish updated active cutover plan

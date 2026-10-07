@@ -31,7 +31,8 @@
           device_mapping:
             - old:
                 serial_number: old-border-0001
-              new_device_management_ip: "192.0.2.20"
+              new:
+                management_ip: "192.0.2.20"
               handoff_interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -39,7 +40,8 @@
                   destination_interface_name: HundredGigE1/0/2
             - old:
                 mac_address: 00-11-22-33-44-55
-              new_device_management_ip: "192.0.2.21"
+              new:
+                management_ip: "192.0.2.21"
               handoff_interface_mappings: []
 
     - name: Build valid Discovery border plan
@@ -63,6 +65,12 @@
             switch_refresh_sda_fabric_border_batch_device_mappings[1].old ==
             {'mac_address': '00:11:22:33:44:55'}
           - >-
+            switch_refresh_sda_fabric_border_batch_device_mappings[0].new ==
+            {'management_ip': '192.0.2.20'}
+          - >-
+            switch_refresh_sda_fabric_border_batch_device_mappings[1].new ==
+            {'management_ip': '192.0.2.21'}
+          - >-
             switch_refresh_sda_fabric_border_batch_device_mappings[0].handoff_interface_mappings |
             length == 2
           - switch_refresh_sda_fabric_border_batch_discovery_config | length == 1
@@ -82,12 +90,8 @@
             switch_refresh_sda_fabric_border_batch_device_ips
           - >-
             switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
-            [
-              {
-                'ip_address_list': switch_refresh_sda_fabric_border_batch_device_ips,
-                'role': 'BORDER_ROUTER'
-              }
-            ]
+            []
+          - switch_refresh_sda_fabric_border_batch_inventory_role_requirements == []
           - switch_refresh_sda_fabric_border_batch_provision_config | length == 2
           - >-
             switch_refresh_sda_fabric_border_batch_provision_config |
@@ -129,11 +133,13 @@
           device_mapping:
             - old:
                 management_ip: "198.51.100.30"
-              new_device_management_ip: "192.0.2.30"
+              new:
+                management_ip: "192.0.2.30"
               handoff_interface_mappings: []
             - old:
                 hostname: old-border-02.example.test
-              new_device_management_ip: "192.0.2.31"
+              new:
+                management_ip: "192.0.2.31"
               handoff_interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -159,8 +165,7 @@
             switch_refresh_sda_fabric_border_batch_inventory_execution_config[0].role
             is not defined
           - >-
-            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config[0].role ==
-            'BORDER_ROUTER'
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config == []
 
     - name: Set valid custom-stage border batch
       ansible.builtin.set_fact:
@@ -187,7 +192,6 @@
                 username: custom-user
                 password: custom-password
                 type: NETWORK_DEVICE
-                role: BORDER_ROUTER
             provision_config:
               - site_name_hierarchy: Global/India/Bangalore/Fabric
                 management_ip_address: "192.0.2.40"
@@ -196,11 +200,13 @@
           device_mapping:
             - old:
                 serial_number: OLD-BORDER-0040
-              new_device_management_ip: "192.0.2.40"
+              new:
+                management_ip: "192.0.2.40"
               handoff_interface_mappings: []
             - old:
                 serial_number: OLD-BORDER-0041
-              new_device_management_ip: "192.0.2.41"
+              new:
+                management_ip: "192.0.2.41"
               handoff_interface_mappings: []
 
     - name: Build valid custom-stage border plan
@@ -220,12 +226,7 @@
             'custom-user'
           - >-
             switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
-            [
-              {
-                'ip_address_list': ['192.0.2.40', '192.0.2.41'],
-                'role': 'BORDER_ROUTER'
-              }
-            ]
+            []
           - >-
             switch_refresh_sda_fabric_border_batch_provision_config ==
             refresh_item.new_devices.provision_config
@@ -247,7 +248,8 @@
           device_mapping:
             - old:
                 serial_number: OLD-BORDER-0042
-              new_device_management_ip: "192.0.2.42"
+              new:
+                management_ip: "192.0.2.42"
               handoff_interface_mappings: []
 
     - name: Build valid role-only inventory border plan
@@ -259,12 +261,7 @@
           - switch_refresh_sda_fabric_border_batch_inventory_execution_config == []
           - >-
             switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
-            [
-              {
-                'ip_address_list': ['192.0.2.42'],
-                'role': 'BORDER_ROUTER'
-              }
-            ]
+            []
 
     - name: Configure inventory planning without role mutation
       ansible.builtin.set_fact:
@@ -283,7 +280,8 @@
           device_mapping:
             - old:
                 serial_number: OLD-BORDER-0043
-              new_device_management_ip: "192.0.2.43"
+              new:
+                management_ip: "192.0.2.43"
               handoff_interface_mappings: []
 
     - name: Build valid inventory-without-role-update border plan
@@ -303,6 +301,136 @@
         switch_refresh_sda_fabric_border_inventory_enabled: true
         switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
 
+    - name: Set heterogeneous inherited inventory role mappings
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_batch_device_ips:
+          - "192.0.2.90"
+          - "192.0.2.91"
+          - "192.0.2.92"
+        switch_refresh_sda_fabric_border_batch_inventory_execution_config:
+          - ip_address_list:
+              - "192.0.2.90"
+              - "192.0.2.91"
+              - "192.0.2.92"
+            username: test-user
+            password: test-password
+            type: NETWORK_DEVICE
+        switch_refresh_sda_fabric_border_batch_resolved_mappings:
+          - new:
+              management_ip: "192.0.2.90"
+            inventory_role: BORDER_ROUTER
+          - new:
+              management_ip: "192.0.2.91"
+            inventory_role: ACCESS
+          - new:
+              management_ip: "192.0.2.92"
+            inventory_role: BORDER_ROUTER
+
+    - name: Build heterogeneous inherited inventory role requirements
+      ansible.builtin.include_tasks: >-
+        ../tasks/build_inventory_role_requirements.yml
+
+    - name: Verify inherited inventory roles are grouped by role
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_requirements ==
+            [
+              {
+                'ip_address_list': ['192.0.2.90', '192.0.2.92'],
+                'role': 'BORDER_ROUTER'
+              },
+              {
+                'ip_address_list': ['192.0.2.91'],
+                'role': 'ACCESS'
+              }
+            ]
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
+            switch_refresh_sda_fabric_border_batch_inventory_role_requirements
+
+    - name: Disable inherited inventory role mutation
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled: false
+
+    - name: Rebuild inherited inventory role requirements without mutation
+      ansible.builtin.include_tasks: >-
+        ../tasks/build_inventory_role_requirements.yml
+
+    - name: Verify inherited role equality remains required without mutation
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_requirements |
+            length == 2
+          - >-
+            switch_refresh_sda_fabric_border_batch_inventory_role_execution_config == []
+
+    - name: Restore inherited inventory role mutation
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
+
+    - name: Set old border inventory role resolution fixture
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_batch_resolved_mappings: []
+        switch_refresh_sda_fabric_border_batch_old_device_info_entries:
+          - device_ip: "198.51.100.90"
+            device_details:
+              - instanceUuid: old-border-uuid-90
+                serialNumber: OLD-BORDER-0090
+                hostname: old-border-90.example.test
+                role: Distribution
+        switch_refresh_sda_fabric_border_resolve_mapping:
+          old:
+            serial_number: OLD-BORDER-0090
+          new:
+            management_ip: "192.0.2.90"
+          handoff_interface_mappings: []
+        switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
+
+    - name: Resolve inherited old border inventory role
+      ansible.builtin.include_tasks: ../tasks/resolve_batch_mapping.yml
+
+    - name: Verify old border inventory role normalization
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_batch_resolved_mappings[0]
+            .inventory_role == 'DISTRIBUTION'
+
+    - name: Verify unsupported old inventory role is rejected
+      block:
+        - name: Set unsupported old border inventory role fixture
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_batch_resolved_mappings: []
+            switch_refresh_sda_fabric_border_batch_old_device_info_entries:
+              - device_ip: "198.51.100.91"
+                device_details:
+                  - instanceUuid: old-border-uuid-91
+                    serialNumber: OLD-BORDER-0091
+                    hostname: old-border-91.example.test
+                    role: SUPER_CORE
+            switch_refresh_sda_fabric_border_resolve_mapping:
+              old:
+                serial_number: OLD-BORDER-0091
+              new:
+                management_ip: "192.0.2.91"
+              handoff_interface_mappings: []
+
+        - name: Resolve unsupported old border inventory role
+          ansible.builtin.include_tasks: ../tasks/resolve_batch_mapping.yml
+
+        - name: Fail when unsupported old inventory role passed
+          ansible.builtin.fail:
+            msg: Unsupported old inventory role unexpectedly passed.
+      rescue:
+        - name: Confirm unsupported old inventory role failed closed
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate matched old border inventory role'
+
     - name: Verify duplicate interface mappings are rejected
       block:
         - name: Set duplicate handoff interface mapping input
@@ -317,7 +445,8 @@
               device_mapping:
                 - old:
                     serial_number: OLD-BORDER-0050
-                  new_device_management_ip: "192.0.2.50"
+                  new:
+                    management_ip: "192.0.2.50"
                   handoff_interface_mappings:
                     - source_interface_name: FortyGigabitEthernet1/1/1
                       destination_interface_name: HundredGigE1/0/1
@@ -353,7 +482,8 @@
               device_mapping:
                 - old:
                     serial_number: OLD-BORDER-0060
-                  new_device_management_ip: "192.0.2.60"
+                  new:
+                    management_ip: "192.0.2.60"
                   handoff_interface_mappings: []
 
         - name: Build incomplete replacement mapping input
@@ -370,7 +500,7 @@
                 ansible_failed_task.name ==
                 'Validate border refresh batch mapping coverage'
 
-    - name: Verify non-border inventory role is rejected
+    - name: Verify user-supplied inventory role is rejected
       block:
         - name: Set invalid custom inventory role input
           ansible.builtin.set_fact:
@@ -391,17 +521,18 @@
               device_mapping:
                 - old:
                     serial_number: OLD-BORDER-0070
-                  new_device_management_ip: "192.0.2.70"
+                  new:
+                    management_ip: "192.0.2.70"
                   handoff_interface_mappings: []
 
         - name: Build invalid custom inventory role input
           ansible.builtin.include_tasks: ../tasks/build_batch_plan.yml
 
-        - name: Fail when non-border inventory role passed
+        - name: Fail when user-supplied inventory role passed
           ansible.builtin.fail:
-            msg: Non-border inventory role unexpectedly passed.
+            msg: User-supplied inventory role unexpectedly passed.
       rescue:
-        - name: Confirm non-border inventory role failed
+        - name: Confirm user-supplied inventory role failed
           ansible.builtin.assert:
             that:
               - ansible_failed_task.name == 'Validate custom inventory entry'
@@ -420,7 +551,8 @@
               device_mapping:
                 - old:
                     management_ip: "192.0.2.80"
-                  new_device_management_ip: "192.0.2.80"
+                  new:
+                    management_ip: "192.0.2.80"
                   handoff_interface_mappings: []
 
         - name: Build overlapping old and replacement IP input

@@ -16,6 +16,8 @@
       device_ip: 198.51.100.10
       device_roles:
         - BORDER_NODE
+        - CONTROL_PLANE_NODE
+        - EDGE_NODE
       borders_settings:
         layer3_settings:
           local_autonomous_system_number: "65001"
@@ -28,6 +30,8 @@
       device_ip: 192.0.2.10
       device_roles:
         - BORDER_NODE
+        - CONTROL_PLANE_NODE
+        - EDGE_NODE
       borders_settings:
         layer3_settings:
           local_autonomous_system_number: "65001"
@@ -36,6 +40,8 @@
       device_ip: 192.0.2.10
       device_roles:
         - BORDER_NODE
+        - CONTROL_PLANE_NODE
+        - EDGE_NODE
       borders_settings:
         layer3_settings:
           local_autonomous_system_number: "65001"
@@ -53,7 +59,8 @@
       device_mapping:
         - old:
             serial_number: OLD-BORDER-01
-          new_device_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           handoff_interface_mappings:
             - source_interface_name: FortyGigabitEthernet1/1/1
               destination_interface_name: HundredGigE1/0/1
@@ -66,6 +73,45 @@
 
     - name: Derive manifest test input fingerprint
       ansible.builtin.include_tasks: ../tasks/derive_cutover_input_fingerprint.yml
+
+    - name: Preserve nested-target fingerprint fixture
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_original_refresh_item: >-
+          {{ refresh_item }}
+        switch_refresh_sda_fabric_border_manifest_original_input_fingerprint: >-
+          {{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}
+
+    - name: Change nested replacement management IP for fingerprint validation
+      ansible.builtin.set_fact:
+        refresh_item: >-
+          {{
+            refresh_item |
+            combine(
+              {
+                'device_mapping': [
+                  refresh_item.device_mapping[0] |
+                  combine({'new': {'management_ip': '192.0.2.11'}})
+                ]
+              }
+            )
+          }}
+
+    - name: Derive changed nested-target input fingerprint
+      ansible.builtin.include_tasks: ../tasks/derive_cutover_input_fingerprint.yml
+
+    - name: Verify nested replacement management IP affects input fingerprint
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_border_cutover_input_fingerprint !=
+            switch_refresh_sda_fabric_border_manifest_original_input_fingerprint
+
+    - name: Restore original fingerprint fixture
+      ansible.builtin.set_fact:
+        refresh_item: >-
+          {{ switch_refresh_sda_fabric_border_manifest_original_refresh_item }}
+        switch_refresh_sda_fabric_border_cutover_input_fingerprint: >-
+          {{ switch_refresh_sda_fabric_border_manifest_original_input_fingerprint }}
 
     - name: Build manifest test plan
       ansible.builtin.set_fact:
@@ -84,10 +130,16 @@
             - old_selector:
                 serial_number: OLD-BORDER-01
               old_management_ip: 198.51.100.10
-              new_management_ip: 192.0.2.10
+              new:
+                management_ip: 192.0.2.10
               interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
+              inventory_role: CORE
+              device_roles:
+                - BORDER_NODE
+                - CONTROL_PLANE_NODE
+                - EDGE_NODE
               old_identity:
                 management_ip: 198.51.100.10
                 inventory_uuid: old-uuid-01
@@ -159,6 +211,12 @@
             switch_refresh_sda_fabric_border_manifest_test_document.devices[0].new.inventory_uuid ==
             'new-uuid-01'
           - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].inventory_role ==
+            'CORE'
+          - >-
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0].device_roles ==
+            ['BORDER_NODE', 'CONTROL_PLANE_NODE', 'EDGE_NODE']
+          - >-
             switch_refresh_sda_fabric_border_manifest_test_document.devices[0].source_config_fingerprint ==
             (
               switch_refresh_sda_fabric_border_manifest_test_original |
@@ -202,11 +260,82 @@
             switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].old_management_ip ==
             '198.51.100.10'
           - >-
-            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].new_management_ip ==
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0]
+            .new.management_ip ==
             '192.0.2.10'
           - >-
             switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].status ==
             'captured'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].inventory_role ==
+            'CORE'
+          - >-
+            switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].device_roles ==
+            ['BORDER_NODE', 'CONTROL_PLANE_NODE', 'EDGE_NODE']
+
+    - name: Verify a manifest entry without old_selector is rejected
+      block:
+        - name: Validate manifest entry without required old selector
+          ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
+          vars:
+            switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+              entries:
+                - >-
+                  {{
+                    switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                    dict2items |
+                    rejectattr('key', 'equalto', 'old_selector') |
+                    list |
+                    items2dict
+                  }}
+              expected_new_ips:
+                - 192.0.2.10
+              context: missing old selector negative test
+
+        - name: Fail when a missing old selector was accepted
+          ansible.builtin.fail:
+            msg: Manifest entry without old_selector unexpectedly passed validation.
+      rescue:
+        - name: Verify the required old selector was enforced
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate each cutover manifest old selector'
+
+    - name: Verify a manifest entry with multiple old selectors is rejected
+      block:
+        - name: Validate manifest entry with multiple old selectors
+          ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
+          vars:
+            switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+              entries:
+                - >-
+                  {{
+                    switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+                    combine(
+                      {
+                        'old_selector': {
+                          'serial_number': 'OLD-BORDER-01',
+                          'hostname': 'old-border-01.example.test'
+                        }
+                      }
+                    )
+                  }}
+              expected_new_ips:
+                - 192.0.2.10
+              context: multiple old selectors negative test
+
+        - name: Fail when multiple old selectors were accepted
+          ansible.builtin.fail:
+            msg: Manifest entry with multiple old selectors unexpectedly passed validation.
+      rescue:
+        - name: Verify exactly one old selector was enforced
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate each cutover manifest old selector'
 
     - name: Verify payload tampering fails manifest integrity checks
       block:
@@ -295,6 +424,95 @@
 
     - name: Restore valid manifest after interface mapping tamper test
       ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+    - name: Build pure control-plane manifest payloads
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_cp_original:
+          device_ip: 198.51.100.10
+          device_roles:
+            - CONTROL_PLANE_NODE
+        switch_refresh_sda_fabric_border_manifest_cp_base:
+          device_ip: 192.0.2.10
+          device_roles:
+            - CONTROL_PLANE_NODE
+        switch_refresh_sda_fabric_border_manifest_cp_expected:
+          device_ip: 192.0.2.10
+          device_roles:
+            - CONTROL_PLANE_NODE
+
+    - name: Build pure control-plane manifest entry base
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_cp_entry_base: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_test_document.devices[0] |
+            combine(
+              {
+                'interface_mappings': [],
+                'device_roles': ['CONTROL_PLANE_NODE'],
+                'original_device_config':
+                  switch_refresh_sda_fabric_border_manifest_cp_original,
+                'base_new_device_config':
+                  switch_refresh_sda_fabric_border_manifest_cp_base,
+                'expected_new_device_config':
+                  switch_refresh_sda_fabric_border_manifest_cp_expected,
+                'source_config_fingerprint':
+                  switch_refresh_sda_fabric_border_manifest_cp_original |
+                  to_json(sort_keys=true) | hash('sha256'),
+                'base_new_config_fingerprint':
+                  switch_refresh_sda_fabric_border_manifest_cp_base |
+                  to_json(sort_keys=true) | hash('sha256'),
+                'expected_new_config_fingerprint':
+                  switch_refresh_sda_fabric_border_manifest_cp_expected |
+                  to_json(sort_keys=true) | hash('sha256'),
+                'source_handoff_interfaces': []
+              }
+            )
+          }}
+
+    - name: Complete pure control-plane immutable fingerprint
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_manifest_cp_entry: >-
+          {{
+            switch_refresh_sda_fabric_border_manifest_cp_entry_base |
+            combine(
+              {
+                'immutable_payload_fingerprint':
+                  {
+                    'old': switch_refresh_sda_fabric_border_manifest_cp_entry_base.old,
+                    'new': switch_refresh_sda_fabric_border_manifest_cp_entry_base.new,
+                    'old_selector':
+                      switch_refresh_sda_fabric_border_manifest_cp_entry_base.old_selector,
+                    'interface_mappings': [],
+                    'inventory_role':
+                      switch_refresh_sda_fabric_border_manifest_cp_entry_base.inventory_role,
+                    'device_roles': ['CONTROL_PLANE_NODE'],
+                    'original_device_config':
+                      switch_refresh_sda_fabric_border_manifest_cp_original,
+                    'base_new_device_config':
+                      switch_refresh_sda_fabric_border_manifest_cp_base,
+                    'expected_new_device_config':
+                      switch_refresh_sda_fabric_border_manifest_cp_expected,
+                    'source_config_fingerprint':
+                      switch_refresh_sda_fabric_border_manifest_cp_entry_base
+                      .source_config_fingerprint,
+                    'source_handoff_interfaces': []
+                  } |
+                  to_json(sort_keys=true) |
+                  hash('sha256')
+              }
+            )
+          }}
+
+    - name: Validate pure control-plane manifest without border settings
+      ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
+      vars:
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+          entries:
+            - >-
+              {{ switch_refresh_sda_fabric_border_manifest_cp_entry }}
+          expected_new_ips:
+            - 192.0.2.10
+          context: pure control-plane manifest validation
 
     - name: Build pool-backed source and replacement manifest payloads
       ansible.builtin.set_fact:
@@ -387,6 +605,10 @@
                       switch_refresh_sda_fabric_border_manifest_pool_entry_base.old_selector,
                     'interface_mappings':
                       switch_refresh_sda_fabric_border_manifest_pool_entry_base.interface_mappings,
+                    'inventory_role':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.inventory_role,
+                    'device_roles':
+                      switch_refresh_sda_fabric_border_manifest_pool_entry_base.device_roles,
                     'original_device_config':
                       switch_refresh_sda_fabric_border_manifest_pool_entry_base.original_device_config,
                     'base_new_device_config':
@@ -584,7 +806,8 @@
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: deletion_started
 
     - name: Verify deletion-started aggregate state before destructive call
@@ -620,21 +843,24 @@
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: old_deleted
 
     - name: Update manifest test entry through handoff-verified state
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: handoff_verified
 
     - name: Update manifest test entry through complete state
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: complete
           hostname_verified: false
 
@@ -642,7 +868,8 @@
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: old_deleted
 
     - name: Verify manifest progress cannot move backward on resume
@@ -682,7 +909,7 @@
                   switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0] |
                   combine(
                     {
-                      'new_management_ip': '192.0.2.11',
+                      'new': {'management_ip': '192.0.2.11'},
                       'status': 'captured'
                     }
                   )
@@ -695,7 +922,8 @@
       ansible.builtin.include_tasks: ../tasks/update_cutover_plan_entry.yml
       vars:
         switch_refresh_sda_fabric_border_cutover_entry_update_request:
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           status: complete
 
     - name: Verify aggregate status remains at the lowest common boundary

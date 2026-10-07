@@ -30,6 +30,69 @@
     switch_refresh_sda_fabric_border_manifest_new_uuids: []
     switch_refresh_sda_fabric_border_manifest_source_hashes: []
 
+- name: Validate each cutover manifest old selector
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_manifest_entry is mapping
+      - switch_refresh_sda_fabric_border_manifest_entry.old_selector is defined
+      - switch_refresh_sda_fabric_border_manifest_entry.old_selector is mapping
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.keys() |
+        list | length == 1
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.keys() |
+        list |
+        difference(['management_ip', 'hostname', 'serial_number', 'mac_address']) |
+        length == 0
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.old_selector.values() |
+        first) is string
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.values() |
+        first | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.values() | first ==
+        (switch_refresh_sda_fabric_border_manifest_entry.old_selector.values() |
+        first | trim)
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.management_ip
+        is not defined or
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.old_selector.management_ip |
+          regex_search(
+            '^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$'
+          ) is not none
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.management_ip
+        is not defined or
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.old_selector.management_ip |
+          split('.') | map('int') | max <= 255
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.old_selector.mac_address
+        is not defined or
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.old_selector.mac_address |
+          regex_search('^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$')
+          is not none
+        )
+    fail_msg: >-
+      Each cutover manifest device entry must include old_selector as a mapping
+      with exactly one non-empty management_ip, hostname, serial_number, or
+      mac_address selector.
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_manifest_entry
+    label: >-
+      {{
+        switch_refresh_sda_fabric_border_manifest_entry.old.management_ip |
+        default('cutover-entry')
+      }}
+  no_log: true
+
 - name: Validate each cutover manifest entry
   ansible.builtin.assert:
     that:
@@ -79,6 +142,35 @@
         (switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
         default([]) | type_debug) == 'list'
       - >-
+        switch_refresh_sda_fabric_border_manifest_entry.inventory_role |
+        default('') | string in
+        ['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.inventory_role |
+        string ==
+        switch_refresh_sda_fabric_border_manifest_entry.inventory_role |
+        string | trim | upper | regex_replace('[ -]+', '_')
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry.device_roles |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles ==
+        (
+          switch_refresh_sda_fabric_border_manifest_entry.device_roles |
+          map('string') | map('upper') | unique | sort | list
+        )
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles in
+        [
+          ['BORDER_NODE'],
+          ['CONTROL_PLANE_NODE'],
+          ['BORDER_NODE', 'CONTROL_PLANE_NODE'],
+          ['BORDER_NODE', 'CONTROL_PLANE_NODE', 'EDGE_NODE']
+        ]
+      - >-
         (switch_refresh_sda_fabric_border_manifest_entry.source_handoff_interfaces |
         default([]) | type_debug) == 'list'
       - >-
@@ -102,19 +194,73 @@
       - switch_refresh_sda_fabric_border_manifest_entry.base_new_device_config is mapping
       - switch_refresh_sda_fabric_border_manifest_entry.expected_new_device_config is mapping
       - >-
+        (switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.device_roles | default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.device_roles |
+        map('string') | map('upper') | unique | sort | list ==
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry
+        .base_new_device_config.device_roles | default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry
+        .base_new_device_config.device_roles |
+        map('string') | map('upper') | unique | sort | list ==
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles
+      - >-
+        (switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.device_roles | default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.device_roles |
+        map('string') | map('upper') | unique | sort | list ==
+        switch_refresh_sda_fabric_border_manifest_entry.device_roles
+      - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
         switch_refresh_sda_fabric_border_manifest_entry
         .original_device_config.borders_settings is mapping
       - >-
-        (switch_refresh_sda_fabric_border_manifest_entry
-        .original_device_config.borders_settings.layer3_handoff_ip_transit |
-        default([]) | type_debug) == 'list'
+        'BORDER_NODE' in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.borders_settings is not defined or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .original_device_config.borders_settings | default({}) | length == 0
       - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .base_new_device_config.borders_settings is mapping
+      - >-
+        'BORDER_NODE' in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .base_new_device_config.borders_settings is not defined or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .base_new_device_config.borders_settings | default({}) | length == 0
+      - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
         switch_refresh_sda_fabric_border_manifest_entry
         .expected_new_device_config.borders_settings is mapping
       - >-
-        (switch_refresh_sda_fabric_border_manifest_entry
-        .expected_new_device_config.borders_settings.layer3_handoff_ip_transit |
-        default([]) | type_debug) == 'list'
+        'BORDER_NODE' in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.borders_settings is not defined or
+        switch_refresh_sda_fabric_border_manifest_entry
+        .expected_new_device_config.borders_settings | default({}) | length == 0
+      - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        (
+          switch_refresh_sda_fabric_border_manifest_entry
+          .original_device_config.borders_settings.layer3_handoff_ip_transit |
+          default([]) | type_debug
+        ) == 'list'
+      - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_manifest_entry.device_roles or
+        (
+          switch_refresh_sda_fabric_border_manifest_entry
+          .expected_new_device_config.borders_settings.layer3_handoff_ip_transit |
+          default([]) | type_debug
+        ) == 'list'
       - >-
         switch_refresh_sda_fabric_border_manifest_entry.original_device_config.device_ip |
         default('') | string ==
@@ -167,11 +313,14 @@
             'old': switch_refresh_sda_fabric_border_manifest_entry.old,
             'new': switch_refresh_sda_fabric_border_manifest_entry.new,
             'old_selector':
-              switch_refresh_sda_fabric_border_manifest_entry.old_selector |
-              default({}),
+              switch_refresh_sda_fabric_border_manifest_entry.old_selector,
             'interface_mappings':
               switch_refresh_sda_fabric_border_manifest_entry.interface_mappings |
               default([]),
+            'inventory_role':
+              switch_refresh_sda_fabric_border_manifest_entry.inventory_role,
+            'device_roles':
+              switch_refresh_sda_fabric_border_manifest_entry.device_roles,
             'original_device_config':
               switch_refresh_sda_fabric_border_manifest_entry.original_device_config,
             'base_new_device_config':
@@ -251,7 +400,13 @@
                       default('') | string
                   },
                   recursive=true
-                )
+                ),
+              'inventory_role':
+                switch_refresh_sda_fabric_border_manifest_entry.inventory_role |
+                string,
+              'device_roles':
+                switch_refresh_sda_fabric_border_manifest_entry.device_roles |
+                map('string') | map('upper') | unique | sort | list
             },
             recursive=true
           )

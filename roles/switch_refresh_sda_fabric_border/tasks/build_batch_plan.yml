@@ -47,6 +47,7 @@
     switch_refresh_sda_fabric_border_batch_inventory_credentials: {}
     switch_refresh_sda_fabric_border_batch_inventory_config: []
     switch_refresh_sda_fabric_border_batch_inventory_execution_config: []
+    switch_refresh_sda_fabric_border_batch_inventory_role_requirements: []
     switch_refresh_sda_fabric_border_batch_inventory_role_execution_config: []
     switch_refresh_sda_fabric_border_batch_provision_config: []
     switch_refresh_sda_fabric_border_custom_discovery_target_ips: []
@@ -205,8 +206,14 @@
     loop_var: switch_refresh_sda_fabric_border_input_mapping
     label: >-
       {{
-        switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip |
+        switch_refresh_sda_fabric_border_input_mapping.new.management_ip |
         default('device-mapping')
+        if (
+          switch_refresh_sda_fabric_border_input_mapping is mapping and
+          switch_refresh_sda_fabric_border_input_mapping.new is defined and
+          switch_refresh_sda_fabric_border_input_mapping.new is mapping
+        )
+        else 'device-mapping'
       }}
 
 - name: Derive border refresh batch mapping keys
@@ -214,7 +221,7 @@
     switch_refresh_sda_fabric_border_batch_mapping_new_ips: >-
       {{
         switch_refresh_sda_fabric_border_batch_device_mappings |
-        map(attribute='new_device_management_ip') | list
+        map(attribute='new.management_ip') | list
       }}
     switch_refresh_sda_fabric_border_batch_mapping_old_keys: >-
       {{
@@ -237,7 +244,7 @@
   loop: "{{ switch_refresh_sda_fabric_border_batch_device_mappings }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_mapping_item
-    label: "{{ switch_refresh_sda_fabric_border_mapping_item.new_device_management_ip }}"
+    label: "{{ switch_refresh_sda_fabric_border_mapping_item.new.management_ip }}"
 
 - name: Validate border refresh batch mapping coverage
   ansible.builtin.assert:
@@ -636,23 +643,19 @@
       - >-
         (switch_refresh_sda_fabric_border_custom_inventory_item.type |
         default('NETWORK_DEVICE')) == 'NETWORK_DEVICE'
-      - >-
-        switch_refresh_sda_fabric_border_custom_inventory_item.role is not defined or
-        switch_refresh_sda_fabric_border_custom_inventory_item.role == 'BORDER_ROUTER'
-      - >-
-        switch_refresh_sda_fabric_border_custom_inventory_item.role is not defined or
-        switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
+      - switch_refresh_sda_fabric_border_custom_inventory_item.role is not defined
       - >-
         switch_refresh_sda_fabric_border_custom_inventory_item.keys() |
         list |
         difference(
           switch_refresh_sda_fabric_border_inventory_allowed_connection_keys +
-          ['ip_address_list', 'role']
+          ['ip_address_list']
         ) |
         length == 0
     fail_msg: >-
       Custom inventory_config must target only replacement NETWORK_DEVICE
-      records and may set only the protected BORDER_ROUTER role.
+      records and cannot set role. The replacement inventory role is inherited
+      from its matched old device after inventory synchronization.
   loop: >-
     {{ switch_refresh_sda_fabric_border_batch_new_devices.inventory_config | default([]) }}
   loop_control:
@@ -710,35 +713,17 @@
     label: aggregate-inventory-entry
   no_log: true
 
-- name: Build protected inventory role-only configuration
-  ansible.builtin.set_fact:
-    switch_refresh_sda_fabric_border_batch_inventory_role_execution_config:
-      - ip_address_list: "{{ switch_refresh_sda_fabric_border_batch_device_ips }}"
-        role: BORDER_ROUTER
-  when: switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool
-  no_log: true
-
-- name: Validate protected staged inventory configurations
+- name: Validate role-free inventory add configuration
   ansible.builtin.assert:
     that:
       - >-
         switch_refresh_sda_fabric_border_batch_inventory_execution_config |
         selectattr('role', 'defined') | list | length == 0
-      - >-
-        not (switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool) or
-        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config ==
-        [
-          {
-            'ip_address_list': switch_refresh_sda_fabric_border_batch_device_ips,
-            'role': 'BORDER_ROUTER'
-          }
-        ]
-      - >-
-        switch_refresh_sda_fabric_border_inventory_role_update_enabled | bool or
-        switch_refresh_sda_fabric_border_batch_inventory_role_execution_config | length == 0
+      - switch_refresh_sda_fabric_border_batch_inventory_role_requirements == []
+      - switch_refresh_sda_fabric_border_batch_inventory_role_execution_config == []
     fail_msg: >-
       Inventory preparation must keep add and credential payloads role-free and
-      must isolate BORDER_ROUTER assignment in one protected role-only payload.
+      defer inherited role planning until all old devices have been resolved.
   no_log: true
 
 - name: Set replacement provisioning site

@@ -11,9 +11,6 @@
       - >-
         (switch_refresh_sda_fabric_border_resume_from_manifest | type_debug) == 'bool'
       - >-
-        (switch_refresh_sda_fabric_border_allow_single_border_outage |
-        type_debug) == 'bool'
-      - >-
         (switch_refresh_sda_fabric_border_hostname_transfer_enabled |
         type_debug) == 'bool'
       - >-
@@ -477,7 +474,7 @@
         switch_refresh_sda_fabric_border_all_batch_device_ips | length
       - >-
         switch_refresh_sda_fabric_border_all_cutover_mappings |
-        map(attribute='new_management_ip') | map('string') | list | sort ==
+        map(attribute='new.management_ip') | map('string') | list | sort ==
         switch_refresh_sda_fabric_border_all_batch_device_ips | sort
       - >-
         switch_refresh_sda_fabric_border_all_cutover_mappings |

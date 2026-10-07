@@ -152,20 +152,20 @@
         switch_refresh_sda_fabric_border_loaded_cutover_mappings + [
           {
             'old_selector':
-              switch_refresh_sda_fabric_border_loaded_cutover_entry.old_selector |
-              default(
-                {
-                  'management_ip':
-                    switch_refresh_sda_fabric_border_loaded_cutover_entry.old.management_ip
-                }
-              ),
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.old_selector,
             'old_management_ip':
               switch_refresh_sda_fabric_border_loaded_cutover_entry.old.management_ip,
-            'new_management_ip':
-              switch_refresh_sda_fabric_border_loaded_cutover_entry.new.management_ip,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_border_loaded_cutover_entry.new.management_ip
+            },
             'interface_mappings':
               switch_refresh_sda_fabric_border_loaded_cutover_entry.interface_mappings |
               default([]),
+            'inventory_role':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.inventory_role,
+            'device_roles':
+              switch_refresh_sda_fabric_border_loaded_cutover_entry.device_roles,
             'old_identity': switch_refresh_sda_fabric_border_loaded_cutover_entry.old,
             'new_identity': switch_refresh_sda_fabric_border_loaded_cutover_entry.new,
             'original_device_config':

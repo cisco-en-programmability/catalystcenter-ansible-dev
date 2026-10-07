@@ -9,30 +9,42 @@
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_mapping_old_identifier: >-
       {{ switch_refresh_sda_fabric_border_input_mapping.old | default({}) }}
+    switch_refresh_sda_fabric_border_mapping_new_identifier: >-
+      {{ switch_refresh_sda_fabric_border_input_mapping.new | default({}) }}
+
+- name: Validate border refresh device mapping containers
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_input_mapping.keys() |
+        list |
+        difference(['old', 'new', 'handoff_interface_mappings']) |
+        length == 0
+      - switch_refresh_sda_fabric_border_input_mapping.old is defined
+      - switch_refresh_sda_fabric_border_mapping_old_identifier is mapping
+      - switch_refresh_sda_fabric_border_input_mapping.new is defined
+      - switch_refresh_sda_fabric_border_mapping_new_identifier is mapping
+    fail_msg: >-
+      Each device_mapping entry accepts only old, new, and optional
+      handoff_interface_mappings keys. old and new must be mappings.
 
 - name: Validate border refresh device mapping
   ansible.builtin.assert:
     that:
-      - switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip is defined
-      - switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip is string
       - >-
-        switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip |
+        switch_refresh_sda_fabric_border_mapping_new_identifier.keys() |
+        list |
+        sort == ['management_ip']
+      - switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip is string
+      - >-
+        switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip |
         trim | length > 0
       - >-
-        switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip ==
-        (switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip | trim)
+        switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip ==
+        (switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip | trim)
       - >-
-        switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip in
+        switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip in
         switch_refresh_sda_fabric_border_batch_device_ips
-      - switch_refresh_sda_fabric_border_input_mapping.old is defined
-      - >-
-        switch_refresh_sda_fabric_border_input_mapping.keys() |
-        list |
-        difference(
-          ['old', 'new_device_management_ip', 'handoff_interface_mappings']
-        ) |
-        length == 0
-      - switch_refresh_sda_fabric_border_mapping_old_identifier is mapping
       - >-
         switch_refresh_sda_fabric_border_mapping_old_identifier.keys() |
         list |
@@ -98,8 +110,9 @@
       Each device_mapping entry must target one IP from new_devices.device_ips,
       identify one old device with exactly one non-empty management_ip,
       hostname, serial_number, or mac_address selector, and contain only the
-      supported keys. handoff_interface_mappings must be a list. Old and new
-      management IPs cannot overlap within a batch.
+      supported keys. new must contain only management_ip, and
+      handoff_interface_mappings must be a list. Old and new management IPs
+      cannot overlap within a batch.
 
 - name: Normalize old border identifier
   ansible.builtin.set_fact:
@@ -218,8 +231,10 @@
         [
           {
             'old': switch_refresh_sda_fabric_border_mapping_normalized_old_identifier,
-            'new_device_management_ip':
-              switch_refresh_sda_fabric_border_input_mapping.new_device_management_ip,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_border_mapping_new_identifier.management_ip
+            },
             'handoff_interface_mappings':
               switch_refresh_sda_fabric_border_effective_handoff_interface_mappings
           }

@@ -16,7 +16,6 @@ switch_refresh_sda_fabric_border_cutover_approved: false
 switch_refresh_sda_fabric_border_resume_from_manifest: false
 switch_refresh_sda_fabric_border_manifest_dir: >-
   /var/lib/catalystcenter/switch_refresh_sda_fabric_border
-switch_refresh_sda_fabric_border_allow_single_border_outage: false
 switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
 
 switch_refresh_sda_fabric_border_inventory_credentials:
@@ -42,7 +41,10 @@ switch_refresh_sda_fabric_border_batches:
     device_mapping:
       - old:
           serial_number: OLD-BORDER-01
-        new_device_management_ip: "192.0.2.20"
+        new:
+          management_ip: "192.0.2.20"
+        # Inventory role and fabric device_roles are intentionally omitted.
+        # The replacement inherits both values from this matched old device.
         handoff_interface_mappings:
           - source_interface_name: FortyGigabitEthernet1/1/1
             destination_interface_name: HundredGigE1/0/1

@@ -52,7 +52,7 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_identity_mapping
     label: >-
-      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new_device_management_ip }}
+      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new.management_ip }}
 
 - name: Add replacement IPs to cutover identity lookup
   ansible.builtin.set_fact:
@@ -188,7 +188,7 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_identity_mapping
     label: >-
-      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new_device_management_ip }}
+      {{ switch_refresh_sda_fabric_border_cutover_identity_mapping.new.management_ip }}
 
 - name: Validate mapped replacement interfaces exist before manifest persistence
   ansible.builtin.include_tasks: validate_cutover_destination_interfaces.yml
@@ -212,7 +212,7 @@
         switch_refresh_sda_fabric_border_cutover_identity_request.device_mappings | length
       - >-
         switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
-        map(attribute='new_management_ip') | list | sort ==
+        map(attribute='new.management_ip') | list | sort ==
         switch_refresh_sda_fabric_border_cutover_identity_request.expected_new_ips |
         map('string') | list | sort
       - >-
@@ -234,7 +234,7 @@
         map(attribute='old_management_ip') | list |
         intersect(
           switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |
-          map(attribute='new_management_ip') | list
+          map(attribute='new.management_ip') | list
         ) | length == 0
       - >-
         switch_refresh_sda_fabric_border_cutover_identity_resolved_mappings |

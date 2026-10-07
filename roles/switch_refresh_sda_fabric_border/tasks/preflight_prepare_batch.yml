@@ -13,6 +13,9 @@
 - name: Resolve all old borders during prepare preflight
   ansible.builtin.include_tasks: resolve_batch_old_devices.yml
 
+- name: Build inherited replacement inventory role requirements
+  ansible.builtin.include_tasks: build_inventory_role_requirements.yml
+
 - name: Capture and transform all old border configurations
   block:
     - name: Create protected prepare generator workspace
@@ -39,7 +42,7 @@
         index_var: switch_refresh_sda_fabric_border_prepare_mapping_index
         label: >-
           {{ switch_refresh_sda_fabric_border_prepare_mapping.old_management_ip }} ->
-          {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+          {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}
   always:
     - name: Remove temporary prepare generator workspace
       ansible.builtin.file:
@@ -60,7 +63,7 @@
         switch_refresh_sda_fabric_border_batch_resolved_mappings | length
       - >-
         switch_refresh_sda_fabric_border_prepare_resolved_mappings |
-        map(attribute='new_management_ip') | list | sort ==
+        map(attribute='new.management_ip') | list | sort ==
         switch_refresh_sda_fabric_border_batch_device_ips | list | sort
     fail_msg: >-
       Prepare preflight did not capture one generated old-border configuration
@@ -94,6 +97,8 @@
               switch_refresh_sda_fabric_border_batch_lan_automation_config,
             'inventory_execution_config':
               switch_refresh_sda_fabric_border_batch_inventory_execution_config,
+            'inventory_role_requirements':
+              switch_refresh_sda_fabric_border_batch_inventory_role_requirements,
             'inventory_role_execution_config':
               switch_refresh_sda_fabric_border_batch_inventory_role_execution_config,
             'inventory_readiness_timeout':

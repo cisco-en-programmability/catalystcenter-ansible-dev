@@ -73,9 +73,13 @@
     loop_var: switch_refresh_sda_fabric_border_cutover_mapping_item
     label: >-
       {{
-        switch_refresh_sda_fabric_border_cutover_mapping_item
-        .new_device_management_ip | default('invalid-cutover-mapping')
-        if (switch_refresh_sda_fabric_border_cutover_mapping_item is mapping)
+        switch_refresh_sda_fabric_border_cutover_mapping_item.new.management_ip |
+        default('invalid-cutover-mapping')
+        if (
+          switch_refresh_sda_fabric_border_cutover_mapping_item is mapping and
+          switch_refresh_sda_fabric_border_cutover_mapping_item.new is defined and
+          switch_refresh_sda_fabric_border_cutover_mapping_item.new is mapping
+        )
         else 'invalid-cutover-mapping'
       }}
 
@@ -84,7 +88,7 @@
     switch_refresh_sda_fabric_border_batch_mapping_new_ips: >-
       {{
         switch_refresh_sda_fabric_border_batch_device_mappings |
-        map(attribute='new_device_management_ip') | map('string') | list
+        map(attribute='new.management_ip') | map('string') | list
       }}
 
 - name: Validate exact minimal cutover mapping coverage

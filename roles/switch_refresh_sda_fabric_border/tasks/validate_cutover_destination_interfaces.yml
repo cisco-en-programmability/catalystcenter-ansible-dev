@@ -19,7 +19,7 @@
         selectattr(
           'device_ip',
           'equalto',
-          switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip |
+          switch_refresh_sda_fabric_border_cutover_interface_mapping.new.management_ip |
           string
         ) |
         list
@@ -33,7 +33,7 @@
     }}
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_interface_mapping
-    label: "{{ switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip }}"
+    label: "{{ switch_refresh_sda_fabric_border_cutover_interface_mapping.new.management_ip }}"
   register: switch_refresh_sda_fabric_border_cutover_interface_match_results
 
 - name: Validate replacement interface query envelopes
@@ -66,8 +66,10 @@
       {{
         switch_refresh_sda_fabric_border_cutover_destination_interface_checks + [
           {
-            'new_management_ip':
-              switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_border_cutover_interface_mapping.new.management_ip
+            },
             'destination_interface_name':
               switch_refresh_sda_fabric_border_cutover_interface_pair.destination_interface_name,
             'available_interface_names':
@@ -75,7 +77,7 @@
               selectattr(
                 'device_ip',
                 'equalto',
-                switch_refresh_sda_fabric_border_cutover_interface_mapping.new_management_ip |
+                switch_refresh_sda_fabric_border_cutover_interface_mapping.new.management_ip |
                 string
               ) |
               map(attribute='interface_details') |
@@ -95,7 +97,7 @@
     loop_var: switch_refresh_sda_fabric_border_cutover_interface_mapping_pair
     label: >-
       {{
-        switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.0.new_management_ip ~
+        switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.0.new.management_ip ~
         ':' ~
         switch_refresh_sda_fabric_border_cutover_interface_mapping_pair.1.destination_interface_name
       }}
@@ -116,13 +118,13 @@
       Destination interface {{
       switch_refresh_sda_fabric_border_cutover_destination_interface_check.destination_interface_name }}
       does not exist on replacement {{
-      switch_refresh_sda_fabric_border_cutover_destination_interface_check.new_management_ip }}.
+      switch_refresh_sda_fabric_border_cutover_destination_interface_check.new.management_ip }}.
   loop: "{{ switch_refresh_sda_fabric_border_cutover_destination_interface_checks }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_destination_interface_check
     label: >-
       {{
-        switch_refresh_sda_fabric_border_cutover_destination_interface_check.new_management_ip ~
+        switch_refresh_sda_fabric_border_cutover_destination_interface_check.new.management_ip ~
         ':' ~
         switch_refresh_sda_fabric_border_cutover_destination_interface_check.destination_interface_name
       }}

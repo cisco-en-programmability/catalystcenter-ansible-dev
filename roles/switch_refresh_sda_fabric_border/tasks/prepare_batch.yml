@@ -51,6 +51,11 @@
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
         .inventory_execution_config
       }}
+    switch_refresh_sda_fabric_border_prepare_inventory_role_requirements: >-
+      {{
+        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
+        .inventory_role_requirements
+      }}
     switch_refresh_sda_fabric_border_prepare_inventory_role_config: >-
       {{
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
@@ -161,7 +166,7 @@
       required_role: ""
       context: >-
         Prepare batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
-        before BORDER_ROUTER assignment
+        before inherited inventory role assignment
       timeout: >-
         {{
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
@@ -185,20 +190,26 @@
     inventory_config_verify: >-
       {{ switch_refresh_sda_fabric_border_inventory_config_verify }}
     inventory_config: >-
-      {{ switch_refresh_sda_fabric_border_prepare_inventory_role_config }}
-  when: >-
-    switch_refresh_sda_fabric_border_prepare_inventory_role_config | length > 0
+      {{ [switch_refresh_sda_fabric_border_prepare_inventory_role_assignment] }}
+  loop: "{{ switch_refresh_sda_fabric_border_prepare_inventory_role_config }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_inventory_role_assignment
+    label: >-
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_role_assignment.role }}
   no_log: true
 
-- name: Wait for replacement borders to report BORDER_ROUTER
+- name: Wait for replacement borders to report inherited inventory roles
   ansible.builtin.include_tasks: wait_for_prepare_inventory.yml
   vars:
     switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
-      expected_ips: "{{ switch_refresh_sda_fabric_border_prepare_device_ips }}"
-      required_role: BORDER_ROUTER
+      expected_ips: >-
+        {{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.ip_address_list }}
+      required_role: >-
+        {{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.role }}
       context: >-
         Prepare batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
-        after BORDER_ROUTER assignment
+        after inherited inventory role assignment for
+        {{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.role }}
       timeout: >-
         {{
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
@@ -207,6 +218,11 @@
         {{
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval
         }}
+  loop: "{{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirements }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_prepare_inventory_role_requirement
+    label: >-
+      {{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.role }}
 
 - name: Provision replacement border batch
   ansible.builtin.include_role:
@@ -247,7 +263,7 @@
             }}
   no_log: true
 
-- name: Add replacement batch as handoff-free border nodes
+- name: Add replacement batch with inherited fabric roles
   ansible.builtin.include_role:
     name: sda_fabric_devices
     apply:
@@ -261,15 +277,15 @@
       {{ switch_refresh_sda_fabric_border_prepare_fabric_config }}
   when: switch_refresh_sda_fabric_border_fabric_add_enabled | bool
 
-- name: Generate and verify all prepared replacement borders
+- name: Generate and verify all prepared replacement devices
   block:
-    - name: Create protected prepared-border verification workspace
+    - name: Create protected prepared-device verification workspace
       ansible.builtin.tempfile:
         state: directory
         prefix: switch-refresh-border-verify-
       register: switch_refresh_sda_fabric_border_prepare_verify_workspace
 
-    - name: Protect prepared-border verification workspace
+    - name: Protect prepared-device verification workspace
       ansible.builtin.file:
         path: "{{ switch_refresh_sda_fabric_border_prepare_verify_workspace.path }}"
         state: directory
@@ -279,16 +295,16 @@
       ansible.builtin.set_fact:
         switch_refresh_sda_fabric_border_prepare_mapping_results: []
 
-    - name: Verify prepared replacement border mapping
+    - name: Verify prepared replacement device mapping
       ansible.builtin.include_tasks: verify_prepare_mapping.yml
       loop: "{{ switch_refresh_sda_fabric_border_prepare_runtime_mappings }}"
       loop_control:
         loop_var: switch_refresh_sda_fabric_border_prepare_verify_mapping
         index_var: switch_refresh_sda_fabric_border_prepare_verify_mapping_index
         label: >-
-          {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+          {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new.management_ip }}
   always:
-    - name: Remove prepared-border verification workspace
+    - name: Remove prepared-device verification workspace
       ansible.builtin.file:
         path: >-
           {{ switch_refresh_sda_fabric_border_prepare_verify_workspace.path }}

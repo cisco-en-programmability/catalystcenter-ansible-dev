@@ -33,6 +33,10 @@
       - >-
         switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip |
         default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_request.inventory_role |
+        default('') | string in
+        ['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
     fail_msg: Inventory observation requires captured old and replacement identities.
 
 - name: Initialize cutover inventory observation records
@@ -506,7 +510,8 @@
       - >-
         switch_refresh_sda_fabric_border_inventory_observation_new_detail.role |
         default('') | string | upper | regex_replace('[ -]+', '_') ==
-        'BORDER_ROUTER'
+        switch_refresh_sda_fabric_border_inventory_observation_request.inventory_role |
+        string
       - >-
         switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
         switch_refresh_sda_fabric_border_inventory_observation_old_matches[0].device_ip |
@@ -523,19 +528,27 @@
         switch_refresh_sda_fabric_border_inventory_observation_old_serials ==
         switch_refresh_sda_fabric_border_inventory_observation_request.old_identity.serial_numbers |
         map('string') | map('upper') | unique | sort | list
+      - >-
+        switch_refresh_sda_fabric_border_inventory_observation_old_matches | length == 0 or
+        switch_refresh_sda_fabric_border_inventory_observation_old_detail.role |
+        default('') | string | upper | regex_replace('[ -]+', '_') ==
+        switch_refresh_sda_fabric_border_inventory_observation_request.inventory_role |
+        string
     fail_msg: >-
       Current inventory records no longer match the immutable old/replacement
-      UUID and serial identities captured in the manifest.
+      UUIDs, serial identities, or inventory role captured in the manifest.
 
 - name: Revalidate mapped destination interfaces at runtime
   ansible.builtin.include_tasks: validate_cutover_destination_interfaces.yml
   vars:
     switch_refresh_sda_fabric_border_cutover_interface_validation_request:
       resolved_mappings:
-        - new_management_ip: >-
-            {{
-              switch_refresh_sda_fabric_border_inventory_observation_request.new_identity.management_ip
-            }}
+        - new:
+            management_ip: >-
+              {{
+                switch_refresh_sda_fabric_border_inventory_observation_request
+                .new_identity.management_ip
+              }}
           interface_mappings: >-
             {{
               switch_refresh_sda_fabric_border_inventory_observation_request.interface_mappings |
@@ -565,5 +578,6 @@
         }}
       new_managed: true
       new_reachable: true
-      new_inventory_role: BORDER_ROUTER
+      new_inventory_role: >-
+        {{ switch_refresh_sda_fabric_border_inventory_observation_request.inventory_role }}
   no_log: true

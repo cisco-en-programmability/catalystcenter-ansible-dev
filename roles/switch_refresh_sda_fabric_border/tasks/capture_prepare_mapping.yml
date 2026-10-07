@@ -25,8 +25,9 @@
     switch_refresh_sda_fabric_border_transform_request:
       fabric_name: >-
         {{ switch_refresh_sda_fabric_border_batch_fabric_site_name_hierarchy }}
-      new_management_ip: >-
-        {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      new:
+        management_ip: >-
+          {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}
       interface_mappings: >-
         {{ switch_refresh_sda_fabric_border_prepare_mapping.interface_mappings }}
       original_device_config: >-
@@ -44,6 +45,9 @@
               'original_device_config':
                 switch_refresh_sda_fabric_border_transform_result
                 .original_device_config,
+              'device_roles':
+                switch_refresh_sda_fabric_border_transform_result
+                .original_device_config.device_roles,
               'base_new_device_config':
                 switch_refresh_sda_fabric_border_transform_result
                 .base_new_device_config,

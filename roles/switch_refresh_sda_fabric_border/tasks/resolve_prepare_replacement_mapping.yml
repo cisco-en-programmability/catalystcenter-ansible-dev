@@ -7,7 +7,7 @@
         selectattr(
           'device_ip',
           'equalto',
-          switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip
+          switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip
         ) |
         list
       }}
@@ -17,7 +17,7 @@
         selectattr(
           'device_ip',
           'equalto',
-          switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip
+          switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip
         ) |
         list
       }}
@@ -42,7 +42,7 @@
         .interface_details | type_debug) == 'list'
     fail_msg: >-
       Replacement
-      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}
       must resolve to exactly one inventory record and one interface record.
 
 - name: Normalize replacement device details and interfaces
@@ -66,7 +66,7 @@
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_prepare_new_identity:
       management_ip: >-
-        {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+        {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}
       inventory_uuid: >-
         {{
           switch_refresh_sda_fabric_border_prepare_device_details.instanceUuid |
@@ -103,7 +103,8 @@
         length > 0
       - >-
         switch_refresh_sda_fabric_border_prepare_device_details.role |
-        default('') | string | upper | replace(' ', '_') == 'BORDER_ROUTER'
+        default('') | string | trim | upper | regex_replace('[ -]+', '_') ==
+        switch_refresh_sda_fabric_border_prepare_mapping.inventory_role
       - >-
         switch_refresh_sda_fabric_border_prepare_device_details.collectionStatus |
         default('') | string | upper == 'MANAGED'
@@ -115,9 +116,11 @@
         default('') | string | upper in ['REACHABLE', 'PING REACHABLE']
     fail_msg: >-
       Replacement
-      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}
       must have a stable UUID and serial and remain Managed, reachable, and
-      assigned inventory role BORDER_ROUTER.
+      assigned the source device inventory role
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.inventory_role |
+      default('missing') }}.
 
 - name: Validate mapped destination interfaces exist on replacement
   ansible.builtin.assert:
@@ -128,16 +131,20 @@
         switch_refresh_sda_fabric_border_prepare_interface_names
     fail_msg: >-
       Destination interface
-      {{ switch_refresh_sda_fabric_border_destination_interface_mapping
-      .destination_interface_name | default('unknown') }} does not exist on
+      {{
+        switch_refresh_sda_fabric_border_destination_interface_mapping.destination_interface_name |
+        default('unknown')
+      }} does not exist on
       replacement
-      {{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}.
+      {{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}.
   loop: "{{ switch_refresh_sda_fabric_border_prepare_mapping.interface_mappings }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_destination_interface_mapping
     label: >-
-      {{ switch_refresh_sda_fabric_border_destination_interface_mapping
-      .destination_interface_name | default('destination-interface') }}
+      {{
+        switch_refresh_sda_fabric_border_destination_interface_mapping.destination_interface_name |
+        default('destination-interface')
+      }}
 
 - name: Add resolved replacement identity to prepare mapping
   ansible.builtin.set_fact:

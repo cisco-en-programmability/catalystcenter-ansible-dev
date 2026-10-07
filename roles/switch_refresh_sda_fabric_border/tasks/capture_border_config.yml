@@ -97,8 +97,6 @@
               {{ switch_refresh_sda_fabric_border_capture_fabric_name }}
             device_ip: >-
               {{ switch_refresh_sda_fabric_border_capture_device_ip }}
-            device_roles:
-              - BORDER_NODE
   no_log: true
 
 - name: Inspect generated border configuration artifact
@@ -289,35 +287,70 @@
         default([]) | type_debug) == 'list'
       - >-
         switch_refresh_sda_fabric_border_capture_device_config.device_roles |
-        default([]) | sort == ['BORDER_NODE']
-      - switch_refresh_sda_fabric_border_capture_device_config.borders_settings is defined
-      - switch_refresh_sda_fabric_border_capture_device_config.borders_settings is mapping
+        default([]) | sort in [
+          ['BORDER_NODE'],
+          ['CONTROL_PLANE_NODE'],
+          ['BORDER_NODE', 'CONTROL_PLANE_NODE'],
+          ['BORDER_NODE', 'CONTROL_PLANE_NODE', 'EDGE_NODE']
+        ]
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
+        switch_refresh_sda_fabric_border_capture_device_config.borders_settings
+        is defined
+      - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
+        switch_refresh_sda_fabric_border_capture_device_config.borders_settings
+        is mapping
+      - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_settings is defined
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_settings is mapping
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_settings.local_autonomous_system_number |
         default('') | string | trim | length > 0
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         (switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer2_handoff | default([]) | type_debug) == 'list'
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         (switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_handoff_ip_transit | default([]) |
         type_debug) == 'list'
       - >-
+        'BORDER_NODE' not in
+        (switch_refresh_sda_fabric_border_capture_device_config.device_roles |
+        default([])) or
         switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_handoff_sda_transit is not defined or
         switch_refresh_sda_fabric_border_capture_device_config
         .borders_settings.layer3_handoff_sda_transit is mapping
     fail_msg: >-
       Generated device {{ switch_refresh_sda_fabric_border_capture_device_ip }}
-      must be a pure BORDER_NODE with manager-ready Layer 3 border settings.
-      Combined fabric roles are not supported by this initial implementation.
+      must use one of the supported fabric role sets: BORDER_NODE,
+      CONTROL_PLANE_NODE, BORDER_NODE plus CONTROL_PLANE_NODE, or BORDER_NODE
+      plus CONTROL_PLANE_NODE plus EDGE_NODE. Any role set containing
+      BORDER_NODE must also include manager-ready Layer 3 border settings.
   when: switch_refresh_sda_fabric_border_capture_matches | length == 1
 
 - name: Publish generated border configuration capture
@@ -332,17 +365,19 @@
       device_config: "{{ switch_refresh_sda_fabric_border_capture_device_config }}"
       l2_handoff_count: >-
         {{
-          switch_refresh_sda_fabric_border_capture_device_config
-          .borders_settings.layer2_handoff |
-          default([]) | length
+          (
+            switch_refresh_sda_fabric_border_capture_device_config
+            .borders_settings | default({})
+          ).layer2_handoff | default([]) | length
           if (switch_refresh_sda_fabric_border_capture_matches | length == 1)
           else 0
         }}
       ip_transit_handoff_count: >-
         {{
-          switch_refresh_sda_fabric_border_capture_device_config
-          .borders_settings.layer3_handoff_ip_transit |
-          default([]) | length
+          (
+            switch_refresh_sda_fabric_border_capture_device_config
+            .borders_settings | default({})
+          ).layer3_handoff_ip_transit | default([]) | length
           if (switch_refresh_sda_fabric_border_capture_matches | length == 1)
           else 0
         }}
@@ -351,8 +386,10 @@
           1
           if (
             switch_refresh_sda_fabric_border_capture_matches | length == 1 and
-            switch_refresh_sda_fabric_border_capture_device_config
-            .borders_settings.layer3_handoff_sda_transit |
+            (
+              switch_refresh_sda_fabric_border_capture_device_config
+              .borders_settings | default({})
+            ).layer3_handoff_sda_transit |
             default({}) | length > 0
           )
           else 0

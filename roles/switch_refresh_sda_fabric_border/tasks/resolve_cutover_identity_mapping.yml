@@ -81,7 +81,7 @@
     - >-
       switch_refresh_sda_fabric_border_cutover_identity_record.device_ip |
       default('') | string ==
-      switch_refresh_sda_fabric_border_cutover_mapping.new_device_management_ip | string
+      switch_refresh_sda_fabric_border_cutover_mapping.new.management_ip | string
     - >-
       (switch_refresh_sda_fabric_border_cutover_identity_record.device_details |
       default([]) | type_debug) == 'list'
@@ -97,7 +97,7 @@
     fail_msg: >-
       Cutover identity resolution requires exactly one old device and exactly
       one replacement for {{
-      switch_refresh_sda_fabric_border_cutover_mapping.new_device_management_ip }}.
+      switch_refresh_sda_fabric_border_cutover_mapping.new.management_ip }}.
 
 - name: Select cutover inventory identity records
   ansible.builtin.set_fact:
@@ -179,6 +179,27 @@
         }}
   no_log: true
 
+- name: Normalize source and replacement inventory roles for cutover
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_old_inventory_role: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_old_identity_detail.role |
+        default('') |
+        string |
+        trim |
+        upper |
+        regex_replace('[ -]+', '_')
+      }}
+    switch_refresh_sda_fabric_border_cutover_new_inventory_role: >-
+      {{
+        switch_refresh_sda_fabric_border_cutover_new_identity_detail.role |
+        default('') |
+        string |
+        trim |
+        upper |
+        regex_replace('[ -]+', '_')
+      }}
+
 - name: Validate immutable cutover identity fields
   ansible.builtin.assert:
     that:
@@ -201,10 +222,17 @@
       - >-
         switch_refresh_sda_fabric_border_cutover_old_identity.inventory_uuid | lower !=
         switch_refresh_sda_fabric_border_cutover_new_identity.inventory_uuid | lower
+      - >-
+        switch_refresh_sda_fabric_border_cutover_old_inventory_role in
+        ['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
+      - >-
+        switch_refresh_sda_fabric_border_cutover_new_inventory_role ==
+        switch_refresh_sda_fabric_border_cutover_old_inventory_role
     fail_msg: >-
       Old and replacement cutover identities require distinct management IPs,
       UUIDs, and non-empty serial-number sets. The old hostname is also
-      required when optional hostname transfer is enabled.
+      required when optional hostname transfer is enabled. Their normalized
+      inventory roles must also match the supported source inventory role.
 
 - name: Append resolved cutover mapping identity
   ansible.builtin.set_fact:
@@ -215,13 +243,17 @@
             'old_selector': switch_refresh_sda_fabric_border_cutover_mapping.old,
             'old_management_ip':
               switch_refresh_sda_fabric_border_cutover_old_identity.management_ip,
-            'new_management_ip':
-              switch_refresh_sda_fabric_border_cutover_new_identity.management_ip,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_border_cutover_new_identity.management_ip
+            },
             'interface_mappings':
               switch_refresh_sda_fabric_border_cutover_mapping.handoff_interface_mappings |
               default([]),
             'old_identity': switch_refresh_sda_fabric_border_cutover_old_identity,
-            'new_identity': switch_refresh_sda_fabric_border_cutover_new_identity
+            'new_identity': switch_refresh_sda_fabric_border_cutover_new_identity,
+            'inventory_role':
+              switch_refresh_sda_fabric_border_cutover_old_inventory_role
           }
         ]
       }}
