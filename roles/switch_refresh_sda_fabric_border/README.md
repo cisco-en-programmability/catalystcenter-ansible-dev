@@ -1,9 +1,9 @@
 # Ansible Role: `switch_refresh_sda_fabric_border`
 
-Refresh pure SDA fabric border devices while preserving their complete border
-handoff configuration. The role deliberately uses a break-before-make
-cutover: Catalyst Center cannot assign the captured handoff to the replacement
-until the old border has been removed.
+Refresh supported SDA fabric devices while preserving their complete fabric
+role set and, when present, border handoff configuration. The role deliberately
+uses a break-before-make cutover: Catalyst Center cannot assign a captured
+border handoff to the replacement until the old device has been removed.
 
 The existing `sda_fabric_devices_config_generator` role is the authoritative
 source for capture and readback. A generator failure stops the run. This role
@@ -12,11 +12,12 @@ modules.
 
 ## Phases
 
-`prepare` is non-destructive. It resolves and captures each old border,
-onboards the replacement, waits for Catalyst Center inventory collection to
-finish, assigns and confirms inventory role `BORDER_ROUTER`, provisions it,
-and adds it to the fabric as a `BORDER_NODE` with the captured Layer 3 border
-settings but no handoffs.
+`prepare` is non-destructive. It resolves and captures each old device,
+including its inventory role and complete fabric `device_roles` list, onboards
+the replacement, waits for Catalyst Center inventory collection to finish,
+assigns and confirms the captured inventory role, provisions it, and adds it to
+the fabric with the same fabric roles. Devices containing `BORDER_NODE` are
+prepared with their captured Layer 3 border settings but no handoffs.
 
 Normal `cutover` captures every source again and persists every batch manifest
 before the first deletion. Manifest continuation loads and validates the
@@ -52,8 +53,15 @@ Recovery is manifest-backed and rolls forward.
   slash components; an existing target must be a directory and not a symlink.
 - Secrets supplied through Ansible Vault or another secret store
 
-Only pure `BORDER_NODE` sources are supported in the first implementation.
-Combined border/control-plane/edge devices are rejected.
+The supported source fabric role sets are exactly:
+
+- `BORDER_NODE`
+- `CONTROL_PLANE_NODE`
+- `BORDER_NODE` plus `CONTROL_PLANE_NODE`
+- `BORDER_NODE` plus `CONTROL_PLANE_NODE` plus `EDGE_NODE`
+
+The replacement inherits the source role set unchanged. Other role sets are
+rejected.
 
 ## Controls
 
@@ -93,10 +101,9 @@ switch_refresh_sda_fabric_border_resume_from_manifest: true
 switch_refresh_sda_fabric_border_manifest_dir: /var/lib/catalystcenter/border-refresh
 ```
 
-Both safety overrides default to `false`:
+Optional hostname transfer defaults to `false`:
 
 ```yaml
-switch_refresh_sda_fabric_border_allow_single_border_outage: false
 switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
 ```
 
@@ -133,7 +140,8 @@ switch_refresh_sda_fabric_border_batches:
     device_mapping:
       - old:
           serial_number: OLD-BORDER-01
-        new_device_management_ip: "192.0.2.20"
+        new:
+          management_ip: "192.0.2.20"
         handoff_interface_mappings:
           - source_interface_name: FortyGigabitEthernet1/1/1
             destination_interface_name: HundredGigE1/0/1
@@ -147,6 +155,10 @@ switch_refresh_sda_fabric_border_batches:
 handoff must be explicitly mapped, including unchanged interface names.
 SDA-transit handoffs have no interface mapping.
 
+Neither the inventory role nor fabric `device_roles` is a user input. The old
+inventory record and generated fabric configuration are authoritative, and the
+workflow requires the replacement to match both before cutover.
+
 Set `onboarding_method` to `discovery` or `lan_automation`. A Discovery batch
 can use the generated configuration or provide `new_devices.discovery_config`.
 A LAN Automation batch supplies `new_devices.lan_automation_config`. Complete
@@ -157,21 +169,22 @@ configuration must cover exactly the replacement IP set.
 ## Prepare inventory synchronization
 
 Inventory addition and role assignment are separate prepare stages. The first
-inventory payload contains only device-addition and connection fields; even an
-allowed custom `role: BORDER_ROUTER` is withheld from that payload. Prepare
+inventory payload contains only device-addition and connection fields; a
+custom inventory payload cannot set `role`. Prepare
 waits until every replacement has exact inventory coverage, completed
 collection and management state, wired-device classification, successful
 inventory status, stable identity and platform fields, a non-empty device
 support level other than `Unsupported`, and `Reachable` or `Ping Reachable`
-status. It then submits one protected role-only payload and waits for every
-replacement to report `BORDER_ROUTER` before provisioning.
+status. It then groups replacements by the normalized inventory role captured
+from their source devices, submits protected role-only payloads, and waits for
+every replacement to report its inherited role before provisioning.
 
 Both readiness barriers use
 `switch_refresh_sda_fabric_border_inventory_readiness_timeout` and
 `switch_refresh_sda_fabric_border_inventory_readiness_poll_interval`. A batch
 failure or rerun is safe: an existing inventory record and an already assigned
-`BORDER_ROUTER` role are treated idempotently, while provisioning remains
-blocked until both barriers pass.
+matching role are treated idempotently, while provisioning remains blocked
+until both barriers pass.
 
 ## Mandatory safety checks
 
@@ -179,7 +192,7 @@ blocked until both barriers pass.
 - Safe work/manifest paths and exclusive local cutover lock ownership
 - Unique batch names, replacement IPs, old selectors, and resolved old devices
 - Exact old-selector resolution with stable UUID and serial identity
-- Exact generator capture for the requested fabric, device, and pure border role
+- Exact generator capture for the requested fabric, device, and supported role set
 - Complete source-to-destination interface mapping
 - Replay-safe IP-transit handoffs; a non-empty external-connectivity pool is
   rejected because replay could reallocate the captured peer addresses
@@ -194,27 +207,29 @@ blocked until both barriers pass.
   management-IP reads
 - Exact generator readback after handoff apply
 
-By default, an operational peer is another border outside the current old/new
-pair that has a non-empty handoff in the site-wide generator result and is
-reported by inventory as Managed and either Reachable or Ping Reachable. A
-handoff-free prepared replacement does not count, while a replacement whose
-handoff was verified by an earlier serial mapping can count. Explicitly set
-`switch_refresh_sda_fabric_border_allow_single_border_outage: true` only when
-the outage of the site's last operational border is understood and approved.
+Cutover does not require another operational border or control-plane node
+outside the old/replacement pair. A single-border refresh therefore proceeds
+after explicit destructive cutover approval and causes a planned border outage
+between removal of the old device and verified handoff restoration on the
+replacement. Run that cutover in an approved maintenance window.
 
 ## Manifest recovery
 
 Each batch has one mode-`0600` manifest containing controller and fabric scope,
-an input fingerprint, immutable old/new identities, the original generated
-configuration, the transformed replacement configuration, and per-mapping
-state. Each entry also has an `immutable_payload_fingerprint` over the old and
-new identities (including the captured old hostname), old selector, interface
-mappings, original/base/expected configurations, source configuration
-fingerprint, and source handoff-interface list. All batch manifests are written
-before any old device is removed in normal cutover. Those freshly persisted
-manifests are then read back from disk and revalidated before deletion is
-permitted. Immediately before an old fabric removal is submitted, the entry is
-atomically advanced from `captured` to `deletion_started`.
+an input fingerprint, immutable old/new identities, inherited inventory and
+fabric roles, the original generated configuration, the transformed replacement
+configuration, and per-mapping state. Each entry also has an
+`immutable_payload_fingerprint` over those roles, the old and new identities
+(including the captured old hostname), old selector, interface mappings,
+original/base/expected configurations, source configuration fingerprint, and
+source handoff-interface list. All batch manifests are written before any old
+device is removed in normal cutover. Those freshly persisted manifests are then
+read back from disk and revalidated before deletion is permitted. Immediately
+before an old fabric removal is submitted, the entry is atomically advanced
+from `captured` to `deletion_started`.
+
+The initial manifest schema is version 1 and includes inherited inventory and
+fabric roles in each immutable device entry.
 
 Per-mapping progress is monotonic:
 

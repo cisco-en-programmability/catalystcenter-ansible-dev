@@ -44,14 +44,92 @@
           - interface_name: FortyGigabitEthernet1/1/1
             internal_vlan_id: 1001
             external_vlan_id: 101
+    switch_refresh_sda_fabric_border_supported_role_sets:
+      - name: border
+        device_roles:
+          - BORDER_NODE
+      - name: control-plane
+        device_roles:
+          - CONTROL_PLANE_NODE
+      - name: border-control-plane
+        device_roles:
+          - BORDER_NODE
+          - CONTROL_PLANE_NODE
+      - name: border-control-plane-edge
+        device_roles:
+          - BORDER_NODE
+          - CONTROL_PLANE_NODE
+          - EDGE_NODE
+    switch_refresh_sda_fabric_border_unsupported_role_sets:
+      - name: empty
+        device_roles: []
+      - name: edge
+        device_roles:
+          - EDGE_NODE
+      - name: border-edge
+        device_roles:
+          - BORDER_NODE
+          - EDGE_NODE
+      - name: control-plane-edge
+        device_roles:
+          - CONTROL_PLANE_NODE
+          - EDGE_NODE
+      - name: border-control-plane-wireless
+        device_roles:
+          - BORDER_NODE
+          - CONTROL_PLANE_NODE
+          - WIRELESS_CONTROLLER_NODE
 
   tasks:
+    - name: Verify every supported source role set is inherited
+      ansible.builtin.include_tasks: tasks/assert_supported_role_inheritance.yml
+      loop: "{{ switch_refresh_sda_fabric_border_supported_role_sets }}"
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_role_case
+        label: "{{ switch_refresh_sda_fabric_border_role_case.name }}"
+
+    - name: Verify every unsupported source role set is rejected
+      ansible.builtin.include_tasks: tasks/assert_rejected_role_set.yml
+      loop: "{{ switch_refresh_sda_fabric_border_unsupported_role_sets }}"
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_role_case
+        label: "{{ switch_refresh_sda_fabric_border_role_case.name }}"
+
+    - name: Verify pure control-plane rejects unrelated handoff mappings
+      block:
+        - name: Transform pure control-plane with an unrelated handoff mapping
+          ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
+          vars:
+            switch_refresh_sda_fabric_border_transform_request:
+              fabric_name: Global/Test/Fabric
+              new:
+                management_ip: 192.0.2.10
+              interface_mappings:
+                - source_interface_name: FortyGigabitEthernet1/1/1
+                  destination_interface_name: HundredGigE1/0/1
+              original_device_config:
+                device_ip: 198.51.100.10
+                device_roles:
+                  - CONTROL_PLANE_NODE
+
+        - name: Fail when unrelated pure control-plane mapping passed
+          ansible.builtin.fail:
+            msg: Unrelated pure control-plane handoff mapping unexpectedly passed.
+      rescue:
+        - name: Confirm unrelated pure control-plane mapping failed preflight
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate exact source handoff mapping coverage'
+
     - name: Transform generator-default border priority for manager compatibility
       ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
       vars:
         switch_refresh_sda_fabric_border_transform_request:
           fabric_name: Global/Test/Fabric
-          new_management_ip: 192.0.2.10
+          new:
+            management_ip: 192.0.2.10
           interface_mappings:
             - source_interface_name: FortyGigabitEthernet1/1/1
               destination_interface_name: HundredGigE1/0/1
@@ -155,7 +233,8 @@
           vars:
             switch_refresh_sda_fabric_border_transform_request:
               fabric_name: Global/Test/Fabric
-              new_management_ip: 192.0.2.10
+              new:
+                management_ip: 192.0.2.10
               interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -510,7 +589,8 @@
           device_mappings:
             - old:
                 serial_number: OLD-BORDER-01
-              new_device_management_ip: 192.0.2.10
+              new:
+                management_ip: 192.0.2.10
               handoff_interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -524,11 +604,13 @@
                 serialNumber: OLD-BORDER-01
                 hostname: old-border-01.example.test
                 macAddress: 00:11:22:33:44:55
+                role: CORE
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
                 serialNumber: NEW-BORDER-01
                 hostname: temporary-border-01.example.test
+                role: CORE
         switch_refresh_sda_fabric_border_cutover_interface_records_override:
           - device_ip: 192.0.2.10
             interface_details:
@@ -546,6 +628,48 @@
           - >-
             switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings[0].new_identity.inventory_uuid ==
             'new-uuid-01'
+          - >-
+            switch_refresh_sda_fabric_border_cutover_identity_result.resolved_mappings[0].inventory_role ==
+            'CORE'
+
+    - name: Reject source and replacement inventory role mismatch
+      block:
+        - name: Resolve cutover identities with mismatched inventory roles
+          ansible.builtin.include_tasks: ../tasks/resolve_cutover_identities.yml
+          vars:
+            switch_refresh_sda_fabric_border_cutover_identity_request:
+              device_mappings:
+                - old:
+                    serial_number: OLD-BORDER-01
+                  new:
+                    management_ip: 192.0.2.10
+                  handoff_interface_mappings: []
+              expected_new_ips:
+                - 192.0.2.10
+              context: mismatched inventory role validation
+            switch_refresh_sda_fabric_border_cutover_identity_records_override:
+              - device_ip: 198.51.100.10
+                device_details:
+                  - instanceUuid: old-uuid-01
+                    serialNumber: OLD-BORDER-01
+                    hostname: old-border-01.example.test
+                    role: CORE
+              - device_ip: 192.0.2.10
+                device_details:
+                  - instanceUuid: new-uuid-01
+                    serialNumber: NEW-BORDER-01
+                    hostname: temporary-border-01.example.test
+                    role: ACCESS
+            switch_refresh_sda_fabric_border_cutover_interface_records_override: []
+
+        - name: Fail when mismatched cutover inventory roles were accepted
+          ansible.builtin.fail:
+            msg: Mismatched source and replacement inventory roles unexpectedly passed.
+      rescue:
+        - name: Verify inventory role mismatch was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate immutable cutover identity fields'
 
     - name: Observe ready immutable cutover inventory identities offline
       ansible.builtin.include_tasks: ../tasks/observe_cutover_inventory.yml
@@ -561,6 +685,7 @@
             inventory_uuid: new-uuid-01
             serial_numbers:
               - NEW-BORDER-01
+          inventory_role: CORE
           interface_mappings:
             - source_interface_name: FortyGigabitEthernet1/1/1
               destination_interface_name: HundredGigE1/0/1
@@ -569,6 +694,7 @@
             device_details:
               - instanceUuid: old-uuid-01
                 serialNumber: OLD-BORDER-01
+                role: CORE
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
@@ -576,7 +702,7 @@
                 hostname: temporary-border-01.example.test
                 managementState: Managed
                 reachabilityStatus: Reachable
-                role: BORDER_ROUTER
+                role: CORE
         switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
           - device_ip: 192.0.2.10
             interface_details:
@@ -591,7 +717,7 @@
           - switch_refresh_sda_fabric_border_inventory_observation_result.new_reachable | bool
           - >-
             switch_refresh_sda_fabric_border_inventory_observation_result.new_inventory_role ==
-            'BORDER_ROUTER'
+            'CORE'
 
     - name: Verify missing mapped destination fails runtime revalidation
       block:
@@ -609,6 +735,7 @@
                 inventory_uuid: new-uuid-01
                 serial_numbers:
                   - NEW-BORDER-01
+              inventory_role: BORDER_ROUTER
               interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -618,6 +745,7 @@
                 device_details:
                   - instanceUuid: old-uuid-01
                     serialNumber: OLD-BORDER-01
+                    role: BORDER_ROUTER
               - device_ip: 192.0.2.10
                 device_details:
                   - instanceUuid: new-uuid-01
@@ -655,6 +783,7 @@
             inventory_uuid: new-uuid-01
             serial_numbers:
               - NEW-BORDER-01
+          inventory_role: BORDER_ROUTER
           interface_mappings: []
           validate_replacement_interfaces: true
         switch_refresh_sda_fabric_border_inventory_observation_records_override:
@@ -662,6 +791,7 @@
             device_details:
               - instanceUuid: old-uuid-01
                 serialNumber: OLD-BORDER-01
+                role: BORDER_ROUTER
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
@@ -692,6 +822,7 @@
                 inventory_uuid: new-uuid-01
                 serial_numbers:
                   - NEW-BORDER-01
+              inventory_role: BORDER_ROUTER
               interface_mappings:
                 - source_interface_name: FortyGigabitEthernet1/1/1
                   destination_interface_name: HundredGigE1/0/1
@@ -700,6 +831,7 @@
                 device_details:
                   - instanceUuid: old-uuid-01
                     serialNumber: OLD-BORDER-01
+                    role: BORDER_ROUTER
               - device_ip: 192.0.2.10
                 device_details:
                   - instanceUuid: new-uuid-01
@@ -762,16 +894,6 @@
       ansible.builtin.set_fact:
         switch_refresh_sda_fabric_border_cutover_task_names: >-
           {{ switch_refresh_sda_fabric_border_cutover_mapping_tasks | map(attribute='name') | list }}
-        switch_refresh_sda_fabric_border_redundancy_tasks: >-
-          {{
-            switch_refresh_sda_fabric_border_cutover_mapping_tasks |
-            selectattr(
-              'name',
-              'equalto',
-              'Validate another operational border before new destructive release'
-            ) |
-            list
-          }}
         switch_refresh_sda_fabric_border_inventory_query_tasks: >-
           {{
             switch_refresh_sda_fabric_border_inventory_observation_tasks |
@@ -877,17 +999,6 @@
           - "'sda_fabric_devices_layer2_handoffs_sda_transits_info' not in switch_refresh_sda_fabric_border_cutover_mapping_source"
           - "'loop:' in switch_refresh_sda_fabric_border_cutover_batch_source"
           - "'cutover_mapping.yml' in switch_refresh_sda_fabric_border_cutover_batch_source"
-          - switch_refresh_sda_fabric_border_redundancy_tasks | length == 1
-          - >-
-            (
-              switch_refresh_sda_fabric_border_redundancy_tasks[0].vars
-              .switch_refresh_sda_fabric_border_redundancy_request.excluded_device_ips |
-              type_debug
-            ) == 'list'
-          - >-
-            switch_refresh_sda_fabric_border_redundancy_tasks[0].vars
-            .switch_refresh_sda_fabric_border_redundancy_request.excluded_device_ips |
-            length == 2
           - switch_refresh_sda_fabric_border_inventory_query_tasks | length == 1
           - >-
             switch_refresh_sda_fabric_border_inventory_query_tasks[0].vars

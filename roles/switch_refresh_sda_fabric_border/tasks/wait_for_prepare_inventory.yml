@@ -1,7 +1,7 @@
 ---
 # Inventory addition completes before Catalyst Center finishes collecting the
 # device. Keep collection readiness separate from the later protected role
-# mutation so BORDER_ROUTER is never submitted for a partially scanned device.
+# mutation so an inherited role is never submitted for a partially scanned device.
 - name: Validate replacement border inventory readiness request
   ansible.builtin.assert:
     that:
@@ -35,7 +35,8 @@
       - >-
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .required_role | default('') | string | trim | upper |
-        replace(' ', '_') in ['', 'BORDER_ROUTER']
+        regex_replace('[ -]+', '_') in
+        ['', 'ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
       - >-
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .context is defined
@@ -56,7 +57,7 @@
         .poll_interval | int) > 0
     fail_msg: >-
       Replacement border inventory readiness requires unique non-empty
-      management IPs, an optional BORDER_ROUTER role policy, a context, and
+      management IPs, an optional supported inventory role policy, a context, and
       positive timeout and polling values.
 
 - name: Normalize replacement border inventory readiness request
@@ -70,7 +71,7 @@
       {{
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .required_role | default('') | string | trim | upper |
-        replace(' ', '_')
+        regex_replace('[ -]+', '_')
       }}
     switch_refresh_sda_fabric_border_prepare_inventory_readiness_context: >-
       {{
@@ -252,7 +253,7 @@
         ).response | default([]) |
         map(attribute='role', default='') |
         map('default', '', true) | map('string') | map('upper') |
-        map('replace', ' ', '_') |
+        map('regex_replace', '[ -]+', '_') |
         select(
           'equalto',
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role

@@ -33,7 +33,7 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_mapping_selector
     label: >-
-      {{ switch_refresh_sda_fabric_border_cutover_mapping_selector.new_management_ip }}
+      {{ switch_refresh_sda_fabric_border_cutover_mapping_selector.new.management_ip }}
 
 - name: Require every serial mapping reached complete state
   ansible.builtin.assert:
@@ -63,4 +63,3 @@
           }
         ]
       }}
-

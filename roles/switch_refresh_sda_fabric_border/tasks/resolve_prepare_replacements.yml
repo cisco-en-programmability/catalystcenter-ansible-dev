@@ -98,7 +98,7 @@
   loop: "{{ switch_refresh_sda_fabric_border_prepare_resolved_mappings }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_prepare_mapping
-    label: "{{ switch_refresh_sda_fabric_border_prepare_mapping.new_management_ip }}"
+    label: "{{ switch_refresh_sda_fabric_border_prepare_mapping.new.management_ip }}"
 
 - name: Validate resolved replacement identity uniqueness
   ansible.builtin.assert:

@@ -51,7 +51,7 @@
       - switch_refresh_sda_fabric_border_mapping_matches | length == 1
     fail_msg: >-
       Expected exactly one old inventory device for replacement
-      {{ switch_refresh_sda_fabric_border_resolve_mapping.new_device_management_ip }}
+      {{ switch_refresh_sda_fabric_border_resolve_mapping.new.management_ip }}
       using selector {{ switch_refresh_sda_fabric_border_resolve_mapping.old }},
       but matched {{ switch_refresh_sda_fabric_border_mapping_matches | length }}.
 
@@ -61,6 +61,27 @@
       {{ switch_refresh_sda_fabric_border_mapping_matches | first }}
     switch_refresh_sda_fabric_border_matched_old_details: >-
       {{ (switch_refresh_sda_fabric_border_mapping_matches | first).device_details | first }}
+
+- name: Normalize matched old border inventory role
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_matched_old_inventory_role: >-
+      {{
+        switch_refresh_sda_fabric_border_matched_old_details.role |
+        default('') | string | trim | upper | regex_replace('[ -]+', '_')
+      }}
+
+- name: Validate matched old border inventory role
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_matched_old_inventory_role in
+        ['ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
+    fail_msg: >-
+      Old border {{ switch_refresh_sda_fabric_border_matched_old_record.device_ip }}
+      must report one inventory role supported by inventory_workflow_manager:
+      ACCESS, DISTRIBUTION, CORE, BORDER_ROUTER, or UNKNOWN. Reported role:
+      {{ switch_refresh_sda_fabric_border_matched_old_details.role |
+      default('missing', true) }}.
 
 - name: Derive immutable old border identity
   ansible.builtin.set_fact:
@@ -112,10 +133,14 @@
             'old_selector': switch_refresh_sda_fabric_border_resolve_mapping.old,
             'old_management_ip':
               switch_refresh_sda_fabric_border_matched_old_record.device_ip,
-            'new_management_ip':
-              switch_refresh_sda_fabric_border_resolve_mapping.new_device_management_ip,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_border_resolve_mapping.new.management_ip
+            },
             'interface_mappings':
               switch_refresh_sda_fabric_border_resolve_mapping.handoff_interface_mappings,
+            'inventory_role':
+              switch_refresh_sda_fabric_border_matched_old_inventory_role,
             'old_identity': switch_refresh_sda_fabric_border_matched_old_identity
           }
         ]

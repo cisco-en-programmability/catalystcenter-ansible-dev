@@ -126,7 +126,7 @@
             selectattr(
               'name',
               'equalto',
-              'Wait for replacement borders to report BORDER_ROUTER'
+              'Wait for replacement borders to report inherited inventory roles'
             ) |
             first
           }}
@@ -166,7 +166,7 @@
             switch_refresh_sda_fabric_border_guard_prepare_task_names |
             select(
               'equalto',
-              'Wait for replacement borders to report BORDER_ROUTER'
+              'Wait for replacement borders to report inherited inventory roles'
             ) | list | length == 1
           - >-
             switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
@@ -187,11 +187,11 @@
               'Assign replacement border inventory role'
             ) <
             switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
-              'Wait for replacement borders to report BORDER_ROUTER'
+              'Wait for replacement borders to report inherited inventory roles'
             )
           - >-
             switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
-              'Wait for replacement borders to report BORDER_ROUTER'
+              'Wait for replacement borders to report inherited inventory roles'
             ) <
             switch_refresh_sda_fabric_border_guard_prepare_task_names.index(
               'Provision replacement border batch'
@@ -213,12 +213,19 @@
               string
             )
           - >-
-            'switch_refresh_sda_fabric_border_prepare_inventory_role_config' in
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_assignment' in
             (
               switch_refresh_sda_fabric_border_guard_role_update_task
               .vars.inventory_config |
               string
             )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_config' in
+            (switch_refresh_sda_fabric_border_guard_role_update_task.loop | string)
+          - >-
+            switch_refresh_sda_fabric_border_guard_role_update_task
+            .loop_control.loop_var ==
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_assignment'
           - >-
             (
               switch_refresh_sda_fabric_border_guard_base_wait_task.vars
@@ -228,12 +235,25 @@
               length
             ) == 0
           - >-
-            switch_refresh_sda_fabric_border_guard_role_wait_task.vars
-            .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
-            .required_role == 'BORDER_ROUTER'
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.role' in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.vars
+              .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+              .required_role | string
+            )
           - >-
-            'switch_refresh_sda_fabric_border_prepare_inventory_role_config' in
-            (switch_refresh_sda_fabric_border_guard_role_update_task.when | string)
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirement.ip_address_list'
+            in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.vars
+              .switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+              .expected_ips | string
+            )
+          - >-
+            'switch_refresh_sda_fabric_border_prepare_inventory_role_requirements' in
+            (
+              switch_refresh_sda_fabric_border_guard_role_wait_task.loop | string
+            )
 
     - name: Verify inventory readiness polling contract
       ansible.builtin.assert:
@@ -366,6 +386,22 @@
                   switch_refresh_sda_fabric_border_guard_ready_access_records[0] |
                   combine({'role': 'BORDER_ROUTER'})
                 }}
+
+    - name: Accept synchronized inherited ACCESS inventory
+      ansible.builtin.include_tasks: >-
+        ../tasks/validate_prepare_inventory_readiness_result.yml
+      vars:
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request:
+          expected_ips:
+            - "204.1.2.11"
+          required_role: ACCESS
+          context: inherited-access-role-offline-test
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              - >-
+                {{ switch_refresh_sda_fabric_border_guard_ready_access_records[0] }}
 
     - name: Accept Ping Reachable synchronized border inventory
       ansible.builtin.include_tasks: >-

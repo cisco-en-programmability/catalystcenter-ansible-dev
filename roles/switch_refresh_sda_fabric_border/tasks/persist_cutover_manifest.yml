@@ -40,11 +40,14 @@
             'old': switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_identity,
             'new': switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_identity,
             'old_selector':
-              switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector |
-              default({}),
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector,
             'interface_mappings':
               switch_refresh_sda_fabric_border_cutover_manifest_mapping.interface_mappings |
               default([]),
+            'inventory_role':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.inventory_role,
+            'device_roles':
+              switch_refresh_sda_fabric_border_cutover_manifest_mapping.device_roles,
             'original_device_config':
               switch_refresh_sda_fabric_border_cutover_manifest_mapping.original_device_config,
             'base_new_device_config':
@@ -71,11 +74,14 @@
                 'new':
                   switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_identity,
                 'old_selector':
-                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector |
-                  default({}),
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.old_selector,
                 'interface_mappings':
                   switch_refresh_sda_fabric_border_cutover_manifest_mapping.interface_mappings |
                   default([]),
+                'inventory_role':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.inventory_role,
+                'device_roles':
+                  switch_refresh_sda_fabric_border_cutover_manifest_mapping.device_roles,
                 'original_device_config':
                   switch_refresh_sda_fabric_border_cutover_manifest_mapping.original_device_config,
                 'base_new_device_config':
@@ -100,7 +106,7 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_cutover_manifest_mapping
     label: >-
-      {{ switch_refresh_sda_fabric_border_cutover_manifest_mapping.new_management_ip }}
+      {{ switch_refresh_sda_fabric_border_cutover_manifest_mapping.new.management_ip }}
   no_log: true
 
 - name: Validate cutover manifest entries before persistence

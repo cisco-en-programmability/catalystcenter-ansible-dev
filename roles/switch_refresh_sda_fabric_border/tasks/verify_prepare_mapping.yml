@@ -6,7 +6,7 @@
       fabric_name: >-
         {{ switch_refresh_sda_fabric_border_prepare_fabric_site }}
       device_ip: >-
-        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new.management_ip }}
       capture_file: >-
         {{
           switch_refresh_sda_fabric_border_prepare_verify_workspace.path ~ '/' ~
@@ -17,7 +17,7 @@
       context: >-
         Prepared replacement verification for batch
         {{ switch_refresh_sda_fabric_border_prepare_batch_name }}, replacement
-        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new.management_ip }}
 
 - name: Compare prepared replacement with expected handoff-free base
   ansible.builtin.include_tasks: verify_generated_config.yml
@@ -32,7 +32,7 @@
         {{ switch_refresh_sda_fabric_border_capture_result.device_config }}
       context: >-
         Prepared replacement
-        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new_management_ip }}
+        {{ switch_refresh_sda_fabric_border_prepare_verify_mapping.new.management_ip }}
         in batch {{ switch_refresh_sda_fabric_border_prepare_batch_name }}
       require_empty_handoffs: true
       fail_on_mismatch: true
@@ -47,9 +47,8 @@
             'old_management_ip':
               switch_refresh_sda_fabric_border_prepare_verify_mapping
               .old_management_ip,
-            'new_management_ip':
-              switch_refresh_sda_fabric_border_prepare_verify_mapping
-              .new_management_ip,
+            'new':
+              switch_refresh_sda_fabric_border_prepare_verify_mapping.new,
             'new_identity':
               switch_refresh_sda_fabric_border_prepare_verify_mapping.new_identity,
             'status': 'prepared_no_handoff',

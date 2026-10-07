@@ -31,8 +31,9 @@
   vars:
     switch_refresh_sda_fabric_border_transform_request:
       fabric_name: "{{ switch_refresh_sda_fabric_border_cutover_build_site }}"
-      new_management_ip: >-
-        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+      new:
+        management_ip: >-
+          {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new.management_ip }}
       interface_mappings: >-
         {{ switch_refresh_sda_fabric_border_cutover_build_mapping.interface_mappings }}
       original_device_config: >-
@@ -50,19 +51,19 @@
     switch_refresh_sda_fabric_border_capture_request:
       fabric_name: "{{ switch_refresh_sda_fabric_border_cutover_build_site }}"
       device_ip: >-
-        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+        {{ switch_refresh_sda_fabric_border_cutover_build_mapping.new.management_ip }}
       capture_file: >-
         {{
           switch_refresh_sda_fabric_border_cutover_build_workspace ~ '/' ~
           (
-            switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip |
+            switch_refresh_sda_fabric_border_cutover_build_mapping.new.management_ip |
             regex_replace('[^A-Za-z0-9_.-]', '_')
           ) ~ '_prepared.yml'
         }}
       expected_state: present
       context: >-
         prepared replacement {{
-        switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+        switch_refresh_sda_fabric_border_cutover_build_mapping.new.management_ip }}
 
 - name: Preserve current prepared replacement capture
   ansible.builtin.set_fact:
@@ -80,7 +81,7 @@
         {{ switch_refresh_sda_fabric_border_cutover_prepared_capture.device_config }}
       context: >-
         pre-cutover replacement {{
-        switch_refresh_sda_fabric_border_cutover_build_mapping.new_management_ip }}
+        switch_refresh_sda_fabric_border_cutover_build_mapping.new.management_ip }}
       require_empty_handoffs: true
 
 - name: Append captured cutover mapping plan
@@ -99,6 +100,10 @@
                 switch_refresh_sda_fabric_border_cutover_transform.expected_new_device_config,
               'source_config_fingerprint':
                 switch_refresh_sda_fabric_border_cutover_transform.source_config_fingerprint,
+              'device_roles':
+                switch_refresh_sda_fabric_border_cutover_transform
+                .original_device_config.device_roles |
+                map('string') | map('upper') | unique | sort | list,
               'source_handoff_interfaces':
                 switch_refresh_sda_fabric_border_cutover_transform.source_handoff_interfaces,
               'l2_handoff_count':
@@ -114,4 +119,3 @@
         ]
       }}
   no_log: true
-

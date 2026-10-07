@@ -26,7 +26,7 @@
   loop: "{{ switch_refresh_sda_fabric_border_batch_device_mappings }}"
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_old_mapping
-    label: "{{ switch_refresh_sda_fabric_border_old_mapping.new_device_management_ip }}"
+    label: "{{ switch_refresh_sda_fabric_border_old_mapping.new.management_ip }}"
 
 - name: Resolve old border inventory records
   ansible.builtin.include_role:
@@ -106,7 +106,7 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_mapping_to_resolve
     label: >-
-      {{ switch_refresh_sda_fabric_border_mapping_to_resolve.new_device_management_ip }}
+      {{ switch_refresh_sda_fabric_border_mapping_to_resolve.new.management_ip }}
 
 - name: Validate resolved old border coverage and uniqueness
   ansible.builtin.assert:
@@ -116,7 +116,7 @@
         switch_refresh_sda_fabric_border_batch_device_mappings | length
       - >-
         switch_refresh_sda_fabric_border_batch_resolved_mappings |
-        map(attribute='new_management_ip') | map('string') | list | sort ==
+        map(attribute='new.management_ip') | map('string') | list | sort ==
         switch_refresh_sda_fabric_border_batch_device_ips | map('string') | list | sort
       - >-
         switch_refresh_sda_fabric_border_batch_resolved_mappings |

@@ -18,7 +18,6 @@ switch_refresh_sda_fabric_border_batches: []
 switch_refresh_sda_fabric_border_cutover_approved: false
 switch_refresh_sda_fabric_border_resume_from_manifest: false
 switch_refresh_sda_fabric_border_manifest_dir: ""
-switch_refresh_sda_fabric_border_allow_single_border_outage: false
 switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
 
 # Replacement onboarding and generated-stage defaults.

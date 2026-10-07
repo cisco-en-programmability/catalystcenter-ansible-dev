@@ -34,7 +34,8 @@
       - >-
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .required_role | default('') | string | trim | upper |
-        replace(' ', '_') in ['', 'BORDER_ROUTER']
+        regex_replace('[ -]+', '_') in
+        ['', 'ACCESS', 'DISTRIBUTION', 'CORE', 'BORDER_ROUTER', 'UNKNOWN']
       - >-
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .context is defined
@@ -85,7 +86,7 @@
       {{
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .required_role | default('') | string | trim | upper |
-        replace(' ', '_')
+        regex_replace('[ -]+', '_')
       }}
   no_log: true
 
@@ -169,7 +170,8 @@
         length == 0 or
         (
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
-          .role | default('', true) | string | upper | replace(' ', '_')
+          .role | default('', true) | string | trim | upper |
+          regex_replace('[ -]+', '_')
         ) ==
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_required_role
     fail_msg: >-
