@@ -1377,9 +1377,11 @@ Parameters
 
         <div class="ansible-option-indent-desc"></div><div class="ansible-option-indent-desc"></div><div class="ansible-option-cell">
 
-      Indicates the sleep time after initiating the Cisco ISE integration process.
+      Maximum time, in seconds, to wait for the Cisco ISE integration process to reach the ACTIVE state.
 
-      Maximum sleep time should be less or equal to 120 seconds.
+      The integration status is polled every five seconds and returns as soon as it completes.
+
+      Valid values are from 1 to 600 seconds.
 
 
       .. rst-class:: ansible-option-line
