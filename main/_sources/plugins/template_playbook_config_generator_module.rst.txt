@@ -1291,6 +1291,11 @@ Notes
      manager module applies only the last config entry because
      yaml.safe\_load uses last-key-wins semantics for duplicate
      keys in a single YAML document.
+   - Template version is not included in the generated configuration:
+     Catalyst Center assigns a version number only when a template is committed, so a
+     version is only a record of the source template at the time of generation.
+     Replaying a generated configuration creates a new version instead of restoring
+     the captured one, and including the field would break idempotency.
    - Does not support \ :literal:`check\_mode`\ 
    - The plugin runs on the control node and does not use any ansible connection plugins instead embedded connection manager from Cisco Catalyst Center SDK
    - Requires Python \>= 3.10, matching the controller Python versions supported by the collection's minimum ansible-core version (see the collection README for the current ansible-core / Python compatibility range)
