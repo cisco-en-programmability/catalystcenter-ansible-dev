@@ -1235,18 +1235,18 @@ class SdaFabricDevicesPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
                         f"Applying device_ip filter: '{device_ip}'",
                         "DEBUG",
                     )
-                    device_list_params = self.get_device_list_params(
-                        ip_address_list=device_ip
-                    )
-                    device_info_map = self.get_device_list(device_list_params)
-                    if not device_info_map or device_ip not in device_info_map:
+                    # This lookup only needs the inventory ID. Fabric configuration
+                    # can still be exported when inventory reports "Ping Reachable".
+                    network_device_id = self.get_device_ids_from_device_ips(
+                        [device_ip]
+                    ).get(device_ip)
+                    if not network_device_id:
                         self.log(
                             f"Device with IP '{device_ip}' not found in Cisco Catalyst Center. Skipping filter entry {filter_idx}.",
                             "WARNING",
                         )
                         continue
 
-                    network_device_id = device_info_map[device_ip].get("device_id")
                     self.log(
                         f"Device with IP '{device_ip}' found with network_device_id '{network_device_id}'",
                         "DEBUG",
