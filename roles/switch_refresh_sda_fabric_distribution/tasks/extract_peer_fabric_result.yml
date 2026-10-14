@@ -1,0 +1,24 @@
+---
+- name: Extract mapping-shaped peer fabric response
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_validation_records: >-
+      {{
+        switch_refresh_sda_fabric_distribution_peer_validation_records +
+        (switch_refresh_sda_fabric_distribution_fabric_fragment.fabric_info | default([]))
+      }}
+  when:
+    - switch_refresh_sda_fabric_distribution_fabric_fragment is mapping
+    - switch_refresh_sda_fabric_distribution_fabric_fragment.fabric_info is defined
+
+- name: Extract list-shaped peer fabric response
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_validation_records: >-
+      {{
+        switch_refresh_sda_fabric_distribution_peer_validation_records +
+        (switch_refresh_sda_fabric_distribution_fabric_fragment[0].fabric_info | default([]))
+      }}
+  when:
+    - (switch_refresh_sda_fabric_distribution_fabric_fragment | type_debug) == 'list'
+    - switch_refresh_sda_fabric_distribution_fabric_fragment | length == 1
+    - switch_refresh_sda_fabric_distribution_fabric_fragment[0] is mapping
+    - switch_refresh_sda_fabric_distribution_fabric_fragment[0].fabric_info is defined

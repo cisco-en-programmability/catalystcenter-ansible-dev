@@ -1,0 +1,162 @@
+---
+- name: Validate distribution refresh peer eligibility offline
+  hosts: plan_test
+  gather_facts: false
+
+  tasks:
+    - name: Accept edge and border fabric peers
+      ansible.builtin.include_tasks: ../tasks/validate_peer_result.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_expected_peer_ips:
+          - "192.0.2.10"
+          - "192.0.2.11"
+        switch_refresh_sda_fabric_distribution_expected_peer_records:
+          - management_ip: "192.0.2.10"
+            device_id: peer-edge-uuid
+            reachability_status: Reachable
+          - management_ip: "192.0.2.11"
+            device_id: peer-border-uuid
+            reachability_status: Reachable
+        switch_refresh_sda_fabric_distribution_peer_validation_records:
+          - device_ip: "192.0.2.10"
+            fabric_details:
+              - networkDeviceId: peer-edge-uuid
+                deviceRoles:
+                  - EDGE_NODE
+          - device_ip: "192.0.2.11"
+            fabric_details:
+              - networkDeviceId: peer-border-uuid
+                deviceRoles:
+                  - BORDER_NODE
+                  - CONTROL_PLANE_NODE
+
+    - name: Reject a peer outside the allowed fabric roles
+      block:
+        - name: Evaluate an ineligible fabric peer
+          ansible.builtin.include_tasks: ../tasks/validate_peer_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_expected_peer_ips:
+              - "192.0.2.12"
+            switch_refresh_sda_fabric_distribution_expected_peer_records:
+              - management_ip: "192.0.2.12"
+                device_id: peer-control-plane-uuid
+                reachability_status: Reachable
+            switch_refresh_sda_fabric_distribution_peer_validation_records:
+              - device_ip: "192.0.2.12"
+                fabric_details:
+                  - networkDeviceId: peer-control-plane-uuid
+                    deviceRoles:
+                      - CONTROL_PLANE_NODE
+
+        - name: Fail when ineligible peer was accepted
+          ansible.builtin.fail:
+            msg: A peer without an edge or border fabric role unexpectedly passed.
+      rescue:
+        - name: Confirm peer role evaluation failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate peer fabric roles'
+
+    - name: Reject missing peer fabric evidence
+      block:
+        - name: Evaluate incomplete peer coverage
+          ansible.builtin.include_tasks: ../tasks/validate_peer_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_expected_peer_ips:
+              - "192.0.2.10"
+              - "192.0.2.11"
+            switch_refresh_sda_fabric_distribution_expected_peer_records:
+              - management_ip: "192.0.2.10"
+                device_id: peer-edge-uuid
+                reachability_status: Reachable
+              - management_ip: "192.0.2.11"
+                device_id: peer-border-uuid
+                reachability_status: Reachable
+            switch_refresh_sda_fabric_distribution_peer_validation_records:
+              - device_ip: "192.0.2.10"
+                fabric_details:
+                  - networkDeviceId: peer-edge-uuid
+                    deviceRoles:
+                      - EDGE_NODE
+
+        - name: Fail when missing peer fabric evidence was accepted
+          ansible.builtin.fail:
+            msg: Missing peer fabric evidence unexpectedly passed.
+      rescue:
+        - name: Confirm incomplete peer coverage was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate peer fabric result structure'
+
+    - name: Reject an unreachable fabric peer
+      block:
+        - name: Evaluate an unreachable edge peer
+          ansible.builtin.include_tasks: ../tasks/validate_peer_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_expected_peer_ips:
+              - "192.0.2.13"
+            switch_refresh_sda_fabric_distribution_expected_peer_records:
+              - management_ip: "192.0.2.13"
+                device_id: unreachable-edge-uuid
+                reachability_status: Unreachable
+            switch_refresh_sda_fabric_distribution_peer_validation_records:
+              - device_ip: "192.0.2.13"
+                fabric_details:
+                  - networkDeviceId: unreachable-edge-uuid
+                    deviceRoles:
+                      - EDGE_NODE
+
+        - name: Fail when unreachable peer was accepted
+          ansible.builtin.fail:
+            msg: An unreachable fabric peer unexpectedly passed.
+      rescue:
+        - name: Confirm unreachable peer was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate pinned peer inventory identity'
+
+    - name: Load old-device identity validation contract
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_old_identity_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/resolve_mapping.yml'
+            ) |
+            from_yaml
+          }}
+
+    - name: Select old-device identity assertion
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_old_identity_assertion: >-
+          {{
+            switch_refresh_sda_fabric_distribution_old_identity_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Validate uniquely resolved old distribution identity'
+            ) |
+            first
+          }}
+
+    - name: Verify old inventory role is not an eligibility requirement
+      ansible.builtin.assert:
+        that:
+          - >-
+            'role' not in
+            (
+              switch_refresh_sda_fabric_distribution_old_identity_assertion[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ') |
+              lower
+            )
+          - >-
+            'not an eligibility condition' in
+            switch_refresh_sda_fabric_distribution_old_identity_assertion[
+              'ansible.builtin.assert'
+            ].fail_msg

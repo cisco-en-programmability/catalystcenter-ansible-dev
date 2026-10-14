@@ -1,0 +1,165 @@
+---
+- name: Validate distribution device mapping structure
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_mapping_input is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_input.keys() |
+        list |
+        sort == ['links', 'new', 'old']
+      - switch_refresh_sda_fabric_distribution_mapping_input.old is mapping
+      - switch_refresh_sda_fabric_distribution_mapping_input.new is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_mapping_input.links | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_mapping_input.links | length > 0
+    fail_msg: >-
+      Each device_mapping entry must contain only old, new, and a non-empty
+      links list.
+
+- name: Derive distribution device mapping identifiers
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_mapping_old: >-
+      {{ switch_refresh_sda_fabric_distribution_mapping_input.old }}
+    switch_refresh_sda_fabric_distribution_mapping_new: >-
+      {{ switch_refresh_sda_fabric_distribution_mapping_input.new }}
+
+- name: Validate distribution device mapping identifiers
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_new.keys() |
+        list == ['management_ip']
+      - >-
+        (switch_refresh_sda_fabric_distribution_mapping_new.management_ip |
+        default('') | type_debug) == 'str'
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_new.management_ip |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_new.management_ip ==
+        (switch_refresh_sda_fabric_distribution_mapping_new.management_ip | trim)
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_new.management_ip in
+        switch_refresh_sda_fabric_distribution_batch_device_ips
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.keys() |
+        list |
+        difference(['management_ip', 'hostname', 'serial_number', 'mac_address']) |
+        length == 0
+      - >-
+        ([
+          switch_refresh_sda_fabric_distribution_mapping_old.management_ip is defined,
+          switch_refresh_sda_fabric_distribution_mapping_old.hostname is defined,
+          switch_refresh_sda_fabric_distribution_mapping_old.serial_number is defined,
+          switch_refresh_sda_fabric_distribution_mapping_old.mac_address is defined
+        ] | select('equalto', true) | list | length) == 1
+      - >-
+        (switch_refresh_sda_fabric_distribution_mapping_old.values() |
+        first | type_debug) == 'str'
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.values() |
+        first | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.values() | first ==
+        (switch_refresh_sda_fabric_distribution_mapping_old.values() | first | trim)
+    fail_msg: >-
+      new must contain only a management_ip from new_devices.device_ips. old
+      must contain exactly one non-empty, whitespace-trimmed management_ip,
+      hostname, serial_number, or mac_address.
+
+- name: Validate old distribution management IPv4 selector
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.management_ip |
+        regex_search('^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$')
+        is not none
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.management_ip.split('.') |
+        map('int') | max <= 255
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.management_ip not in
+        switch_refresh_sda_fabric_distribution_batch_device_ips
+    fail_msg: old.management_ip must be a canonical IPv4 address distinct from every replacement.
+  when: switch_refresh_sda_fabric_distribution_mapping_old.management_ip is defined
+
+- name: Validate old distribution MAC selector
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_mapping_old.mac_address |
+        regex_search('^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$') is not none
+    fail_msg: old.mac_address must contain six hexadecimal octets.
+  when: switch_refresh_sda_fabric_distribution_mapping_old.mac_address is defined
+
+- name: Build immutable distribution mapping key
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_mapping_old_key: >-
+      {{
+        'management_ip:' ~ switch_refresh_sda_fabric_distribution_mapping_old.management_ip
+        if (switch_refresh_sda_fabric_distribution_mapping_old.management_ip is defined)
+        else 'hostname:' ~
+          (switch_refresh_sda_fabric_distribution_mapping_old.hostname | lower)
+        if (switch_refresh_sda_fabric_distribution_mapping_old.hostname is defined)
+        else 'serial_number:' ~
+          (switch_refresh_sda_fabric_distribution_mapping_old.serial_number | upper)
+        if (switch_refresh_sda_fabric_distribution_mapping_old.serial_number is defined)
+        else 'mac_address:' ~
+          (switch_refresh_sda_fabric_distribution_mapping_old.mac_address |
+          lower | regex_replace('-', ':'))
+      }}
+    switch_refresh_sda_fabric_distribution_mapping_links: []
+
+- name: Validate and normalize distribution links
+  ansible.builtin.include_tasks:
+    file: validate_link.yml
+    apply:
+      tags:
+        - always
+  loop: "{{ switch_refresh_sda_fabric_distribution_mapping_input.links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_link_input
+    label: >-
+      {{
+        switch_refresh_sda_fabric_distribution_link_input.peer_management_ip |
+        default('invalid-link')
+        if (switch_refresh_sda_fabric_distribution_link_input is mapping)
+        else 'invalid-link'
+      }}
+
+- name: Save normalized distribution device mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_mappings: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_mappings + [
+          {
+            'old': switch_refresh_sda_fabric_distribution_mapping_old,
+            'old_identity_key': switch_refresh_sda_fabric_distribution_mapping_old_key,
+            'new': {
+              'management_ip':
+                switch_refresh_sda_fabric_distribution_mapping_new.management_ip
+            },
+            'links': switch_refresh_sda_fabric_distribution_mapping_links
+          }
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_batch_links: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_links +
+        (switch_refresh_sda_fabric_distribution_mapping_links |
+        map('combine', {
+          'old_identity_key': switch_refresh_sda_fabric_distribution_mapping_old_key,
+          'new_management_ip':
+            switch_refresh_sda_fabric_distribution_mapping_new.management_ip
+        }) | list)
+      }}
+    switch_refresh_sda_fabric_distribution_batch_old_identity_keys: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_old_identity_keys +
+        [switch_refresh_sda_fabric_distribution_mapping_old_key]
+      }}
+    switch_refresh_sda_fabric_distribution_batch_mapping_new_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_mapping_new_ips +
+        [switch_refresh_sda_fabric_distribution_mapping_new.management_ip]
+      }}

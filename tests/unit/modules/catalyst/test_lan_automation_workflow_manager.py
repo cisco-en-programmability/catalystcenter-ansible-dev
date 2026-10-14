@@ -28,7 +28,7 @@ __author__ = "Archit Soni"
 __email__ = "soni.archit03@gmail.com"
 __version__ = "1.0.0"
 
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 from ansible_collections.cisco.catalystcenter.plugins.modules import (
     lan_automation_workflow_manager,
 )
@@ -459,4 +459,397 @@ class TestCatalystCenterLanAutomationWorkflow(TestCatalystModule):
         self.assertIn(
             "Links added successfully to the port channel between source device '172.254.0.2' and destination device '172.101.1.1'. Added links:",
             result.get("msg"),
+        )
+
+    def _filter_link_delete_updates(self, source_exists, destination_exists):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.no_link_deleted = []
+        link_delete = {
+            "sourceDeviceManagementIPAddress": "192.0.2.10",
+            "sourceDeviceInterfaceName": "GigabitEthernet1/0/1",
+            "destinationDeviceManagementIPAddress": "192.0.2.20",
+            "destinationDeviceInterfaceName": "GigabitEthernet1/0/2",
+        }
+
+        with patch.object(
+            workflow,
+            "check_link_details",
+            side_effect=[source_exists, destination_exists],
+        ) as check_link_details, patch.object(workflow, "log"):
+            filtered_updates = workflow.filter_updates({"linkDelete": link_delete})
+
+        self.assertEqual(
+            check_link_details.call_args_list,
+            [
+                call("192.0.2.10", "GigabitEthernet1/0/1"),
+                call("192.0.2.20", "GigabitEthernet1/0/2"),
+            ],
+        )
+        return workflow, link_delete, filtered_updates
+
+    def test_filter_updates_submits_active_link_delete(self):
+        workflow, link_delete, filtered_updates = self._filter_link_delete_updates(
+            True, True
+        )
+
+        self.assertEqual(filtered_updates, {"linkDelete": link_delete})
+        self.assertEqual(workflow.no_link_deleted, [])
+
+    def test_filter_updates_skips_absent_link_delete(self):
+        workflow, link_delete, filtered_updates = self._filter_link_delete_updates(
+            False, False
+        )
+
+        self.assertEqual(filtered_updates, {})
+        self.assertEqual(workflow.no_link_deleted, [link_delete])
+
+    def test_filter_updates_submits_asymmetric_link_delete(self):
+        for source_exists, destination_exists in [(True, False), (False, True)]:
+            with self.subTest(
+                source_exists=source_exists,
+                destination_exists=destination_exists,
+            ):
+                workflow, link_delete, filtered_updates = (
+                    self._filter_link_delete_updates(
+                        source_exists,
+                        destination_exists,
+                    )
+                )
+
+                self.assertEqual(filtered_updates, {"linkDelete": link_delete})
+                self.assertEqual(workflow.no_link_deleted, [])
+
+    def _process_link_deletion(self, source_exists, destination_exists):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        link_delete = {
+            "sourceDeviceManagementIPAddress": "192.0.2.10",
+            "sourceDeviceInterfaceName": "GigabitEthernet1/0/1",
+            "destinationDeviceManagementIPAddress": "192.0.2.20",
+            "destinationDeviceInterfaceName": "GigabitEthernet1/0/2",
+        }
+
+        with patch.object(
+            workflow,
+            "check_link_details",
+            side_effect=[source_exists, destination_exists],
+        ) as check_link_details, patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            workflow.process_link_deletion(link_delete)
+
+        self.assertEqual(
+            check_link_details.call_args_list,
+            [
+                call("192.0.2.10", "GigabitEthernet1/0/1"),
+                call("192.0.2.20", "GigabitEthernet1/0/2"),
+            ],
+        )
+        return fail_and_exit
+
+    def test_process_link_deletion_accepts_absent_link(self):
+        fail_and_exit = self._process_link_deletion(False, False)
+
+        fail_and_exit.assert_not_called()
+
+    def test_process_link_deletion_fails_when_link_state_remains(self):
+        for source_exists, destination_exists in [
+            (True, True),
+            (True, False),
+            (False, True),
+        ]:
+            with self.subTest(
+                source_exists=source_exists,
+                destination_exists=destination_exists,
+            ):
+                fail_and_exit = self._process_link_deletion(
+                    source_exists,
+                    destination_exists,
+                )
+
+                fail_and_exit.assert_called_once_with(
+                    "Link deletion verification failed for "
+                    "192.0.2.10/GigabitEthernet1/0/1 and "
+                    "192.0.2.20/GigabitEthernet1/0/2: link configuration "
+                    "remains on at least one endpoint."
+                )
+
+    def _filter_link_add_updates(self, source_exists, destination_exists):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.no_link_added = []
+        link_add = {
+            "sourceDeviceManagementIPAddress": "192.0.2.10",
+            "sourceDeviceInterfaceName": "GigabitEthernet1/0/1",
+            "destinationDeviceManagementIPAddress": "192.0.2.20",
+            "destinationDeviceInterfaceName": "GigabitEthernet1/0/2",
+            "ipPoolName": "LAN_AUTO_P2P",
+        }
+
+        with patch.object(
+            workflow,
+            "check_link_details",
+            side_effect=[source_exists, destination_exists],
+        ) as check_link_details, patch.object(workflow, "log"):
+            filtered_updates = workflow.filter_updates({"linkAdd": link_add})
+
+        self.assertEqual(
+            check_link_details.call_args_list,
+            [
+                call("192.0.2.10", "GigabitEthernet1/0/1"),
+                call("192.0.2.20", "GigabitEthernet1/0/2"),
+            ],
+        )
+        return workflow, link_add, filtered_updates
+
+    def test_filter_updates_skips_link_add_only_when_both_endpoints_exist(self):
+        for source_exists, destination_exists in [
+            (True, True),
+            (True, False),
+            (False, True),
+            (False, False),
+        ]:
+            with self.subTest(
+                source_exists=source_exists,
+                destination_exists=destination_exists,
+            ):
+                workflow, link_add, filtered_updates = self._filter_link_add_updates(
+                    source_exists, destination_exists
+                )
+
+                if source_exists and destination_exists:
+                    self.assertEqual(filtered_updates, {})
+                    self.assertEqual(workflow.no_link_added, [link_add])
+                else:
+                    self.assertEqual(filtered_updates, {"linkAdd": link_add})
+                    self.assertEqual(workflow.no_link_added, [])
+
+    def test_filter_updates_returns_empty_mapping_for_compliant_hostname(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.no_hostname_updated = []
+        hostname_update = {
+            "deviceManagementIPAddress": "192.0.2.20",
+            "newHostName": "SJ-IM",
+        }
+
+        with patch.object(
+            workflow, "get_hostname_details", return_value="SJ-IM"
+        ), patch.object(workflow, "log"):
+            filtered_updates = workflow.filter_updates(
+                {"hostnameUpdateDevices": [hostname_update]}
+            )
+
+        self.assertEqual(filtered_updates, {})
+        self.assertEqual(workflow.no_hostname_updated, [hostname_update])
+
+    def _process_link_addition(self, source_exists, destination_exists):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        link_add = {
+            "sourceDeviceManagementIPAddress": "192.0.2.10",
+            "sourceDeviceInterfaceName": "GigabitEthernet1/0/1",
+            "destinationDeviceManagementIPAddress": "192.0.2.20",
+            "destinationDeviceInterfaceName": "GigabitEthernet1/0/2",
+        }
+
+        with patch.object(
+            workflow,
+            "check_link_details",
+            side_effect=[source_exists, destination_exists],
+        ) as check_link_details, patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            workflow.process_link_addition(link_add)
+
+        self.assertEqual(
+            check_link_details.call_args_list,
+            [
+                call("192.0.2.10", "GigabitEthernet1/0/1"),
+                call("192.0.2.20", "GigabitEthernet1/0/2"),
+            ],
+        )
+        return fail_and_exit
+
+    def test_process_link_addition_requires_both_endpoints(self):
+        for source_exists, destination_exists in [
+            (True, True),
+            (True, False),
+            (False, True),
+            (False, False),
+        ]:
+            with self.subTest(
+                source_exists=source_exists,
+                destination_exists=destination_exists,
+            ):
+                fail_and_exit = self._process_link_addition(
+                    source_exists, destination_exists
+                )
+
+                if source_exists and destination_exists:
+                    fail_and_exit.assert_not_called()
+                else:
+                    fail_and_exit.assert_called_once_with(
+                        "Link addition verification failed for "
+                        "192.0.2.10/GigabitEthernet1/0/1 and "
+                        "192.0.2.20/GigabitEthernet1/0/2: link configuration "
+                        "is missing from at least one endpoint."
+                    )
+
+    def test_update_lan_auto_devices_fails_when_task_id_is_missing(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        link_add = {"sourceDeviceManagementIPAddress": "192.0.2.10"}
+
+        with patch.object(
+            workflow, "call_lan_auto_update_api", return_value=None
+        ), patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            result = workflow.update_lan_auto_devices({"linkAdd": link_add})
+
+        self.assertIsNone(result)
+        fail_and_exit.assert_called_once_with(
+            "Failed to get a task ID for the requested link_add update: "
+            "{'sourceDeviceManagementIPAddress': '192.0.2.10'}"
+        )
+
+    def test_get_diff_merged_rejects_all_none_task_ids(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.want = {
+            "lan_automated_device_update": {
+                "linkAdd": {"sourceDeviceManagementIPAddress": "192.0.2.10"}
+            }
+        }
+        workflow.have = {}
+        empty_task_ids = {
+            "loopback_update": None,
+            "hostname_update": None,
+            "link_add": None,
+            "link_delete": None,
+        }
+
+        with patch.object(
+            workflow,
+            "filter_updates",
+            return_value=workflow.want["lan_automated_device_update"],
+        ), patch.object(
+            workflow, "update_lan_auto_devices", return_value=empty_task_ids
+        ) as update_lan_auto_devices, patch.object(
+            workflow, "log"
+        ), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            update_lan_auto_devices.__name__ = "update_lan_auto_devices"
+            workflow.get_diff_merged()
+
+        fail_and_exit.assert_called_once_with(
+            "An error occurred while retrieving task_ids for "
+            "'update_lan_auto_devices' operation."
+        )
+
+    def test_get_update_lan_task_status_fails_on_timeout(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.params = {
+            "catalystcenter_api_task_timeout": 5,
+            "catalystcenter_task_poll_interval": 30,
+        }
+
+        with patch.object(
+            workflow,
+            "get_task_details",
+            return_value={"isError": False, "progress": "In progress"},
+        ), patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit, patch.object(
+            lan_automation_workflow_manager.time,
+            "monotonic",
+            side_effect=[0, 0, 0, 5],
+        ), patch.object(
+            lan_automation_workflow_manager.time, "sleep"
+        ) as sleep:
+            workflow.get_update_lan_task_status({"link_add": "task-123"})
+
+        sleep.assert_called_once_with(5)
+        fail_and_exit.assert_called_once_with(
+            "Timed out after 5 seconds while waiting for link_add update task "
+            "'task-123' to complete."
+        )
+
+    def test_get_device_id_fails_closed_on_api_error(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.catalystcenter_apply = {
+            "exec": Mock(side_effect=RuntimeError("lookup failed"))
+        }
+
+        with patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            result = workflow.get_device_id("192.0.2.10")
+
+        self.assertIsNone(result)
+        fail_and_exit.assert_called_once_with(
+            "Unable to verify device 192.0.2.10: failed to retrieve its device "
+            "ID: lookup failed"
+        )
+
+    def test_check_link_details_allows_known_unconfigured_interface(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.catalystcenter_apply = {
+            "exec": Mock(
+                return_value={
+                    "response": {
+                        "id": "interface-123",
+                        "ipv4Address": None,
+                        "isisSupport": "false",
+                        "addresses": [],
+                    }
+                }
+            )
+        }
+
+        with patch.object(
+            workflow, "get_device_id", return_value="device-123"
+        ), patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            result = workflow.check_link_details("192.0.2.10", "GigabitEthernet1/0/1")
+
+        self.assertFalse(result)
+        fail_and_exit.assert_not_called()
+
+    def test_check_link_details_fails_closed_on_interface_api_error(self):
+        workflow = lan_automation_workflow_manager.LanAutomation.__new__(
+            lan_automation_workflow_manager.LanAutomation
+        )
+        workflow.catalystcenter_apply = {
+            "exec": Mock(side_effect=RuntimeError("interface lookup failed"))
+        }
+
+        with patch.object(
+            workflow, "get_device_id", return_value="device-123"
+        ), patch.object(workflow, "log"), patch.object(
+            workflow, "fail_and_exit"
+        ) as fail_and_exit:
+            result = workflow.check_link_details("192.0.2.10", "GigabitEthernet1/0/1")
+
+        self.assertFalse(result)
+        fail_and_exit.assert_called_once_with(
+            "Unable to verify link details for "
+            "192.0.2.10/GigabitEthernet1/0/1: interface lookup failed"
         )

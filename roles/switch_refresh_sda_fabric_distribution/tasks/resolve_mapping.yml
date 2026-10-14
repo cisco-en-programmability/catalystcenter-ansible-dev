@@ -1,0 +1,178 @@
+---
+- name: Resolve old distribution device by its declared selector
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    managementIpAddress: >-
+      {{
+        [switch_refresh_sda_fabric_distribution_mapping.old.management_ip]
+        if (switch_refresh_sda_fabric_distribution_mapping.old.management_ip is defined)
+        else omit
+      }}
+    hostname: >-
+      {{
+        [switch_refresh_sda_fabric_distribution_mapping.old.hostname]
+        if (switch_refresh_sda_fabric_distribution_mapping.old.hostname is defined)
+        else omit
+      }}
+    serialNumber: >-
+      {{
+        [switch_refresh_sda_fabric_distribution_mapping.old.serial_number]
+        if (switch_refresh_sda_fabric_distribution_mapping.old.serial_number is defined)
+        else omit
+      }}
+    macAddress: >-
+      {{
+        [switch_refresh_sda_fabric_distribution_mapping.old.mac_address]
+        if (switch_refresh_sda_fabric_distribution_mapping.old.mac_address is defined)
+        else omit
+      }}
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_old_lookup
+  no_log: true
+
+- name: Validate uniquely resolved old distribution identity
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_distribution_old_lookup.failed | default(false) | bool)
+      - switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response |
+        length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0]
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].managementIpAddress |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].id |
+        default(
+          switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].instanceUuid |
+          default('')
+        ) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].reachabilityStatus |
+        default('') | upper == 'REACHABLE'
+      - >-
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].managementState |
+        default('') | upper == 'MANAGED'
+    fail_msg: >-
+      The old distribution selector must resolve to exactly one inventory
+      device with immutable identity fields. Its inventory role is deliberately
+      not an eligibility condition. It must be reachable and managed for the
+      verified link update.
+  no_log: true
+
+- name: Pin resolved old distribution identity
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_resolved_old_record: >-
+      {{ switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0] }}
+    switch_refresh_sda_fabric_distribution_resolved_old_id: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].id |
+        default(
+          switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].instanceUuid
+        )
+      }}
+    switch_refresh_sda_fabric_distribution_resolved_old_ip: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_lookup.catalystcenter_response.response[0].managementIpAddress
+      }}
+  no_log: true
+
+- name: Reject overlapping resolved distribution identities
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_resolved_old_ip |
+        regex_search('^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$')
+        is not none
+      - >-
+        switch_refresh_sda_fabric_distribution_resolved_old_ip.split('.') |
+        map('int') | max <= 255
+      - >-
+        switch_refresh_sda_fabric_distribution_resolved_old_ip not in
+        switch_refresh_sda_fabric_distribution_plan.new_management_ips
+      - >-
+        switch_refresh_sda_fabric_distribution_resolved_old_ip not in
+        (switch_refresh_sda_fabric_distribution_plan.links |
+        map(attribute='peer_management_ip') | unique | list)
+    fail_msg: >-
+      A resolved old distribution management IP cannot identify a replacement
+      or peer device in the same batch.
+
+- name: Initialize resolved delete entries for old distribution mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_mapping_delete_config: []
+
+- name: Build resolved old distribution link deletion payloads
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_mapping_delete_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_mapping_delete_config + [
+          {
+            'lan_automated_device_update': {
+              'link_delete': {
+                'source_device_management_ip_address':
+                  switch_refresh_sda_fabric_distribution_resolved_old_ip,
+                'source_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_mapping_link.old_link.distribution_interface_name,
+                'destination_device_management_ip_address':
+                  switch_refresh_sda_fabric_distribution_mapping_link.peer_management_ip,
+                'destination_device_interface_name':
+                  switch_refresh_sda_fabric_distribution_mapping_link.old_link.peer_interface_name
+              }
+            }
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_distribution_mapping.links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_mapping_link
+    label: "{{ switch_refresh_sda_fabric_distribution_mapping_link.peer_management_ip }}"
+
+- name: Save resolved old distribution mapping
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_resolved_mappings: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_mappings + [
+          switch_refresh_sda_fabric_distribution_mapping |
+          combine({
+            'old_management_ip': switch_refresh_sda_fabric_distribution_resolved_old_ip,
+            'old_device_id': switch_refresh_sda_fabric_distribution_resolved_old_id,
+            'old_serial_number':
+              switch_refresh_sda_fabric_distribution_resolved_old_record.serialNumber |
+              default(''),
+            'old_mac_address':
+              switch_refresh_sda_fabric_distribution_resolved_old_record.macAddress |
+              default(''),
+            'old_hostname':
+              switch_refresh_sda_fabric_distribution_resolved_old_record.hostname |
+              default(''),
+            'old_reachability_status':
+              switch_refresh_sda_fabric_distribution_resolved_old_record.reachabilityStatus |
+              default(''),
+            'old_management_state':
+              switch_refresh_sda_fabric_distribution_resolved_old_record.managementState |
+              default(''),
+            'link_delete_config':
+              switch_refresh_sda_fabric_distribution_mapping_delete_config
+          })
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_resolved_delete_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_delete_config +
+        switch_refresh_sda_fabric_distribution_mapping_delete_config
+      }}
+  no_log: true

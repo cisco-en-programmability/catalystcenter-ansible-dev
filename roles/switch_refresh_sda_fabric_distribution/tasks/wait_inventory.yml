@@ -1,0 +1,88 @@
+---
+- name: Poll replacement distribution inventory readiness
+  cisco.catalystcenter.network_device_by_ip_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    ipAddress: "{{ switch_refresh_sda_fabric_distribution_inventory_ip }}"
+  register: switch_refresh_sda_fabric_distribution_inventory_readiness
+  until:
+    - not (switch_refresh_sda_fabric_distribution_inventory_readiness.failed | default(false) | bool)
+    - switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response is mapping
+    - >-
+      (switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({}) is mapping
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).managementIpAddress |
+      default('') == switch_refresh_sda_fabric_distribution_inventory_ip
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).id |
+      default('') | string | trim | length > 0
+    - >-
+      (switch_refresh_sda_fabric_distribution_inventory_expected_role |
+      default('') | trim | length == 0) or
+      (
+        ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+        default({})).response | default({})).role |
+        default('') | upper ==
+        switch_refresh_sda_fabric_distribution_inventory_expected_role | upper
+      )
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).reachabilityStatus |
+      default('') | upper == 'REACHABLE'
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).collectionStatus |
+      default('') | upper == 'MANAGED'
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).managementState |
+      default('') | upper == 'MANAGED'
+    - >-
+      ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+      default({})).response | default({})).family |
+      default('') in ['Switches and Hubs', 'Routers']
+    - >-
+      'GENERALCODE=SUCCESS' in
+      (
+        ((switch_refresh_sda_fabric_distribution_inventory_readiness.catalystcenter_response |
+        default({})).response | default({})).inventoryStatusDetail |
+        default('') | string | upper | regex_replace('[^A-Z=]', '')
+      )
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_inventory_readiness_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.new_management_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_inventory_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_inventory_ip }}"
+  no_log: true
+
+- name: Validate replacement distribution inventory convergence
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_inventory_readiness.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_plan.new_management_ips | length
+      - >-
+        switch_refresh_sda_fabric_distribution_inventory_readiness.results |
+        rejectattr('failed', 'equalto', true) | list | length ==
+        switch_refresh_sda_fabric_distribution_plan.new_management_ips | length
+    fail_msg: >-
+      Replacement inventory records did not converge to the required reachable,
+      managed state and expected inventory role within the configured timeout.

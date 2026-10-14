@@ -1,0 +1,72 @@
+---
+- name: Validate live replacement hostname target identity
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_target_result.failed |
+        default(false) | bool)
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.managementIpAddress |
+        default('') ==
+        switch_refresh_sda_fabric_distribution_hostname_target_entry.new_management_ip
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.id |
+        default(
+          switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.instanceUuid |
+          default('')
+        ) == switch_refresh_sda_fabric_distribution_hostname_target_entry.new_device_id
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.serialNumber |
+        default('') ==
+        switch_refresh_sda_fabric_distribution_hostname_target_entry.new_serial_number
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.role |
+        default('') | upper == 'DISTRIBUTION'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.reachabilityStatus |
+        default('') | upper == 'REACHABLE'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_target_result.catalystcenter_response.response.managementState |
+        default('') | upper == 'MANAGED'
+    fail_msg: >-
+      Hostname target {{
+      switch_refresh_sda_fabric_distribution_hostname_target_entry.new_management_ip }}
+      no longer matches the manifest UUID and serial or is not a reachable,
+      managed DISTRIBUTION inventory device.
+
+- name: Validate desired distribution hostname ownership
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_owner_result.failed |
+        default(false) | bool)
+      - >-
+        (((switch_refresh_sda_fabric_distribution_hostname_owner_result.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+      - >-
+        ((switch_refresh_sda_fabric_distribution_hostname_owner_result.catalystcenter_response |
+        default({})).response | default([])) | length <= 1
+    fail_msg: >-
+      Desired hostname {{
+      switch_refresh_sda_fabric_distribution_hostname_target_entry.desired_hostname }}
+      is owned by a different inventory device.
+
+- name: Validate any existing desired hostname owner
+  ansible.builtin.include_tasks:
+    file: validate_hostname_owner_record.yml
+    apply:
+      tags: [always]
+  loop: >-
+    {{
+      (switch_refresh_sda_fabric_distribution_hostname_owner_result.catalystcenter_response |
+      default({})).response | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_owner_record
+    label: desired-hostname-owner

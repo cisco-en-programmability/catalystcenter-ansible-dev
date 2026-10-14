@@ -1,0 +1,65 @@
+---
+- name: Match immutable peer identity to fabric record
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_identity_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_expected_peer_records |
+        selectattr(
+          'management_ip', 'equalto',
+          switch_refresh_sda_fabric_distribution_peer_record.device_ip
+        ) | list
+      }}
+
+- name: Validate pinned peer inventory identity
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_peer_identity_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_identity_matches[0].reachability_status |
+        upper == 'REACHABLE'
+    fail_msg: Peer inventory identity or live reachability changed before validation.
+
+- name: Match fabric detail to the pinned peer UUID
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_detail_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_peer_record.fabric_details |
+        default([]) |
+        selectattr('networkDeviceId', 'defined') |
+        selectattr(
+          'networkDeviceId', 'equalto',
+          switch_refresh_sda_fabric_distribution_peer_identity_matches[0].device_id |
+          default('')
+        ) | list
+      }}
+
+- name: Validate peer fabric roles
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_peer_record is mapping
+      - switch_refresh_sda_fabric_distribution_peer_identity_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_identity_matches[0].reachability_status |
+        upper == 'REACHABLE'
+      - >-
+        (switch_refresh_sda_fabric_distribution_peer_record.fabric_details |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_peer_record.fabric_details | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_record.fabric_details |
+        selectattr('deviceRoles', 'defined') | list | length ==
+        switch_refresh_sda_fabric_distribution_peer_record.fabric_details | length
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_record.fabric_details |
+        selectattr('networkDeviceId', 'defined') | list | length ==
+        switch_refresh_sda_fabric_distribution_peer_record.fabric_details | length
+      - >-
+        switch_refresh_sda_fabric_distribution_peer_detail_matches | length == 1
+      - >-
+        (switch_refresh_sda_fabric_distribution_peer_detail_matches[0].deviceRoles |
+        map('upper') | list |
+        intersect(['EDGE_NODE', 'BORDER_NODE']) | length) > 0
+    fail_msg: >-
+      Peer {{ switch_refresh_sda_fabric_distribution_peer_record.device_ip |
+      default('unknown') }} must retain its pinned inventory UUID and be a live
+      EDGE_NODE or BORDER_NODE in the requested fabric site.

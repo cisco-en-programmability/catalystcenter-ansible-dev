@@ -1,0 +1,31 @@
+---
+- name: Match requested distribution IPv4 pool
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_pool_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_site_pool_records |
+        selectattr('name', 'defined') |
+        selectattr('name', 'equalto', switch_refresh_sda_fabric_distribution_pool_name) |
+        list
+      }}
+
+- name: Validate requested distribution IPv4 pool
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_pool_matches | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_pool_matches[0].siteId |
+        default('') == switch_refresh_sda_fabric_distribution_pool_site_id
+      - >-
+        switch_refresh_sda_fabric_distribution_pool_matches[0].poolType |
+        default('') | upper == 'LAN'
+      - >-
+        (switch_refresh_sda_fabric_distribution_pool_matches[0].ipV4AddressSpace |
+        default({})) is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_pool_matches[0].ipV4AddressSpace |
+        default({}) | length > 0
+    fail_msg: >-
+      Pool {{ switch_refresh_sda_fabric_distribution_pool_name }} must exist
+      exactly once at the batch site, have poolType LAN, and contain a non-empty
+      IPv4 address space.

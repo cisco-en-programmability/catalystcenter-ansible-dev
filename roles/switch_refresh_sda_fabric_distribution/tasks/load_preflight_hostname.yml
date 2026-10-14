@@ -1,0 +1,23 @@
+---
+- name: Match preflighted distribution hostname manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_preflight_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests |
+        selectattr('name', 'equalto', switch_refresh_sda_fabric_distribution_plan.name) |
+        list
+      }}
+
+- name: Validate preflighted distribution hostname manifest match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_preflight_matches | length == 1
+    fail_msg: No unique globally preflighted hostname manifest exists for this cleanup batch.
+
+- name: Load preflighted distribution hostname manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest_file: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_preflight_matches[0].file }}
+    switch_refresh_sda_fabric_distribution_hostname_manifest: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_preflight_matches[0].manifest }}
+  no_log: true
