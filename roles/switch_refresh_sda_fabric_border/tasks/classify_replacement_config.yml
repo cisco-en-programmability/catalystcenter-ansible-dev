@@ -1,0 +1,240 @@
+---
+# Pure semantic classifier for generator-derived replacement configuration.
+# It recognizes an exact base with empty, subset, or exact handoffs. Anything
+# with different base settings or unexpected handoffs is divergent.
+- name: Validate replacement configuration classification request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_replacement_classification_request is mapping
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_request.expected_device_config
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_request.actual_device_config
+        is mapping
+    fail_msg: Replacement classification requires expected and actual device mappings.
+
+- name: Extract replacement base and handoff values
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_expected: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_classification_request.expected_device_config
+      }}
+    switch_refresh_sda_fabric_border_replacement_actual: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_classification_request.actual_device_config
+      }}
+    switch_refresh_sda_fabric_border_replacement_expected_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_classification_request.expected_device_config.borders_settings |
+        default({})
+      }}
+    switch_refresh_sda_fabric_border_replacement_actual_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_classification_request.actual_device_config.borders_settings |
+        default({})
+      }}
+    switch_refresh_sda_fabric_border_replacement_expected_l2_records: []
+    switch_refresh_sda_fabric_border_replacement_actual_l2_records: []
+    switch_refresh_sda_fabric_border_replacement_expected_ip_records: []
+    switch_refresh_sda_fabric_border_replacement_actual_ip_records: []
+  no_log: true
+
+- name: Canonicalize replacement Layer 3 border priority defaults
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_expected_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_expected_settings
+        .layer3_settings | default({}) |
+        dict2items |
+        rejectattr('key', 'equalto', 'border_priority') |
+        list |
+        items2dict
+        if (
+          switch_refresh_sda_fabric_border_replacement_expected_settings
+          .layer3_settings.border_priority | default(10) | int == 10
+        )
+        else
+        switch_refresh_sda_fabric_border_replacement_expected_settings
+        .layer3_settings | default({})
+      }}
+    switch_refresh_sda_fabric_border_replacement_actual_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_settings
+        .layer3_settings | default({}) |
+        dict2items |
+        rejectattr('key', 'equalto', 'border_priority') |
+        list |
+        items2dict
+        if (
+          switch_refresh_sda_fabric_border_replacement_actual_settings
+          .layer3_settings.border_priority | default(10) | int == 10
+        )
+        else
+        switch_refresh_sda_fabric_border_replacement_actual_settings
+        .layer3_settings | default({})
+      }}
+  no_log: true
+
+- name: Canonicalize expected Layer 2 handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_expected_l2_records: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_expected_l2_records +
+        [switch_refresh_sda_fabric_border_replacement_handoff | to_json(sort_keys=true)]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_replacement_expected_settings.layer2_handoff | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_replacement_handoff
+    label: expected-layer2-handoff
+
+- name: Canonicalize actual Layer 2 handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_actual_l2_records: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_l2_records +
+        [switch_refresh_sda_fabric_border_replacement_handoff | to_json(sort_keys=true)]
+      }}
+  loop: >-
+    {{ switch_refresh_sda_fabric_border_replacement_actual_settings.layer2_handoff | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_replacement_handoff
+    label: actual-layer2-handoff
+
+- name: Canonicalize expected IP-transit handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_expected_ip_records: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_expected_ip_records +
+        [switch_refresh_sda_fabric_border_replacement_handoff | to_json(sort_keys=true)]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_replacement_expected_settings.layer3_handoff_ip_transit |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_replacement_handoff
+    label: expected-ip-transit-handoff
+
+- name: Canonicalize actual IP-transit handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_actual_ip_records: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_ip_records +
+        [switch_refresh_sda_fabric_border_replacement_handoff | to_json(sort_keys=true)]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_ip_transit |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_replacement_handoff
+    label: actual-ip-transit-handoff
+
+- name: Derive replacement base and handoff relationships
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_base_matches: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_expected.device_ip |
+        default('') | string ==
+        switch_refresh_sda_fabric_border_replacement_actual.device_ip |
+        default('') | string and
+        (
+          switch_refresh_sda_fabric_border_replacement_expected.device_roles |
+          default([]) | sort
+        ) == (
+          switch_refresh_sda_fabric_border_replacement_actual.device_roles |
+          default([]) | sort
+        ) and
+        switch_refresh_sda_fabric_border_replacement_expected_layer3_settings ==
+        switch_refresh_sda_fabric_border_replacement_actual_layer3_settings
+      }}
+    switch_refresh_sda_fabric_border_replacement_l2_is_subset: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_l2_records |
+        difference(switch_refresh_sda_fabric_border_replacement_expected_l2_records) |
+        length == 0
+      }}
+    switch_refresh_sda_fabric_border_replacement_ip_is_subset: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_ip_records |
+        difference(switch_refresh_sda_fabric_border_replacement_expected_ip_records) |
+        length == 0
+      }}
+    switch_refresh_sda_fabric_border_replacement_sda_is_subset: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_sda_transit |
+        default({}) | length == 0 or
+        (
+          switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_sda_transit |
+          default({})
+        ) == (
+          switch_refresh_sda_fabric_border_replacement_expected_settings.layer3_handoff_sda_transit |
+          default({})
+        )
+      }}
+    switch_refresh_sda_fabric_border_replacement_has_no_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_l2_records | length == 0 and
+        switch_refresh_sda_fabric_border_replacement_actual_ip_records | length == 0 and
+        switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_sda_transit |
+        default({}) | length == 0
+      }}
+    switch_refresh_sda_fabric_border_replacement_handoffs_are_exact: >-
+      {{
+        switch_refresh_sda_fabric_border_replacement_actual_l2_records | sort ==
+        switch_refresh_sda_fabric_border_replacement_expected_l2_records | sort and
+        switch_refresh_sda_fabric_border_replacement_actual_ip_records | sort ==
+        switch_refresh_sda_fabric_border_replacement_expected_ip_records | sort and
+        (
+          switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_sda_transit |
+          default({})
+        ) == (
+          switch_refresh_sda_fabric_border_replacement_expected_settings.layer3_handoff_sda_transit |
+          default({})
+        )
+      }}
+
+- name: Publish replacement configuration classification
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replacement_classification_result:
+      state: >-
+        {{
+          'divergent'
+          if not (switch_refresh_sda_fabric_border_replacement_base_matches | bool)
+          else 'empty'
+          if (switch_refresh_sda_fabric_border_replacement_has_no_handoffs | bool)
+          else 'exact'
+          if (switch_refresh_sda_fabric_border_replacement_handoffs_are_exact | bool)
+          else 'subset'
+          if (
+            switch_refresh_sda_fabric_border_replacement_l2_is_subset | bool and
+            switch_refresh_sda_fabric_border_replacement_ip_is_subset | bool and
+            switch_refresh_sda_fabric_border_replacement_sda_is_subset | bool
+          )
+          else 'divergent'
+        }}
+      base_matches: >-
+        {{ switch_refresh_sda_fabric_border_replacement_base_matches | bool }}
+      exact_match: >-
+        {{
+          switch_refresh_sda_fabric_border_replacement_base_matches | bool and
+          switch_refresh_sda_fabric_border_replacement_handoffs_are_exact | bool
+        }}
+      actual_l2_count: >-
+        {{ switch_refresh_sda_fabric_border_replacement_actual_l2_records | length }}
+      actual_ip_transit_count: >-
+        {{ switch_refresh_sda_fabric_border_replacement_actual_ip_records | length }}
+      actual_sda_transit_count: >-
+        {{
+          1
+          if (
+            switch_refresh_sda_fabric_border_replacement_actual_settings.layer3_handoff_sda_transit |
+            default({}) | length > 0
+          )
+          else 0
+        }}
+  no_log: true

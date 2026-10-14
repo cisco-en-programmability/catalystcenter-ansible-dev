@@ -174,6 +174,31 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
                 self.test_data.get("get_interface_details2_update_interface"),
                 self.test_data.get("update_interface_details_response"),
             ]
+        elif "playbook_update_role_task_failure" in self._testMethodName:
+            self.run_catalystcenter_exec.side_effect = [
+                self.test_data.get("get_device_list1_update_role"),
+                self.test_data.get("get_device_list2_update_role"),
+                self.test_data.get("get_device_list3_update_role"),
+                self.test_data.get("get_device_list4_update_role"),
+                self.test_data.get("update_device_role"),
+                {
+                    "response": {
+                        "progress": "Device role update failed",
+                        "isError": True,
+                        "failureReason": "Catalyst Center rejected the role update",
+                    }
+                },
+            ]
+        elif "playbook_update_role_api_failure" in self._testMethodName:
+            self.run_catalystcenter_exec.side_effect = [
+                self.test_data.get("get_device_list1_update_role"),
+                self.test_data.get("get_device_list2_update_role"),
+                self.test_data.get("get_device_list3_update_role"),
+                self.test_data.get("get_device_list4_update_role"),
+                Exception(
+                    "NCIM90673: 'BORDER_ROUTER' is not a valid role value for the device."
+                ),
+            ]
         elif "playbook_update_role" in self._testMethodName:
             self.run_catalystcenter_exec.side_effect = [
                 self.test_data.get("get_device_list1_update_role"),
@@ -530,6 +555,50 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
         self.assertEqual(
             result.get("msg"),
             "Device(s) '['2.2.2.2']' role updated successfully to '['ACCESS']'",
+        )
+
+    def test_inventory_workflow_manager_playbook_update_role_api_failure(self):
+        """A rejected role update must fail instead of being logged and ignored."""
+        failed_role_config = [dict(self.playbook_update_role[0])]
+        failed_role_config[0]["role"] = "BORDER_ROUTER"
+        set_module_args(
+            dict(
+                catalystcenter_host="1.1.1.1",
+                catalystcenter_username="dummy",
+                catalystcenter_password="dummy",
+                catalystcenter_log=True,
+                catalystcenter_version="2.3.7.6",
+                state="merged",
+                config_verify=False,
+                config=failed_role_config,
+            )
+        )
+
+        result = self.execute_module(changed=False, failed=True)
+
+        self.assertIn("Error while updating device role 'BORDER_ROUTER'", result["msg"])
+        self.assertIn("NCIM90673", result["msg"])
+
+    def test_inventory_workflow_manager_playbook_update_role_task_failure(self):
+        """An asynchronous role task failure must not be overwritten as success."""
+        set_module_args(
+            dict(
+                catalystcenter_host="1.1.1.1",
+                catalystcenter_username="dummy",
+                catalystcenter_password="dummy",
+                catalystcenter_log=True,
+                catalystcenter_version="2.3.7.6",
+                state="merged",
+                config_verify=False,
+                config=self.playbook_update_role,
+            )
+        )
+
+        result = self.execute_module(changed=False, failed=True)
+
+        self.assertEqual(
+            result["msg"],
+            "Device role update get failed because of Catalyst Center rejected the role update",
         )
 
     def test_inventory_workflow_manager_playbook_missing_mand_params(self):
