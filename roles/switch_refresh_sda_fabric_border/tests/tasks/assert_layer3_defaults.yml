@@ -1,0 +1,89 @@
+---
+- name: Build expected and actual generated border records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_defaults_expected:
+      device_ip: 192.0.2.10
+      device_roles: [BORDER_NODE]
+      borders_settings:
+        layer3_settings: >-
+          {{
+            switch_refresh_sda_fabric_border_defaults_base |
+            combine(switch_refresh_sda_fabric_border_defaults_case.expected)
+          }}
+    switch_refresh_sda_fabric_border_defaults_actual:
+      device_ip: 192.0.2.10
+      device_roles: [BORDER_NODE]
+      borders_settings:
+        layer3_settings: >-
+          {{
+            switch_refresh_sda_fabric_border_defaults_base |
+            combine(switch_refresh_sda_fabric_border_defaults_case.actual)
+          }}
+
+- name: Transform captured settings into replacement payloads
+  ansible.builtin.include_tasks: ../../tasks/build_replacement_configs.yml
+  vars:
+    switch_refresh_sda_fabric_border_transform_request:
+      fabric_name: Global/Test/Fabric
+      new:
+        management_ip: 192.0.2.10
+      interface_mappings: []
+      original_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_defaults_expected |
+          combine({'device_ip': '198.51.100.10'})
+        }}
+
+- name: Verify captured settings stay intact and replacement settings preserve intent
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_transform_result.original_device_config ==
+        switch_refresh_sda_fabric_border_defaults_expected |
+        combine({'device_ip': '198.51.100.10'})
+      - >-
+        switch_refresh_sda_fabric_border_transform_result
+        .base_new_device_config.borders_settings.layer3_settings ==
+        switch_refresh_sda_fabric_border_defaults_base |
+        combine(
+          switch_refresh_sda_fabric_border_defaults_case.manager |
+          default(switch_refresh_sda_fabric_border_defaults_case.expected)
+        )
+      - >-
+        switch_refresh_sda_fabric_border_transform_result.expected_new_device_config ==
+        switch_refresh_sda_fabric_border_transform_result.base_new_device_config
+    fail_msg: "Replacement payload changed intent for {{ switch_refresh_sda_fabric_border_defaults_case.name }}."
+
+# Compare the original captured settings as well, covering existing manifests
+# that still contain the empty field rather than only freshly normalized payloads.
+- name: Compare generated border settings
+  ansible.builtin.include_tasks: ../../tasks/verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: "{{ switch_refresh_sda_fabric_border_defaults_expected }}"
+      actual_device_config: "{{ switch_refresh_sda_fabric_border_defaults_actual }}"
+      context: "{{ switch_refresh_sda_fabric_border_defaults_case.name }}"
+      require_empty_handoffs: true
+      fail_on_mismatch: "{{ switch_refresh_sda_fabric_border_defaults_case.match }}"
+
+- name: Classify generated border settings for cutover
+  ansible.builtin.include_tasks: ../../tasks/classify_replacement_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replacement_classification_request:
+      expected_device_config: "{{ switch_refresh_sda_fabric_border_defaults_expected }}"
+      actual_device_config: "{{ switch_refresh_sda_fabric_border_defaults_actual }}"
+
+- name: Verify both comparison paths agree with the expected semantic result
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_verify_result.match ==
+        switch_refresh_sda_fabric_border_defaults_case.match
+      - switch_refresh_sda_fabric_border_verify_result.handoffs_empty | bool
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result.exact_match ==
+        switch_refresh_sda_fabric_border_defaults_case.match
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result.state ==
+        ('empty' if switch_refresh_sda_fabric_border_defaults_case.match else 'divergent')
+    fail_msg: "Unexpected comparison result for {{ switch_refresh_sda_fabric_border_defaults_case.name }}."

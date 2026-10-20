@@ -10,6 +10,7 @@
       borders_settings:
         layer3_settings:
           local_autonomous_system_number: "65001"
+          custom_bgp_router_id: ""
         layer2_handoff:
           - interface_name: HundredGigE1/0/1
             internal_vlan_id: 1001

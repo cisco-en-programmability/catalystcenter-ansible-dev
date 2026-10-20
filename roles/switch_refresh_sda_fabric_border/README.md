@@ -198,6 +198,9 @@ until both barriers pass.
   rejected because replay could reallocate the captured peer addresses
 - Manager-compatible priority handling: default readback priority `10` is
   omitted from mutation payloads, while explicit priorities `1..9` are kept
+- Empty `custom_bgp_router_id` overrides are omitted from replacement payloads
+  and treated as absent during verification and cutover classification;
+  explicit router IDs are preserved and compared
 - Replacement inventory identity, reachability, and destination interfaces
 - Replacement base fabric configuration contains no handoff before cutover
 - All cutover manifests are protected and validated before the first deletion
@@ -251,6 +254,3 @@ symlinked manifests fail closed.
 - `playbooks/switch_refresh_sda_fabric_border_prepare.yml`
 - `playbooks/switch_refresh_sda_fabric_border_cutover.yml`
 - `playbooks/vars/switch_refresh_sda_fabric_border_usecase.yml`
-
-See [FLOW_GUIDE.md](FLOW_GUIDE.md) for the complete state model, data
-transformation, recovery cases, role calls, and operational procedure.

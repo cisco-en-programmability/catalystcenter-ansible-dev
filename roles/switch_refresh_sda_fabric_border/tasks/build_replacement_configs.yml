@@ -154,6 +154,21 @@
   no_log: true
   when: switch_refresh_sda_fabric_border_transform_has_border_role | bool
 
+# An empty router ID means no override; the controller can omit it on readback.
+# Match the exact key/value pair so explicit IDs and other falsy settings survive.
+- name: Omit empty custom BGP router ID from replacement settings
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_transform_manager_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_transform_manager_layer3_settings |
+        dict2items |
+        reject('equalto', {'key': 'custom_bgp_router_id', 'value': ''}) |
+        list |
+        items2dict
+      }}
+  no_log: true
+  when: switch_refresh_sda_fabric_border_transform_has_border_role | bool
+
 - name: Validate captured L2 handoff records
   ansible.builtin.assert:
     that:
