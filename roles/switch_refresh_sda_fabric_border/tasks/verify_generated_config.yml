@@ -101,6 +101,27 @@
       }}
   no_log: true
 
+# Normalize only the empty router-ID override, preserving every explicit value.
+- name: Canonicalize empty custom BGP router IDs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_verify_expected_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_expected_layer3_settings |
+        dict2items |
+        reject('equalto', {'key': 'custom_bgp_router_id', 'value': ''}) |
+        list |
+        items2dict
+      }}
+    switch_refresh_sda_fabric_border_verify_actual_layer3_settings: >-
+      {{
+        switch_refresh_sda_fabric_border_verify_actual_layer3_settings |
+        dict2items |
+        reject('equalto', {'key': 'custom_bgp_router_id', 'value': ''}) |
+        list |
+        items2dict
+      }}
+  no_log: true
+
 - name: Validate expected generated border record shape
   ansible.builtin.assert:
     that:
