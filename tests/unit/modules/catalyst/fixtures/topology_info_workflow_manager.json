@@ -1,0 +1,109 @@
+{
+  "playbook_all_topologies": [
+    {
+      "requested_info": [
+        "site_topology",
+        "layer_2_topology",
+        "layer_3_topology",
+        "physical_topology",
+        "network_health",
+        "vlan_details"
+      ],
+      "vlan_ids": [
+        "Vlan10",
+        "Vlan20",
+        "Vlan10"
+      ],
+      "topology_types": [
+        "OSPF",
+        "ISIS",
+        "OSPF"
+      ],
+      "node_type": "device",
+      "timestamp": 0
+    }
+  ],
+  "site_topology": {
+    "response": {
+      "sites": [
+        {
+          "id": "site-1",
+          "name": "Global",
+          "groupNameHierarchy": "Global",
+          "parentId": null
+        }
+      ]
+    },
+    "version": "1.0"
+  },
+  "layer_2_vlan_10": {
+    "response": {
+      "id": "l2-vlan-10",
+      "nodes": [],
+      "links": []
+    },
+    "version": "1.0"
+  },
+  "layer_2_vlan_20": {
+    "response": {
+      "id": "l2-vlan-20",
+      "nodes": [],
+      "links": []
+    },
+    "version": "1.0"
+  },
+  "layer_3_ospf": {
+    "response": {
+      "id": "l3-ospf",
+      "nodes": [],
+      "links": []
+    },
+    "version": "1.0"
+  },
+  "layer_3_isis": {
+    "response": {
+      "id": "l3-isis",
+      "nodes": [],
+      "links": []
+    },
+    "version": "1.0"
+  },
+  "physical_topology": {
+    "response": {
+      "id": "physical",
+      "nodes": [],
+      "links": []
+    },
+    "version": "1.0"
+  },
+  "network_health": {
+    "response": [
+      {
+        "entity": "All",
+        "healthScore": 100,
+        "timeinMillis": 0,
+        "totalCount": 1,
+        "goodCount": 1,
+        "fairCount": 0,
+        "badCount": 0,
+        "noHealthCount": 0,
+        "unmonCount": 0,
+        "maintenanceModeCount": 0
+      }
+    ],
+    "version": "1.0"
+  },
+  "vlan_details": {
+    "response": [
+      "Vlan10",
+      "Vlan20"
+    ],
+    "version": "1.0"
+  },
+  "empty_site_topology": {
+    "response": {
+      "sites": []
+    },
+    "version": "1.0"
+  }
+}
