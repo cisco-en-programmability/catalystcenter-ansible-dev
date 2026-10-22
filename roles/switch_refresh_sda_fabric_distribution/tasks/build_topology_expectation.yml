@@ -1,0 +1,42 @@
+---
+- name: Match resolved peer for distribution topology expectation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_peer_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_peer_records |
+        selectattr(
+          'management_ip', 'equalto',
+          switch_refresh_sda_fabric_distribution_topology_link.peer_management_ip
+        ) | list
+      }}
+
+- name: Validate resolved peer topology match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_topology_peer_matches | length == 1
+    fail_msg: >-
+      Unable to associate exactly one pinned peer identity with link to
+      {{ switch_refresh_sda_fabric_distribution_topology_link.peer_management_ip }}.
+
+- name: Add exact distribution topology expectation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_expectations: >-
+      {{
+        switch_refresh_sda_fabric_distribution_topology_expectations + [
+          {
+            'distribution_management_ip':
+              switch_refresh_sda_fabric_distribution_topology_distribution_ip,
+            'distribution_device_id':
+              switch_refresh_sda_fabric_distribution_topology_distribution_id,
+            'distribution_interface_name':
+              switch_refresh_sda_fabric_distribution_topology_distribution_interface,
+            'peer_management_ip':
+              switch_refresh_sda_fabric_distribution_topology_link.peer_management_ip,
+            'peer_device_id':
+              switch_refresh_sda_fabric_distribution_topology_peer_matches[0].device_id,
+            'peer_interface_name':
+              switch_refresh_sda_fabric_distribution_topology_peer_interface,
+            'expected_state': switch_refresh_sda_fabric_distribution_topology_state
+          }
+        ]
+      }}

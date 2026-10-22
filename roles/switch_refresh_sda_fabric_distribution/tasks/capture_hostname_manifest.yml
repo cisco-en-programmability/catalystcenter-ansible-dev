@@ -1,0 +1,284 @@
+---
+- name: Derive durable distribution hostname manifest path and fingerprint
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest_file: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir ~ '/' ~
+        switch_refresh_sda_fabric_distribution_plan.file_safe_name ~
+        '_hostname_transfer.yml'
+      }}
+    switch_refresh_sda_fabric_distribution_hostname_input_fingerprint: >-
+      {{
+        {
+          'batch': switch_refresh_sda_fabric_distribution_plan.name,
+          'catalystcenter_host': catalystcenter_host,
+          'site': switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy,
+          'mappings': switch_refresh_sda_fabric_distribution_plan.mappings
+        } | to_json | hash('sha256')
+      }}
+    switch_refresh_sda_fabric_distribution_hostname_entries: []
+
+- name: Build durable distribution hostname transfer entries
+  ansible.builtin.include_tasks:
+    file: build_hostname_entry.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_mapping
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_mapping.old_management_ip }}"
+
+- name: Validate distribution hostname transfer uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entries |
+        map(attribute='desired_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entries |
+        map(attribute='new_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_entries | length
+    fail_msg: >-
+      Captured old hostnames and replacement UUIDs must be unique within a batch.
+
+- name: Query captured old hostname ownership before cleanup
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    hostname:
+      - "{{ switch_refresh_sda_fabric_distribution_old_hostname_owner_entry.desired_hostname }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_old_hostname_owners
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_hostname_owner_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_old_hostname_owner_entry.desired_hostname }}"
+  no_log: true
+
+- name: Validate captured old hostname ownership results
+  ansible.builtin.include_tasks:
+    file: validate_old_hostname_owner.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_old_hostname_owner_entry: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_hostname_owners.results[
+          switch_refresh_sda_fabric_distribution_old_hostname_index
+        ].switch_refresh_sda_fabric_distribution_old_hostname_owner_entry
+      }}
+    switch_refresh_sda_fabric_distribution_old_hostname_owner_result: >-
+      {{
+        switch_refresh_sda_fabric_distribution_old_hostname_owners.results[
+          switch_refresh_sda_fabric_distribution_old_hostname_index
+        ]
+      }}
+  loop: "{{ range(0, switch_refresh_sda_fabric_distribution_hostname_entries | length) | list }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_hostname_index
+    label: captured-hostname-owner
+
+- name: Build pending distribution hostname transfer manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_expected_hostname_manifest:
+      schema_version: 1
+      role: switch_refresh_sda_fabric_distribution
+      catalystcenter_host: "{{ catalystcenter_host }}"
+      batch_name: "{{ switch_refresh_sda_fabric_distribution_plan.name }}"
+      fabric_site_name_hierarchy: >-
+        {{ switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy }}
+      input_fingerprint: >-
+        {{ switch_refresh_sda_fabric_distribution_hostname_input_fingerprint }}
+      status: pending
+      entries: "{{ switch_refresh_sda_fabric_distribution_hostname_entries }}"
+
+- name: Inspect durable distribution hostname manifest directory
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir }}"
+    follow: false
+  register: switch_refresh_sda_fabric_distribution_hostname_manifest_dir_before
+
+- name: Validate durable distribution hostname manifest directory path
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_manifest_dir_before.stat.exists |
+        default(false) | bool) or
+        (
+          switch_refresh_sda_fabric_distribution_hostname_manifest_dir_before.stat.isdir |
+          default(false) and
+          not (switch_refresh_sda_fabric_distribution_hostname_manifest_dir_before.stat.islnk |
+          default(false))
+        )
+    fail_msg: >-
+      Refusing to use a hostname manifest directory that is not a real directory:
+      {{ switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir }}.
+
+- name: Create durable distribution hostname manifest directory
+  ansible.builtin.file:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Inspect secured distribution hostname manifest directory
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir }}"
+    follow: false
+  register: switch_refresh_sda_fabric_distribution_hostname_manifest_dir_after
+
+- name: Validate secured distribution hostname manifest directory
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_manifest_dir_after.stat.isdir | default(false)
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_manifest_dir_after.stat.islnk |
+        default(false))
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest_dir_after.stat.mode |
+        default('') == '0700'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest_dir_after.stat.writeable |
+        default(false)
+    fail_msg: >-
+      The hostname manifest directory must be a writable non-link directory
+      secured with mode 0700.
+
+- name: Inspect existing distribution hostname manifest without following links
+  ansible.builtin.stat:
+    path: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    follow: false
+  register: switch_refresh_sda_fabric_distribution_hostname_manifest_stat
+
+- name: Validate existing distribution hostname manifest path
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.exists | bool) or
+        (
+          switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.isreg |
+          default(false) and
+          not (switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.islnk |
+          default(false)) and
+          switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.mode |
+          default('') == '0600'
+        )
+    fail_msg: >-
+      Refusing to use a hostname manifest path that is not a regular file:
+      {{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}.
+
+- name: Load existing distribution hostname manifest
+  ansible.builtin.include_vars:
+    file: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    name: switch_refresh_sda_fabric_distribution_loaded_hostname_document
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.exists | bool
+
+- name: Validate existing distribution hostname manifest identity
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.schema_version |
+        int == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.role ==
+        'switch_refresh_sda_fabric_distribution'
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.batch_name ==
+        switch_refresh_sda_fabric_distribution_plan.name
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.catalystcenter_host ==
+        catalystcenter_host
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.input_fingerprint ==
+        switch_refresh_sda_fabric_distribution_hostname_input_fingerprint
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='new_device_id') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='new_device_id') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='old_device_id') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='old_device_id') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='new_management_ip') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='new_management_ip') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='old_management_ip') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='old_management_ip') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='new_serial_number') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='new_serial_number') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='old_serial_number') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='old_serial_number') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='desired_hostname') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='desired_hostname') | list
+      - >-
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest.entries |
+        map(attribute='submitted_hostname') | list ==
+        switch_refresh_sda_fabric_distribution_expected_hostname_manifest.entries |
+        map(attribute='submitted_hostname') | list
+    fail_msg: >-
+      Existing hostname manifest does not match the current batch fingerprint
+      or pinned device identities. Cleanup failed closed.
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.exists | bool
+
+- name: Persist new pending distribution hostname manifest before cleanup
+  ansible.builtin.copy:
+    dest: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    content: >-
+      {{ {'manifest': switch_refresh_sda_fabric_distribution_expected_hostname_manifest} |
+      to_nice_yaml(indent=2) }}
+    mode: "0600"
+  when: not (switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.exists | bool)
+  no_log: true
+
+- name: Select active distribution hostname manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest: >-
+      {{
+        switch_refresh_sda_fabric_distribution_loaded_hostname_document.manifest
+        if (switch_refresh_sda_fabric_distribution_hostname_manifest_stat.stat.exists | bool)
+        else switch_refresh_sda_fabric_distribution_expected_hostname_manifest
+      }}
+  no_log: true
+
+- name: Validate active distribution hostname manifest before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_hostname_manifest.yml
+    apply:
+      tags: [always]
+
+- name: Save preflighted distribution hostname manifest
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_preflight_manifests: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests + [
+          {
+            'name': switch_refresh_sda_fabric_distribution_plan.name,
+            'file': switch_refresh_sda_fabric_distribution_hostname_manifest_file,
+            'manifest': switch_refresh_sda_fabric_distribution_hostname_manifest
+          }
+        ]
+      }}
+  no_log: true

@@ -1,0 +1,19 @@
+---
+- name: Validate desired hostname owner immutable identity
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_owner_record is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_owner_record.id |
+        default(
+          switch_refresh_sda_fabric_distribution_hostname_owner_record.instanceUuid |
+          default('')
+        ) == switch_refresh_sda_fabric_distribution_hostname_target_entry.new_device_id
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_owner_record.hostname |
+        default('') | lower ==
+        switch_refresh_sda_fabric_distribution_hostname_target_entry.desired_hostname | lower
+    fail_msg: >-
+      Desired hostname {{
+      switch_refresh_sda_fabric_distribution_hostname_target_entry.desired_hostname }}
+      is owned by a different inventory device.

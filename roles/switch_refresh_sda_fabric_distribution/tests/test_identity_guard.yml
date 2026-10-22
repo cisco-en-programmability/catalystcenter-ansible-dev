@@ -1,0 +1,104 @@
+---
+- name: Validate globally resolved distribution identities offline
+  hosts: safety_test
+  gather_facts: false
+
+  tasks:
+    - name: Accept distinct resolved old distribution identities
+      ansible.builtin.include_tasks: ../tasks/validate_resolved_plans.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_validated_plans:
+          - mappings:
+              - old_identity_key: hostname:old-distribution-a.example.test
+          - mappings:
+              - old_identity_key: serial_number:OLD-DIST-B
+        switch_refresh_sda_fabric_distribution_resolved_plans:
+          - name: distribution-refresh-a
+            new_management_ips:
+              - "192.0.2.20"
+            links:
+              - peer_management_ip: "192.0.2.10"
+            resolved_mappings:
+              - old_identity_key: hostname:old-distribution-a.example.test
+                old_device_id: old-device-uuid-a
+                old_management_ip: "198.51.100.20"
+          - name: distribution-refresh-b
+            new_management_ips:
+              - "192.0.2.21"
+            links:
+              - peer_management_ip: "192.0.2.11"
+            resolved_mappings:
+              - old_identity_key: serial_number:OLD-DIST-B
+                old_device_id: old-device-uuid-b
+                old_management_ip: "198.51.100.21"
+
+    - name: Reject selector aliases that resolve to the same old device
+      block:
+        - name: Evaluate duplicate resolved old identity aliases
+          ansible.builtin.include_tasks: ../tasks/validate_resolved_plans.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_validated_plans:
+              - mappings:
+                  - old_identity_key: hostname:old-distribution.example.test
+              - mappings:
+                  - old_identity_key: serial_number:OLD-DIST-SERIAL
+            switch_refresh_sda_fabric_distribution_resolved_plans:
+              - name: distribution-refresh-hostname-selector
+                new_management_ips:
+                  - "192.0.2.20"
+                links:
+                  - peer_management_ip: "192.0.2.10"
+                resolved_mappings:
+                  - old_identity_key: hostname:old-distribution.example.test
+                    old_device_id: shared-old-device-uuid
+                    old_management_ip: "198.51.100.20"
+              - name: distribution-refresh-serial-selector
+                new_management_ips:
+                  - "192.0.2.21"
+                links:
+                  - peer_management_ip: "192.0.2.11"
+                resolved_mappings:
+                  - old_identity_key: serial_number:OLD-DIST-SERIAL
+                    old_device_id: shared-old-device-uuid
+                    old_management_ip: "198.51.100.20"
+
+        - name: Fail when duplicate resolved old identity was accepted
+          ansible.builtin.fail:
+            msg: Two selectors resolving to the same old device unexpectedly passed.
+      rescue:
+        - name: Confirm duplicate resolved identity was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate globally resolved distribution refresh identities'
+
+    - name: Reject an old device that resolves to a declared peer
+      block:
+        - name: Evaluate resolved old and peer identity overlap
+          ansible.builtin.include_tasks: ../tasks/validate_resolved_plans.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_validated_plans:
+              - mappings:
+                  - old_identity_key: hostname:old-distribution.example.test
+            switch_refresh_sda_fabric_distribution_resolved_plans:
+              - name: overlapping-old-and-peer
+                new_management_ips:
+                  - "192.0.2.20"
+                links:
+                  - peer_management_ip: "198.51.100.20"
+                resolved_mappings:
+                  - old_identity_key: hostname:old-distribution.example.test
+                    old_device_id: old-device-uuid
+                    old_management_ip: "198.51.100.20"
+
+        - name: Fail when resolved old and peer identity overlap was accepted
+          ansible.builtin.fail:
+            msg: A resolved old device unexpectedly identified a declared peer.
+      rescue:
+        - name: Confirm old and peer identity overlap was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate globally resolved distribution refresh identities'

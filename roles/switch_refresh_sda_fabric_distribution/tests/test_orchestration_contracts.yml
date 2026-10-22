@@ -1,0 +1,611 @@
+---
+- name: Validate distribution refresh orchestration contracts offline
+  hosts: plan_test
+  gather_facts: false
+
+  tasks:
+    - name: Load prepare orchestration contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_prepare_source: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/prepare_batch.yml'
+            )
+          }}
+        switch_refresh_sda_fabric_distribution_prepare_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/prepare_batch.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_nonfabric_source: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/validate_nonfabric.yml'
+            )
+          }}
+        switch_refresh_sda_fabric_distribution_cleanup_source: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/cleanup_batch.yml'
+            )
+          }}
+        switch_refresh_sda_fabric_distribution_cleanup_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/cleanup_batch.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_resolve_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/resolve_batch.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_main_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/main.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_wait_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/wait_inventory.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_role_update_wait_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/wait_inventory_role_update.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_provision_validation_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/validate_provisioning.yml'
+            ) |
+            from_yaml
+          }}
+
+    - name: Derive prepare orchestration contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_prepare_task_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_add_links_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Add replacement distribution links'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_onboarding_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Wait for onboarded replacement distribution inventory records'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_role_update_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Assign protected distribution inventory role to onboarded replacements'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_role_update_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Wait for submitted distribution inventory role updates'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_role_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Verify replacement distribution inventory role and readiness'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_nonfabric_dispatch_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_prepare_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Verify replacements have no SDA fabric-device enrollment'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_cleanup_task_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_cleanup_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_resolve_task_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_resolve_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_main_task_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_main_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_delete_links_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_cleanup_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Delete old distribution links'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_unprovision_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_cleanup_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Unprovision old distribution devices'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_delete_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_cleanup_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Remove old distribution devices from inventory'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_wait_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_inventory_wait_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Poll replacement distribution inventory readiness'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_inventory_role_update_poll_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_inventory_role_update_wait_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Poll distribution inventory role update task'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_provision_validation_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_provision_validation_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Poll distribution provisioning state'
+            ) |
+            first
+          }}
+
+    - name: Verify prepare safety ordering
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Discover replacement distribution devices'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Wait for onboarded replacement distribution inventory records'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Onboard replacement distribution devices with LAN Automation'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Wait for onboarded replacement distribution inventory records'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Wait for onboarded replacement distribution inventory records'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Assign protected distribution inventory role to onboarded replacements'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Assign protected distribution inventory role to onboarded replacements'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Wait for submitted distribution inventory role updates'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Wait for submitted distribution inventory role updates'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacement distribution inventory role and readiness'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacement distribution inventory role and readiness'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Provision replacement distribution devices to the fabric site'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Provision replacement distribution devices to the fabric site'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacement distribution provisioning'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Validate prepared replacement distribution state'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacements have no SDA fabric-device enrollment'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacements have no SDA fabric-device enrollment'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Add replacement distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Add replacement distribution links'
+            ) <
+            switch_refresh_sda_fabric_distribution_prepare_task_names.index(
+              'Verify replacement distribution links are exactly active'
+            )
+
+    - name: Verify replacement link-add dispatch contract
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_add_links_task[
+              'ansible.builtin.include_role'
+            ].name == 'lan_automation'
+          - >-
+            switch_refresh_sda_fabric_distribution_add_links_task.vars.lan_automation_state ==
+            'merged'
+          - >-
+            switch_refresh_sda_fabric_distribution_add_links_task.vars.lan_automation_config_verify
+            is sameas true
+          - >-
+            'switch_refresh_sda_fabric_distribution_plan.link_add_config' in
+            (
+              switch_refresh_sda_fabric_distribution_add_links_task.vars.lan_automation_config |
+              string
+            )
+
+    - name: Verify replacement remains outside SDA fabric enrollment
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_nonfabric_dispatch_task[
+              'ansible.builtin.include_tasks'
+            ].file == 'validate_nonfabric.yml'
+          - >-
+            'cisco.catalystcenter.sda_fabric_devices_info' in
+            switch_refresh_sda_fabric_distribution_nonfabric_source
+          - >-
+            'response |' in switch_refresh_sda_fabric_distribution_nonfabric_source
+          - >-
+            'length == 0' in switch_refresh_sda_fabric_distribution_nonfabric_source
+          - >-
+            'sda_fabric_devices_workflow_manager' not in
+            switch_refresh_sda_fabric_distribution_prepare_source
+
+    - name: Verify inventory and provisioning convergence contracts
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_onboarding_wait_task.vars.switch_refresh_sda_fabric_distribution_inventory_expected_role ==
+            ''
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_role_wait_task.vars.switch_refresh_sda_fabric_distribution_inventory_expected_role ==
+            'DISTRIBUTION'
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_role_update_task[
+              'cisco.catalystcenter.network_device_update_role'
+            ].role == 'DISTRIBUTION'
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_role_update_task[
+              'cisco.catalystcenter.network_device_update_role'
+            ].roleSource == 'MANUAL'
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_role_update_wait_task[
+              'ansible.builtin.include_tasks'
+            ].file == 'wait_inventory_role_update.yml'
+          - >-
+            'cisco.catalystcenter.task_info' in
+            switch_refresh_sda_fabric_distribution_inventory_role_update_poll_task
+          - >-
+            'isError' in
+            (
+              switch_refresh_sda_fabric_distribution_inventory_role_update_poll_task.until |
+              string
+            )
+          - >-
+            'endTime' in
+            (
+              switch_refresh_sda_fabric_distribution_inventory_role_update_poll_task.until |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_distribution_inventory_readiness_timeout' in
+            (
+              switch_refresh_sda_fabric_distribution_inventory_role_update_poll_task.retries |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_distribution_onboarded_record' in
+            (
+              switch_refresh_sda_fabric_distribution_inventory_role_update_task[
+                'cisco.catalystcenter.network_device_update_role'
+              ].id |
+              string
+            )
+          - >-
+            'managementIpAddress' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.until | string)
+          - >-
+            '.id' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.until | string)
+          - >-
+            'inventory_expected_role' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.until | string)
+          - >-
+            'REACHABLE' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.until | string)
+          - >-
+            'switch_refresh_sda_fabric_distribution_inventory_readiness_timeout' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.retries | string)
+          - >-
+            'switch_refresh_sda_fabric_distribution_inventory_readiness_poll_interval' in
+            (switch_refresh_sda_fabric_distribution_inventory_wait_task.delay | string)
+          - >-
+            'deviceManagementIpAddress' in
+            (
+              switch_refresh_sda_fabric_distribution_provision_validation_task.until |
+              string
+            )
+          - >-
+            'siteNameHierarchy' in
+            (
+              switch_refresh_sda_fabric_distribution_provision_validation_task.until |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_distribution_provision_validation_timeout' in
+            (
+              switch_refresh_sda_fabric_distribution_provision_validation_task.retries |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_distribution_provision_validation_poll_interval' in
+            (
+              switch_refresh_sda_fabric_distribution_provision_validation_task.delay |
+              string
+            )
+
+    - name: Verify complete preflight occurs before any phase mutation
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Resolve and pin every distribution refresh identity before mutation'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate all resolved distribution plans before mutation'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate all resolved distribution plans before mutation'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Prepare replacement distribution batches'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate all resolved distribution plans before mutation'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Preflight all durable distribution hostname manifests before cleanup'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Preflight all durable distribution hostname manifests before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate global distribution hostname transfer plan'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate global distribution hostname transfer plan'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Clean up old distribution batches'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Preflight all distribution hostname recovery manifests'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate global distribution hostname recovery plan'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Validate global distribution hostname recovery plan'
+            ) <
+            switch_refresh_sda_fabric_distribution_main_task_names.index(
+              'Apply preflighted distribution hostname recovery manifests'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_resolve_task_names.index(
+              'Verify old distribution topology before mutation'
+            ) <
+            switch_refresh_sda_fabric_distribution_resolve_task_names.index(
+              'Verify replacement topology before old-device cleanup'
+            )
+
+    - name: Verify cleanup safety ordering
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Revalidate old replacement and peer immutable identities'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Revalidate replacements have no SDA fabric-device enrollment'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Revalidate replacement provisioning immediately before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Revalidate peer fabric roles immediately before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Revalidate old and new exact topology immediately before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Load globally preflighted distribution hostname manifest'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Load globally preflighted distribution hostname manifest'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Delete old distribution links'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Verify replacement links remain exactly active after old-link deletion'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Verify replacement links remain exactly active after old-link deletion'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Unprovision old distribution devices'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Unprovision old distribution devices'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Remove old distribution devices from inventory'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Remove old distribution devices from inventory'
+            ) <
+            switch_refresh_sda_fabric_distribution_cleanup_task_names.index(
+              'Transfer captured distribution hostnames'
+            )
+
+    - name: Verify cleanup mutation payload contracts
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_delete_links_task[
+              'ansible.builtin.include_role'
+            ].name == 'lan_automation'
+          - >-
+            switch_refresh_sda_fabric_distribution_delete_links_task.vars.lan_automation_config_verify
+            is sameas true
+          - >-
+            'resolved_delete_config' in
+            (
+              switch_refresh_sda_fabric_distribution_delete_links_task.vars.lan_automation_config |
+              string
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_unprovision_task[
+              'ansible.builtin.include_role'
+            ].name == 'provision'
+          - >-
+            switch_refresh_sda_fabric_distribution_unprovision_task.vars.provision_state ==
+            'deleted'
+          - >-
+            switch_refresh_sda_fabric_distribution_unprovision_task.vars.provision_config_verify
+            is sameas true
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_delete_task[
+              'ansible.builtin.include_role'
+            ].name == 'inventory'
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_delete_task.vars.inventory_state ==
+            'deleted'
+          - >-
+            switch_refresh_sda_fabric_distribution_inventory_delete_task.vars.inventory_config_verify
+            is sameas true
+          - >-
+            "expected_state': 'absent" not in
+            switch_refresh_sda_fabric_distribution_cleanup_source

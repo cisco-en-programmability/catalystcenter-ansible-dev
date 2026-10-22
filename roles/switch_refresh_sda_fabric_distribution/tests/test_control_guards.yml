@@ -1,0 +1,141 @@
+---
+- name: Validate distribution refresh control guards offline
+  hosts: safety_test
+  gather_facts: false
+  vars_files:
+    - ../defaults/main.yml
+
+  tasks:
+    - name: Reject cleanup without explicit approval
+      block:
+        - name: Start unapproved old-device cleanup
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: cleanup_old
+            switch_refresh_sda_fabric_distribution_cleanup_old: false
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when unapproved cleanup was accepted
+          ansible.builtin.fail:
+            msg: Old-device cleanup unexpectedly ran without explicit approval.
+      rescue:
+        - name: Confirm unapproved cleanup stopped at its guard
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Require explicit old distribution cleanup approval'
+
+    - name: Reject destructive approval during prepare
+      block:
+        - name: Start prepare with destructive cleanup enabled
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: prepare
+            switch_refresh_sda_fabric_distribution_cleanup_old: true
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when prepare accepted destructive approval
+          ansible.builtin.fail:
+            msg: Prepare unexpectedly accepted cleanup_old=true.
+      rescue:
+        - name: Confirm destructive prepare stopped at its guard
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Require explicit old distribution cleanup approval'
+
+    - name: Accept explicitly approved cleanup before batch validation
+      block:
+        - name: Start approved cleanup with a deliberately invalid batch
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: cleanup_old
+            switch_refresh_sda_fabric_distribution_cleanup_old: true
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when deliberately invalid batch passed
+          ansible.builtin.fail:
+            msg: The deliberately invalid safety fixture unexpectedly passed.
+      rescue:
+        - name: Confirm approval passed and batch validation stopped execution
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution refresh batch structure'
+
+    - name: Accept non-destructive hostname manifest recovery mode
+      block:
+        - name: Start manifest recovery with a deliberately invalid batch
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: cleanup_old
+            switch_refresh_sda_fabric_distribution_cleanup_old: false
+            switch_refresh_sda_fabric_distribution_hostname_transfer_enabled: true
+            switch_refresh_sda_fabric_distribution_hostname_transfer_resume_from_manifest: true
+            switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir: >-
+              /var/lib/catalystcenter/distribution-refresh
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when deliberately invalid recovery batch passed
+          ansible.builtin.fail:
+            msg: The deliberately invalid recovery fixture unexpectedly passed.
+      rescue:
+        - name: Confirm manifest recovery controls passed before batch validation
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution refresh batch structure'
+
+    - name: Reject hostname transfer without a durable absolute manifest path
+      block:
+        - name: Start hostname transfer with a relative manifest directory
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: cleanup_old
+            switch_refresh_sda_fabric_distribution_cleanup_old: true
+            switch_refresh_sda_fabric_distribution_hostname_transfer_enabled: true
+            switch_refresh_sda_fabric_distribution_hostname_transfer_manifest_dir: relative/path
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when relative manifest directory was accepted
+          ansible.builtin.fail:
+            msg: Hostname transfer unexpectedly accepted a relative manifest directory.
+      rescue:
+        - name: Confirm unsafe manifest directory stopped at safety validation
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution refresh safety controls'
+
+    - name: Reject inventory deletion without unprovisioning
+      block:
+        - name: Start cleanup with unprovisioning disabled
+          ansible.builtin.include_tasks: ../tasks/main.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_phase: cleanup_old
+            switch_refresh_sda_fabric_distribution_cleanup_old: true
+            switch_refresh_sda_fabric_distribution_cleanup_unprovision_enabled: false
+            switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled: true
+            switch_refresh_sda_fabric_distribution_batches:
+              - invalid_placeholder: true
+
+        - name: Fail when inventory deletion without unprovisioning was accepted
+          ansible.builtin.fail:
+            msg: Cleanup unexpectedly accepted inventory deletion without unprovisioning.
+      rescue:
+        - name: Confirm unsafe cleanup dependency stopped at safety validation
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate distribution refresh safety controls'
