@@ -44,7 +44,9 @@
         length == 1
       - >-
         (
-          switch_refresh_sda_fabric_border_cutover_interface_match_result.ansible_facts.switch_refresh_sda_fabric_border_cutover_interface_matches[0].interface_details |
+          switch_refresh_sda_fabric_border_cutover_interface_match_result.ansible_facts[
+            'switch_refresh_sda_fabric_border_cutover_interface_matches'
+          ][0].interface_details |
           default([]) | type_debug
         ) == 'list'
     fail_msg: >-
