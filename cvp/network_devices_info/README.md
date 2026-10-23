@@ -74,13 +74,25 @@ Each entry in `network_devices_info_details` contains a `network_devices` list w
 | `software_version` | string | No | - | Filter by software release version (e.g., "17.12.1") |
 | `os_type` | string | No | - | Filter by operating system type (see examples below) |
 | `device_identifier` | list | No | - | List of device identification criteria for granular filtering |
-| `timeout` | integer | No | 120 | Maximum time in seconds to wait for operations (1-3600) |
+| `timeout` | integer | No | 120 / 1200 | Positive lookup timeout, or readiness timeout when a readiness field is supplied |
+| `collectionStatus` | string | No | - | Expected collection status; enables readiness polling |
+| `managementState` | string | No | - | Expected management state; enables readiness polling |
 | `retries` | integer | No | 3 | Number of retry attempts for failed operations (0-10) |
 | `interval` | integer | No | 10 | Time in seconds between retry attempts (1-300) |
 | `requested_info` | list | No | all | List of device information types to retrieve (see table below) |
 | `output_file_info` | dict | No | - | Controls file output generation for retrieval results |
 
 **Note**: At least one filtering criterion must be provided (site_hierarchy, device_type, device_role, device_family, software_version, os_type, or device_identifier)
+
+Supplying either readiness field enables validation of that field for all selected
+devices. Supplying both requires both to match. Readiness polling runs every
+10 seconds with a default timeout of 1200 seconds, overridden by `timeout`.
+Comparisons ignore case and surrounding whitespace. Timeout failures list the
+device IPs and failed fields with expected and observed values. An unresolved
+hostname, serial number, or MAC address is reported with its identifier until a
+management IP is available. Without readiness fields, gathering behavior and the
+120-second lookup timeout remain unchanged. `interval` and `retries` continue to
+control ordinary lookups; they do not change the readiness polling interval.
 
 ### Device Identifier Parameters
 
@@ -810,4 +822,3 @@ Use either of these forms:
 
 - Relative to the playbook: `../vars/network_devices_info_input.yml`
 - Fully resolved from the repo root: `${PWD}/cvp/network_devices_info/vars/network_devices_info_input.yml`
-

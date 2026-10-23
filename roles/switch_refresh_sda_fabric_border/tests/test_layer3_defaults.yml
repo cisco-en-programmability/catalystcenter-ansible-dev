@@ -1,0 +1,97 @@
+---
+- name: Validate Layer 3 border default normalization offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_border_defaults_base:
+      local_autonomous_system_number: "65001"
+      import_external_routes: false
+      is_default_exit: true
+      prepend_autonomous_system_count: 0
+    switch_refresh_sda_fabric_border_defaults_cases:
+      - name: empty router ID versus absent
+        expected: {custom_bgp_router_id: ""}
+        manager: {}
+        actual: {}
+        match: true
+      - name: absent router ID versus empty
+        expected: {}
+        actual: {custom_bgp_router_id: ""}
+        match: true
+      - name: empty router ID on both sides
+        expected: {custom_bgp_router_id: ""}
+        manager: {}
+        actual: {custom_bgp_router_id: ""}
+        match: true
+      - name: absent router ID on both sides
+        expected: {}
+        actual: {}
+        match: true
+      - name: matching explicit router IDs
+        expected: {custom_bgp_router_id: "192.0.2.1"}
+        actual: {custom_bgp_router_id: "192.0.2.1"}
+        match: true
+      - name: missing explicit router ID
+        expected: {custom_bgp_router_id: "192.0.2.1"}
+        actual: {}
+        match: false
+      - name: unexpected explicit router ID
+        expected: {}
+        actual: {custom_bgp_router_id: "192.0.2.1"}
+        match: false
+      - name: different explicit router IDs
+        expected: {custom_bgp_router_id: "192.0.2.1"}
+        actual: {custom_bgp_router_id: "192.0.2.2"}
+        match: false
+      - name: empty router ID versus explicit
+        expected: {custom_bgp_router_id: ""}
+        manager: {}
+        actual: {custom_bgp_router_id: "192.0.2.1"}
+        match: false
+      - name: explicit router ID versus empty
+        expected: {custom_bgp_router_id: "192.0.2.1"}
+        actual: {custom_bgp_router_id: ""}
+        match: false
+      - name: default priority and empty router ID
+        expected: {border_priority: 10, custom_bgp_router_id: ""}
+        manager: {}
+        actual: {}
+        match: true
+      - name: explicit priority and empty router ID
+        expected: {border_priority: 5, custom_bgp_router_id: ""}
+        manager: {border_priority: 5}
+        actual: {border_priority: 5}
+        match: true
+      - name: changed explicit priority
+        expected: {border_priority: 5, custom_bgp_router_id: ""}
+        manager: {border_priority: 5}
+        actual: {border_priority: 6}
+        match: false
+      - name: changed false boolean
+        expected: {}
+        actual: {import_external_routes: true}
+        match: false
+      - name: changed zero count
+        expected: {}
+        actual: {prepend_autonomous_system_count: 1}
+        match: false
+      - name: null router ID remains distinct
+        expected: {custom_bgp_router_id: null}
+        actual: {}
+        match: false
+      - name: whitespace router ID remains distinct
+        expected: {custom_bgp_router_id: " "}
+        actual: {}
+        match: false
+      - name: unrelated empty setting remains distinct
+        expected: {other_setting: ""}
+        actual: {}
+        match: false
+
+  tasks:
+    - name: Check payload construction and both comparison paths
+      ansible.builtin.include_tasks: tasks/assert_layer3_defaults.yml
+      loop: "{{ switch_refresh_sda_fabric_border_defaults_cases }}"
+      loop_control:
+        loop_var: switch_refresh_sda_fabric_border_defaults_case
+        label: "{{ switch_refresh_sda_fabric_border_defaults_case.name }}"
