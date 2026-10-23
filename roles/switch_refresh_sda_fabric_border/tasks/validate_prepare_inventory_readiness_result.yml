@@ -1,5 +1,5 @@
 ---
-# Pure evaluator for a direct network_device_info result. Keeping controller
+# Pure evaluator for normalized network_devices_info records. Keeping controller
 # access outside this file makes readiness behavior testable with canned data.
 - name: Validate replacement border inventory readiness evaluator inputs
   ansible.builtin.assert:
@@ -64,7 +64,7 @@
         ) == 'list'
     fail_msg: >-
       Inventory readiness evaluation requires a successful, structured
-      network_device_info response during
+      network_devices_info response during
       {{
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
         .context | default('replacement border inventory validation')

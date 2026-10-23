@@ -136,7 +136,7 @@
             selectattr(
               'name',
               'equalto',
-              'Poll replacement border inventory readiness'
+              'Gather replacement border inventory with readiness validation'
             ) |
             first
           }}
@@ -255,44 +255,32 @@
               switch_refresh_sda_fabric_border_guard_role_wait_task.loop | string
             )
 
-    - name: Verify inventory readiness polling contract
+    - name: Verify inventory readiness delegates polling to network_devices_info
       ansible.builtin.assert:
         that:
           - >-
-            switch_refresh_sda_fabric_border_guard_poll_task[
-              'cisco.catalystcenter.network_device_info'
-            ] is mapping
+            switch_refresh_sda_fabric_border_guard_poll_task
+            ['ansible.builtin.include_role'].name == 'network_devices_info'
           - >-
-            switch_refresh_sda_fabric_border_guard_poll_task.register ==
-            'switch_refresh_sda_fabric_border_prepare_inventory_readiness_lookup'
+            switch_refresh_sda_fabric_border_guard_poll_task.vars
+            .network_devices_info_config[0].network_devices[0].collectionStatus == 'Managed'
           - >-
-            (switch_refresh_sda_fabric_border_guard_poll_task.until | type_debug) ==
-            'list'
-          - switch_refresh_sda_fabric_border_guard_poll_task.retries is defined
-          - switch_refresh_sda_fabric_border_guard_poll_task.delay is defined
-          - switch_refresh_sda_fabric_border_guard_poll_task.failed_when is sameas false
-          - switch_refresh_sda_fabric_border_guard_poll_task.no_log is sameas true
+            switch_refresh_sda_fabric_border_guard_poll_task.vars
+            .network_devices_info_config[0].network_devices[0].managementState == 'Managed'
+          - >-
+            'readiness_request.timeout' in
+            switch_refresh_sda_fabric_border_guard_poll_task.vars
+            .network_devices_info_config[0].network_devices[0].timeout
+          - switch_refresh_sda_fabric_border_guard_poll_task.until is not defined
+          - switch_refresh_sda_fabric_border_guard_poll_task.retries is not defined
+          - switch_refresh_sda_fabric_border_guard_poll_task.delay is not defined
           - >-
             'validate_prepare_inventory_readiness_result.yml' in
             switch_refresh_sda_fabric_border_guard_waiter_source
           - >-
-            'required_role' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'collectionStatus' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'managementState' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'reachabilityStatus' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'inventoryStatusDetail' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'deviceSupportLevel' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'serialNumber' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
-            'platformId' in switch_refresh_sda_fabric_border_guard_waiter_source
-          - >-
             'instanceUuid' in switch_refresh_sda_fabric_border_guard_evaluator_source
+          - >-
+            'reachabilityStatus' in switch_refresh_sda_fabric_border_guard_evaluator_source
 
     - name: Accept synchronized ACCESS inventory before role assignment
       ansible.builtin.include_tasks: >-

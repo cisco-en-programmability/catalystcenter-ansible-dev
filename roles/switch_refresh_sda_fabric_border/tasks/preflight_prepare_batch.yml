@@ -103,8 +103,6 @@
               switch_refresh_sda_fabric_border_batch_inventory_role_execution_config,
             'inventory_readiness_timeout':
               switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout,
-            'inventory_readiness_poll_interval':
-              switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval,
             'provision_site_name_hierarchy':
               switch_refresh_sda_fabric_border_batch_provision_site_name_hierarchy,
             'provision_config':

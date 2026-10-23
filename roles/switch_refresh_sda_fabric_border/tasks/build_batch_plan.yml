@@ -60,12 +60,6 @@
         default(switch_refresh_sda_fabric_border_inventory_readiness_timeout) |
         int
       }}
-    switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval: >-
-      {{
-        refresh_item.inventory_readiness_poll_interval |
-        default(switch_refresh_sda_fabric_border_inventory_readiness_poll_interval) |
-        int
-      }}
     switch_refresh_sda_fabric_border_batch_provision_validation_timeout: >-
       {{
         refresh_item.provision_validation_timeout |
@@ -167,9 +161,6 @@
         switch_refresh_sda_fabric_border_batch_onboarding_method != 'lan_automation' or
         switch_refresh_sda_fabric_border_batch_new_devices.discovery_config is not defined
       - (switch_refresh_sda_fabric_border_batch_inventory_readiness_timeout | int) > 0
-      - >-
-        (switch_refresh_sda_fabric_border_batch_inventory_readiness_poll_interval |
-        int) > 0
       - (switch_refresh_sda_fabric_border_batch_provision_validation_timeout | int) > 0
       - >-
         (switch_refresh_sda_fabric_border_batch_provision_validation_poll_interval |

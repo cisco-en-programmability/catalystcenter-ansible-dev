@@ -14,7 +14,6 @@
     switch_refresh_sda_fabric_border_inventory_role_update_enabled: true
     switch_refresh_sda_fabric_border_provision_enabled: true
     switch_refresh_sda_fabric_border_inventory_readiness_timeout: 1200
-    switch_refresh_sda_fabric_border_inventory_readiness_poll_interval: 10
     switch_refresh_sda_fabric_border_provision_validation_timeout: 1200
     switch_refresh_sda_fabric_border_provision_validation_poll_interval: 10
   tasks:
