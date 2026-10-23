@@ -643,21 +643,13 @@ class TemplateCommon(NetworkProfileFunctions):
                 family="configuration_templates",
                 function="get_templates_details",
                 op_modifies=True,
-                params={"name": template_name},
+                params={"project_name": project_name, "name": template_name},
             )
-            response = items.get("response") if isinstance(items, dict) else items
-            matched = [
-                template
-                for template in (response or [])
-                if isinstance(template, dict)
-                and template.get("name") == template_name
-                and template.get("projectName") == project_name
-            ]
-            template_details = {"response": matched}
-            if matched:
+            if items:
+                template_details = items
                 self.log(
-                    "Received template details for '{0}' under project '{1}': {2}".format(
-                        template_name, project_name, matched
+                    "Received template details for '{0}': {1}".format(
+                        template_name, template_details
                     ),
                     "DEBUG",
                 )
@@ -668,6 +660,13 @@ class TemplateCommon(NetworkProfileFunctions):
                     ),
                     "WARNING",
                 )
+
+            self.log(
+                "Received API response from 'get_templates_details': {0}".format(
+                    template_details
+                ),
+                "DEBUG",
+            )
         except Exception as e:
             self.log(
                 "Exception occurred while retrieving template details for '{0}': {1}".format(
