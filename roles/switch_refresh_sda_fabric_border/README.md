@@ -179,9 +179,11 @@ status. It then groups replacements by the normalized inventory role captured
 from their source devices, submits protected role-only payloads, and waits for
 every replacement to report its inherited role before provisioning.
 
-Both readiness barriers use
-`switch_refresh_sda_fabric_border_inventory_readiness_timeout` and
-`switch_refresh_sda_fabric_border_inventory_readiness_poll_interval`. A batch
+Both readiness barriers delegate polling to `network_devices_info`, requiring
+`collectionStatus: Managed` and `managementState: Managed`. Polling runs every
+10 seconds and uses `switch_refresh_sda_fabric_border_inventory_readiness_timeout`
+(default 1200 seconds). The role then validates inventory identity, reachability,
+device support, and the expected inventory role before provisioning. A batch
 failure or rerun is safe: an existing inventory record and an already assigned
 matching role are treated idempotently, while provisioning remains blocked
 until both barriers pass.

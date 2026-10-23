@@ -66,11 +66,6 @@
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
         .inventory_readiness_timeout
       }}
-    switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval: >-
-      {{
-        switch_refresh_sda_fabric_border_prepare_plan_matches[0]
-        .inventory_readiness_poll_interval
-      }}
     switch_refresh_sda_fabric_border_prepare_provision_site: >-
       {{
         switch_refresh_sda_fabric_border_prepare_plan_matches[0]
@@ -171,10 +166,6 @@
         {{
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
         }}
-      poll_interval: >-
-        {{
-          switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval
-        }}
 
 - name: Assign replacement border inventory role
   ansible.builtin.include_role:
@@ -213,10 +204,6 @@
       timeout: >-
         {{
           switch_refresh_sda_fabric_border_prepare_inventory_readiness_timeout
-        }}
-      poll_interval: >-
-        {{
-          switch_refresh_sda_fabric_border_prepare_inventory_readiness_poll_interval
         }}
   loop: "{{ switch_refresh_sda_fabric_border_prepare_inventory_role_requirements }}"
   loop_control:
