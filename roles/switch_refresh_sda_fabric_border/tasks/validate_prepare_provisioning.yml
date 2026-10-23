@@ -112,8 +112,7 @@
         switch_refresh_sda_fabric_border_prepare_provision_site | string
     fail_msg: >-
       Replacement
-      {{ switch_refresh_sda_fabric_border_prepare_provision_result
-      .switch_refresh_sda_fabric_border_prepare_provision_ip |
+      {{ switch_refresh_sda_fabric_border_prepare_provision_result.switch_refresh_sda_fabric_border_prepare_provision_ip |
       default('unknown') }} is not provisioned at
       {{ switch_refresh_sda_fabric_border_prepare_provision_site }}.
   loop: >-
@@ -122,6 +121,5 @@
   loop_control:
     loop_var: switch_refresh_sda_fabric_border_prepare_provision_result
     label: >-
-      {{ switch_refresh_sda_fabric_border_prepare_provision_result
-      .switch_refresh_sda_fabric_border_prepare_provision_ip |
+      {{ switch_refresh_sda_fabric_border_prepare_provision_result.switch_refresh_sda_fabric_border_prepare_provision_ip |
       default('replacement-border') }}

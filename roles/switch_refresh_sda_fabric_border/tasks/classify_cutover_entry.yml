@@ -143,4 +143,3 @@
           )
           else 'live state is safe for the selected roll-forward action'
         }}
-
