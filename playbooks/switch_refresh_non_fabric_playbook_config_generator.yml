@@ -1,0 +1,87 @@
+---
+# Non-Fabric Switch Refresh - generate a deploy config for a legacy switch so the
+# operator can fill in the template parameters and apply them onto the replacement
+# Catalyst 9000 switch with the cisco.catalystcenter.switch_refresh_non_fabric_workflow_manager module.
+#
+# The module reads only from the SOURCE switch. It writes a YAML file that is the
+# 'config:' input for switch_refresh_non_fabric_workflow_manager. Templates that were deployed on the
+# source are recreated from their realized configuration (interface names already renamed
+# to the replacement) under project 'switch_refresh_non_fabric_project' as '<name>_refresh', then
+# deployed to the replacement by serial number. Templates added with include_templates
+# that are not on the source are deployed by reference (fill in any blank param values).
+# It also returns a short summary (how many templates were retrieved, how many apply,
+# how many were recreated, how many will be deployed, how many parameter values still
+# need filling, and where the file was written).
+- name: Generate a deploy config for a non-fabric switch refresh
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "vars/credentials.yml"
+  tasks:
+    - name: Generate the switch refresh deploy config
+      cisco.catalystcenter.switch_refresh_non_fabric_playbook_config_generator:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify }}"
+        catalystcenter_port: "{{ catalystcenter_port }}"
+        catalystcenter_version: "{{ catalystcenter_version }}"
+        catalystcenter_debug: "{{ catalystcenter_debug }}"
+        catalystcenter_log: true
+        catalystcenter_log_level: DEBUG
+        catalystcenter_log_file_path: "{{ catalystcenter_log_file_path }}"
+        state: gathered
+        # Optional: where to write the switch_refresh_non_fabric_workflow_manager deploy config.
+        # When omitted it defaults to ./<source_device_ip>_refresh_playbook_config.yml
+        file_path: "switch_refresh_non_fabric_playbook_config.yml"
+        # Optional: where to write the read-only backup. The backup is ALWAYS
+        # written; this only sets where. It is a pristine, do-not-edit copy of
+        # the generated deploy config, so if the working file is disturbed -
+        # edited by mistake, truncated or lost - copy this backup over it and
+        # continue, with no need to regenerate from Catalyst Center.
+        # When omitted it defaults to ./<source_device_ip>_refresh_backup.yml
+        backup_file_path: "switch_refresh_non_fabric_backup.yml"
+        config:
+          # Management IP of the source (legacy) switch. Required.
+          source_device_ip: "204.1.1.25"
+          # Serial number of the destination (replacement) switch. Required.
+          # A serial is used instead of an IP because the replacement switch is
+          # often not yet onboarded (no management IP), and a DHCP address can
+          # change between runs, whereas the serial is stable. It is recorded in
+          # the playbook and response as-is; it is not validated against a live
+          # device, since the replacement may not be onboarded yet. (The source
+          # interfaces in interface_mappings ARE validated up front against the
+          # source switch.)
+          destination_device_serial_number: "FJC2334ABCD"
+          # Optional: skip whole templates. Each entry names a template, and
+          # optionally its project. With project_name, only that one template is
+          # skipped; without it, the name is skipped in every project. Matching
+          # is exact (case-insensitive); no wildcards here. A skipped template is
+          # left out of the playbook, so its parameters are not listed. Skipped
+          # templates are listed in the response under templates_excluded.
+          exclude_templates:
+            - template_name: "Legacy QoS Template"    # skip in every project
+            - template_name: "Refresh_Vlan"           # skip only in this project
+              project_name: "Nonfabric_Refresh_Test"
+          # Optional: add extra templates that are NOT attached to the switch's
+          # profile (for example a standard template in a shared project). Each
+          # entry must name both the project and the template. Matching is exact
+          # (case-insensitive); no wildcards. Entries that match nothing are
+          # reported under templates_include_not_found and do not fail the run.
+          # Exclusion wins: a template in both lists is left out.
+          include_templates:
+            - project_name: "Switch project"
+              template_name: "Switch profile temp1"
+          # Optional: rename interfaces when recreating the source config, and
+          # trim unwanted lines. Renames require interface_migration: true (and
+          # with it, interface_mappings is mandatory); without it the mappings
+          # are ignored. interface_mappings rewrites matched interface names
+          # inside the recreated template_content; exclude_commands drops
+          # matching config lines (glob patterns).
+          interface_migration: true
+          interface_mappings:
+            - source_interface_name: "Vlan20"
+              destination_interface_name: "Vlan220"
+          exclude_commands:
+            - "*route-target*"
