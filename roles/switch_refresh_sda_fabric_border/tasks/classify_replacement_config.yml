@@ -163,7 +163,14 @@
           default([]) | sort
         ) and
         switch_refresh_sda_fabric_border_replacement_expected_layer3_settings ==
-        switch_refresh_sda_fabric_border_replacement_actual_layer3_settings
+        switch_refresh_sda_fabric_border_replacement_actual_layer3_settings and
+        (
+          switch_refresh_sda_fabric_border_replacement_expected |
+          cisco.catalystcenter.sda_border_types
+        ) == (
+          switch_refresh_sda_fabric_border_replacement_actual |
+          cisco.catalystcenter.sda_border_types
+        )
       }}
     switch_refresh_sda_fabric_border_replacement_l2_is_subset: >-
       {{

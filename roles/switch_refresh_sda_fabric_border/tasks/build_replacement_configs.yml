@@ -310,11 +310,15 @@
 - name: Build replacement border settings
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_transform_base_settings:
+      border_types: >-
+        {{ switch_refresh_sda_fabric_border_transform_original | cisco.catalystcenter.sda_border_types }}
       layer3_settings: >-
         {{ switch_refresh_sda_fabric_border_transform_manager_layer3_settings }}
     switch_refresh_sda_fabric_border_transform_final_settings: >-
       {{
         {
+          'border_types':
+            switch_refresh_sda_fabric_border_transform_original | cisco.catalystcenter.sda_border_types,
           'layer3_settings':
             switch_refresh_sda_fabric_border_transform_manager_layer3_settings
         } |

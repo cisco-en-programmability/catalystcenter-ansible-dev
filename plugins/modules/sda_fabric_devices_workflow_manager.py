@@ -203,6 +203,15 @@ options:
                     IP or SDA transit.
                 type: dict
                 suboptions:
+                  border_types:
+                    description:
+                      - Explicit border capabilities, independent of handoff creation.
+                      - Enables capability-only preparation before creating handoffs.
+                      - When omitted, existing capabilities and required handoff capabilities are retained.
+                    type: list
+                    elements: str
+                    choices: [LAYER_2, LAYER_3]
+                    version_added: "2.13.0"
                   layer3_settings:
                     description: Configures a device
                       with a Layer3 border type.
@@ -1263,6 +1272,11 @@ from ansible_collections.cisco.catalystcenter.plugins.module_utils.catalystcente
     get_dict_result,
 )
 
+from ansible_collections.cisco.catalystcenter.plugins.module_utils.sda_border_capabilities import (
+    normalize_border_types,
+    required_border_types,
+)
+
 
 class FabricDevices(CatalystCenterBase):
     """Class containing member attributes for sda_fabric_devices_workflow_manager module"""
@@ -1338,6 +1352,7 @@ class FabricDevices(CatalystCenterBase):
                     "borders_settings": {
                         "type": "list",
                         "elements": "dict",
+                        "border_types": {"type": "list", "elements": "str"},
                         "layer3_settings": {
                             "type": "dict",
                             "local_autonomous_system_number": {
@@ -1420,7 +1435,6 @@ class FabricDevices(CatalystCenterBase):
         try:
             if get_object == "fabricDevices":
                 obj_params = [
-                    ("borderTypes", "borderTypes"),
                     ("borderDeviceSettings", "borderDeviceSettings"),
                 ]
             elif get_object == "fabricSdaL3Handoff":
@@ -3665,33 +3679,29 @@ class FabricDevices(CatalystCenterBase):
 
         self.log("Processing user-provided border settings", "DEBUG")
         border_device_settings = {}
-        border_types = []
         layer3_settings = borders_settings.get("layer3_settings")
-        layer3_handoff_ip_transit = borders_settings.get("layer3_handoff_ip_transit")
-        layer3_handoff_sda_transit = borders_settings.get("layer3_handoff_sda_transit")
-        if layer3_settings:
-            border_types.append("LAYER_3")
-        elif layer3_handoff_ip_transit:
-            border_types.append("LAYER_3")
-        elif layer3_handoff_sda_transit:
-            border_types.append("LAYER_3")
-        elif "BORDER_NODE" in device_roles:
-            border_types.append("LAYER_3")
-
-        l2_handoff = borders_settings.get("layer2_handoff")
-        if l2_handoff:
-            border_types.append("LAYER_2")
-
-        if have_border_settings:
-            border_types = have_border_settings.get("borderTypes")
-
-        if not border_types:
-            self.msg = (
-                "The 'layer3_settings' parameter is required under 'borders_settings' when "
-                "'device_roles' includes 'BORDER_NODE' for device {ip}.".format(
-                    ip=device_ip
-                )
-            )
+        try:
+            # Explicit capability intent must not be overwritten by current state.
+            # Legacy callers retain existing types and gain types required by handoffs.
+            if "border_types" in borders_settings:
+                border_types = required_border_types({
+                    "device_roles": device_roles,
+                    "borders_settings": borders_settings,
+                })
+            else:
+                inferred_settings = dict(borders_settings)
+                if not any(inferred_settings.get(key) for key in (
+                        "layer3_settings", "layer3_handoff_ip_transit",
+                        "layer3_handoff_sda_transit", "layer2_handoff")):
+                    inferred_settings["layer3_settings"] = {"legacy_default": True}
+                inferred = required_border_types({
+                    "device_roles": device_roles,
+                    "borders_settings": inferred_settings,
+                })
+                existing = normalize_border_types(have_border_settings["borderTypes"]) if have_border_settings else []
+                border_types = sorted(set(inferred) | set(existing))
+        except (KeyError, TypeError, ValueError) as exc:
+            self.msg = "Invalid border capabilities for device '{0}': {1}".format(device_ip, exc)
             self.status = "failed"
             return self.check_return_status()
 
@@ -3911,7 +3921,8 @@ class FabricDevices(CatalystCenterBase):
                     }
                 )
 
-            device_info.update({"borderDeviceSettings": border_device_settings})
+        device_info.update({"borderDeviceSettings": border_device_settings})
+        if "LAYER_3" in border_types:
             self.log(
                 "Final device info: {device_info}".format(device_info=device_info),
                 "DEBUG",
@@ -5648,6 +5659,34 @@ class FabricDevices(CatalystCenterBase):
 
         return self
 
+    def wait_for_border_capabilities(self, desired_device, device_ip):
+        """Require live controller capability readback before submitting any handoff."""
+        try:
+            required = normalize_border_types(desired_device["borderDeviceSettings"]["borderTypes"])
+            deadline = time.monotonic() + max(0, self.max_timeout)
+            interval = max(1, self.params.get("catalystcenter_task_poll_interval", 2))
+            while True:
+                observed = self.fabric_device_exists(
+                    desired_device["fabricId"], desired_device["networkDeviceId"], device_ip
+                )
+                settings = (observed.get("device_details") or {}).get("borderDeviceSettings") or {}
+                actual = settings.get("borderTypes")
+                if observed.get("exists") and actual is not None and normalize_border_types(actual) == required:
+                    return self
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(min(interval, max(0, deadline - time.monotonic())))
+        except (KeyError, TypeError, ValueError) as exc:
+            self.msg = "Unable to verify border capabilities for '{0}': {1}".format(device_ip, exc)
+            self.status = "failed"
+            return self
+        self.msg = (
+            "Device '{0}' has not reported required border capabilities {1}; "
+            "observed {2}. No handoffs were submitted."
+        ).format(device_ip, required, actual)
+        self.status = "failed"
+        return self
+
     def update_l2_handoff(
         self,
         have_l2_handoff,
@@ -6922,6 +6961,13 @@ class FabricDevices(CatalystCenterBase):
             )
             if "BORDER_NODE" not in device_roles:
                 continue
+
+            if "border_types" in (item.get("borders_settings") or {}) or any(
+                    want_fabric_device.get(key) for key in (
+                        "l2_handoff_details", "sda_l3_handoff_details", "ip_l3_handoff_details")):
+                self.wait_for_border_capabilities(
+                    want_fabric_device["device_details"], device_ip
+                ).check_return_status()
 
             self.log(
                 "Entered handoffs section which includes SDA - IP L3 Handoffs and L2 Handoff"

@@ -7,8 +7,8 @@ border handoff to the replacement until the old device has been removed.
 
 The existing `sda_fabric_devices_config_generator` role is the authoritative
 source for capture and readback. A generator failure stops the run. This role
-does not modify the generator and does not call direct handoff information
-modules.
+uses the generator's explicit border capability readback and does not call
+direct handoff information modules.
 
 ## Phases
 
@@ -17,7 +17,10 @@ including its inventory role and complete fabric `device_roles` list, onboards
 the replacement, waits for Catalyst Center inventory collection to finish,
 assigns and confirms the captured inventory role, provisions it, and adds it to
 the fabric with the same fabric roles. Devices containing `BORDER_NODE` are
-prepared with their captured Layer 3 border settings but no handoffs.
+prepared with their captured `border_types` (including both `LAYER_2` and
+`LAYER_3` for a mixed border) and Layer 3 settings, without handoffs. Catalyst
+Center must accept the capability configuration and report those types before
+Prepare succeeds.
 
 Normal `cutover` captures every source again and persists every batch manifest
 before the first deletion. Manifest continuation loads and validates the
@@ -26,6 +29,7 @@ been deleted. Every cutover mode processes one old/new pair at a time:
 
 ```text
 capture/persist, or load/validate, every manifest
+  -> verify replacement platform/image inventory and required border capabilities
   -> persist deletion_started immediately before source deletion
   -> remove old border from fabric
   -> prove old fabric absence
@@ -175,7 +179,7 @@ custom inventory payload cannot set `role`. Prepare
 waits until every replacement has exact inventory coverage, completed
 collection and management state, wired-device classification, successful
 inventory status, stable identity and platform fields, a non-empty device
-support level other than `Unsupported`, and `Reachable` or `Ping Reachable`
+software version, a non-empty device support level other than `Unsupported`, and `Reachable` or `Ping Reachable`
 status. It then groups replacements by the normalized inventory role captured
 from their source devices, submits protected role-only payloads, and waits for
 every replacement to report its inherited role before provisioning.
@@ -206,6 +210,8 @@ until both barriers pass.
   and treated as absent during verification and cutover classification;
   explicit router IDs are preserved and compared
 - Replacement inventory identity, reachability, and destination interfaces
+- Supported replacement inventory with nonempty platform and software version;
+  controller acceptance and explicit capability readback before source deletion
 - Replacement base fabric configuration contains no handoff before cutover
 - All cutover manifests are protected and validated before the first deletion
 - Fresh normal cutover never overwrites an existing manifest
@@ -219,6 +225,33 @@ outside the old/replacement pair. A single-border refresh therefore proceeds
 after explicit destructive cutover approval and causes a planned border outage
 between removal of the old device and verified handoff restoration on the
 replacement. Run that cutover in an approved maintenance window.
+
+## Border capability preparation and recovery
+
+For a source with `borderTypes: [LAYER_3, LAYER_2]`, Prepare sends
+`borders_settings.border_types: [LAYER_2, LAYER_3]` independently of handoffs.
+It verifies that the handoff-free replacement reports both types. A fresh
+Cutover rejects a replacement that still reports only `LAYER_3` before deleting
+any source; rerun Prepare to enable the missing capability.
+
+Inventory must identify the replacement platform and running software and
+report `deviceSupportLevel: Supported`. This inventory status alone does not
+prove L2 support. Capability configuration must also succeed in Catalyst
+Center, followed by explicit `borderTypes` readback from that controller. The
+role does not maintain a platform/software compatibility matrix. Controller
+rejection, missing readback, or a type mismatch blocks deletion and handoff
+application. The fabric manager repeats capability readback after device
+configuration and before any L2, SDA-transit, or IP-transit handoff request.
+
+Manifest continuation can enable missing capabilities using a capability-only
+update before replaying handoffs, including recovery from `old_deleted`. For
+older manifests without explicit types, the role derives requirements from
+the protected source settings and captured handoffs. Runtime copies receive
+the derived types; original payloads and fingerprints remain unchanged.
+Requirements absent from an older capture cannot be reconstructed. Unexpected
+replacement capabilities or other configuration drift require operator review.
+Every manifest-backed replacement is checked during batch preflight, and each
+mapping is checked again before destructive release or handoff restoration.
 
 ## Pool-backed IP-transit handoffs
 
@@ -282,3 +315,18 @@ symlinked manifests fail closed.
 - `playbooks/switch_refresh_sda_fabric_border_prepare.yml`
 - `playbooks/switch_refresh_sda_fabric_border_cutover.yml`
 - `playbooks/vars/switch_refresh_sda_fabric_border_usecase.yml`
+
+## Offline capability regression
+
+Run with the Python interpreter from an environment containing Ansible and the
+collection dependencies:
+
+```sh
+python roles/switch_refresh_sda_fabric_border/tests/run_border_capabilities.py
+```
+
+The runner creates a temporary collection with simulated controller roles and
+executes the real capture, transformation, capability gates, manifest
+preflight, and `old_deleted` recovery tasks. It checks mixed L2/L3 handoffs,
+controller rejection, stale readback, unsupported inventory, and preservation
+of legacy manifest payloads. It makes no controller requests.

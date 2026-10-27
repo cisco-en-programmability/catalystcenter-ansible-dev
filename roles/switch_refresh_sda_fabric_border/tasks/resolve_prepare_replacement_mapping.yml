@@ -122,6 +122,13 @@
       {{ switch_refresh_sda_fabric_border_prepare_mapping.inventory_role |
       default('missing') }}.
 
+- name: Validate replacement platform and software prerequisites
+  ansible.builtin.include_tasks: validate_replacement_platform.yml
+  vars:
+    switch_refresh_sda_fabric_border_platform_request:
+      device_details: "{{ switch_refresh_sda_fabric_border_prepare_device_details }}"
+      context: before replacement fabric addition
+
 - name: Validate mapped destination interfaces exist on replacement
   ansible.builtin.assert:
     that:

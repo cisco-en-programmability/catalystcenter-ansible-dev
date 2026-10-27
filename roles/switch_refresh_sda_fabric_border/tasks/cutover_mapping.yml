@@ -45,6 +45,25 @@
       }}
   no_log: true
 
+- name: Resolve legacy capability requirements without rewriting captured manifest payloads
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_current_cutover_mapping: >-
+      {{
+        switch_refresh_sda_fabric_border_current_cutover_mapping | combine({
+          'base_new_device_config':
+            switch_refresh_sda_fabric_border_current_cutover_mapping.base_new_device_config |
+            cisco.catalystcenter.sda_border_capability_config(
+              source=switch_refresh_sda_fabric_border_current_cutover_mapping.original_device_config
+            ),
+          'expected_new_device_config':
+            switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config |
+            cisco.catalystcenter.sda_border_capability_config(
+              source=switch_refresh_sda_fabric_border_current_cutover_mapping.original_device_config
+            )
+        })
+      }}
+  no_log: true
+
 - name: Create protected per-mapping cutover workspace
   ansible.builtin.file:
     path: "{{ switch_refresh_sda_fabric_border_current_cutover_workspace }}"
@@ -130,10 +149,21 @@
       expected_state: present
       context: current replacement fabric state before roll-forward classification
 
+- name: Verify replacement capabilities before destructive release or handoff restoration
+  ansible.builtin.include_tasks: ensure_replacement_capabilities.yml
+  vars:
+    switch_refresh_sda_fabric_border_capability_request:
+      original_device_config: "{{ switch_refresh_sda_fabric_border_current_cutover_mapping.original_device_config }}"
+      expected_device_config: "{{ switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config }}"
+      actual_device_config: "{{ switch_refresh_sda_fabric_border_capture_result.device_config }}"
+      fabric_name: "{{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}"
+      capture_file: "{{ switch_refresh_sda_fabric_border_current_cutover_workspace ~ '/capabilities_verified.yml' }}"
+      allow_enable: "{{ switch_refresh_sda_fabric_border_resume_from_manifest | bool }}"
+
 - name: Preserve current replacement fabric observation
   ansible.builtin.set_fact:
-    switch_refresh_sda_fabric_border_current_new_fabric_capture: >-
-      {{ switch_refresh_sda_fabric_border_capture_result }}
+    switch_refresh_sda_fabric_border_current_new_fabric_capture:
+      device_config: "{{ switch_refresh_sda_fabric_border_capability_result.device_config }}"
   no_log: true
 
 - name: Classify current replacement handoff configuration

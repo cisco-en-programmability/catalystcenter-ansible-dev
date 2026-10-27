@@ -200,6 +200,13 @@
         regex_replace('[ -]+', '_')
       }}
 
+- name: Validate replacement platform and software prerequisites
+  ansible.builtin.include_tasks: validate_replacement_platform.yml
+  vars:
+    switch_refresh_sda_fabric_border_platform_request:
+      device_details: "{{ switch_refresh_sda_fabric_border_cutover_new_identity_detail }}"
+      context: normal cutover preflight
+
 - name: Validate immutable cutover identity fields
   ansible.builtin.assert:
     that:
