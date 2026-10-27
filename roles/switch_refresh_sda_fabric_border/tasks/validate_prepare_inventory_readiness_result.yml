@@ -163,6 +163,9 @@
         .platformId | default('', true) | string | trim | length > 0
       - >-
         switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
+        .softwareVersion | default('', true) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_entry
         .deviceSupportLevel | default('', true) | string | trim | upper not in
         ['', 'UNSUPPORTED']
       - >-

@@ -268,6 +268,8 @@
 - name: Build canonical generated border records
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_verify_expected_canonical:
+      border_types: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected | cisco.catalystcenter.sda_border_types }}
       device_ip: "{{ switch_refresh_sda_fabric_border_verify_expected.device_ip }}"
       device_roles: >-
         {{ switch_refresh_sda_fabric_border_verify_expected.device_roles | sort }}
@@ -288,6 +290,8 @@
           to_json(sort_keys=true)
         }}
     switch_refresh_sda_fabric_border_verify_actual_canonical:
+      border_types: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual | cisco.catalystcenter.sda_border_types }}
       device_ip: "{{ switch_refresh_sda_fabric_border_verify_actual.device_ip }}"
       device_roles: >-
         {{ switch_refresh_sda_fabric_border_verify_actual.device_roles | sort }}

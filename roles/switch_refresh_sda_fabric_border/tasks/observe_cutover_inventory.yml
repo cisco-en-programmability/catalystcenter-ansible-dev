@@ -486,6 +486,13 @@
       }}
   no_log: true
 
+- name: Validate replacement platform and software prerequisites
+  ansible.builtin.include_tasks: validate_replacement_platform.yml
+  vars:
+    switch_refresh_sda_fabric_border_platform_request:
+      device_details: "{{ switch_refresh_sda_fabric_border_inventory_observation_new_detail }}"
+      context: cutover execution or recovery
+
 - name: Revalidate immutable replacement and any present old identity
   ansible.builtin.assert:
     that:

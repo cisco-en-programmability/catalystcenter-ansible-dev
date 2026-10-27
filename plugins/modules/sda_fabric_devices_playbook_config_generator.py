@@ -774,6 +774,7 @@ class SdaFabricDevicesPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
                     },
                     "borders_settings": {
                         "type": "dict",
+                        "border_types": {"type": "list", "elements": "str"},
                         "layer3_settings": {
                             "type": "dict",
                             "local_autonomous_system_number": {
@@ -1572,6 +1573,10 @@ class SdaFabricDevicesPlaybookGenerator(CatalystCenterBase, BrownFieldHelper):
             )
 
             borders_settings = {}
+            # Preserve controller-reported capabilities independently of handoffs.
+            # Missing data stays missing so refresh can fail closed on readback.
+            if "borderTypes" in border_settings:
+                borders_settings["border_types"] = border_settings["borderTypes"]
 
             # Transform layer3Settings using camel_to_snake_case
             layer3_settings = border_settings.get("layer3Settings")

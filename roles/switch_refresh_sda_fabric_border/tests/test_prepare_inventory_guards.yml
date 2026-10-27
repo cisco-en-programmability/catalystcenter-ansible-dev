@@ -32,6 +32,7 @@
         platformId: C9500-48Y4C
         serialNumber: FDO00000011
         deviceSupportLevel: Supported
+        softwareVersion: 17.12.4
         inventoryStatusDetail: '<status><general code="SUCCESS"/></status>'
         role: ACCESS
       - managementIpAddress: "204.1.2.12"
@@ -45,6 +46,7 @@
         platformId: C8500-12X4QC
         serialNumber: FDO00000012
         deviceSupportLevel: Supported
+        softwareVersion: 17.12.4
         inventoryStatusDetail: "<status><general code='SUCCESS'/></status>"
         role: ACCESS
 

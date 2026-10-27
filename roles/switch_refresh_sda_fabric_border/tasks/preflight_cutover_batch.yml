@@ -73,6 +73,14 @@
   ansible.builtin.include_tasks: load_cutover_manifest.yml
   when: switch_refresh_sda_fabric_border_resume_from_manifest | bool
 
+- name: Preflight capabilities for every manifest-backed replacement
+  ansible.builtin.include_tasks: preflight_manifest_capabilities.yml
+  loop: "{{ switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_capability_mapping
+    label: "{{ switch_refresh_sda_fabric_border_capability_mapping.new.management_ip }}"
+  when: switch_refresh_sda_fabric_border_resume_from_manifest | bool
+
 - name: Append loaded manifest continuation plan
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_cutover_plans: >-

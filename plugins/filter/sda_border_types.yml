@@ -1,0 +1,23 @@
+---
+# Copyright (c) 2026 Cisco and/or its affiliates.
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+DOCUMENTATION:
+  name: sda_border_types
+  version_added: "2.13.0"
+  short_description: Resolve SDA border capability requirements
+  description:
+    - Read explicit border capabilities or derive legacy manifest requirements from captured settings and handoffs.
+    - Non-border fabric devices return an empty list.
+  author: Cisco Systems (@cisco)
+  options:
+    _input:
+      description: Generated SDA device configuration.
+      type: dict
+      required: true
+EXAMPLES: |
+  required_types: "{{ captured_device | cisco.catalystcenter.sda_border_types }}"
+RETURN:
+  _value:
+    description: Sorted required border capabilities.
+    type: list
+    elements: str

@@ -1,0 +1,130 @@
+---
+# Capability-only recovery preserves handoffs and immutable manifest records.
+# The controller must accept and report the types before deletion or handoff apply.
+- name: Resolve immutable replacement capability requirements
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capability_expected: >-
+      {{
+        switch_refresh_sda_fabric_border_capability_request.expected_device_config |
+        cisco.catalystcenter.sda_border_capability_config(
+          source=switch_refresh_sda_fabric_border_capability_request.original_device_config
+        )
+      }}
+    switch_refresh_sda_fabric_border_capability_observed: >-
+      {{ switch_refresh_sda_fabric_border_capability_request.actual_device_config }}
+  no_log: true
+
+- name: Require explicit observed capabilities before deciding on repair
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_capability_observed.borders_settings.border_types is defined
+    fail_msg: Live border capabilities must be reported explicitly; handoffs cannot prove capability enablement.
+  when: "'BORDER_NODE' in switch_refresh_sda_fabric_border_capability_observed.device_roles"
+
+- name: Resolve required and currently configured border capabilities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capability_required: >-
+      {{ switch_refresh_sda_fabric_border_capability_expected | cisco.catalystcenter.sda_border_types }}
+    switch_refresh_sda_fabric_border_capability_current: >-
+      {{ switch_refresh_sda_fabric_border_capability_observed | cisco.catalystcenter.sda_border_types }}
+  no_log: true
+
+- name: Reject unexpected replacement capabilities before repair
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_capability_current |
+        difference(switch_refresh_sda_fabric_border_capability_required) | length == 0
+    fail_msg: Replacement has capabilities outside captured intent; automatic capability removal is blocked.
+
+- name: Check existing replacement intent before a capability-only update
+  when: switch_refresh_sda_fabric_border_capability_required | length > 0
+  block:
+    - name: Classify replacement handoffs independently of the capability being repaired
+      ansible.builtin.include_tasks: classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: "{{ switch_refresh_sda_fabric_border_capability_expected }}"
+          actual_device_config: >-
+            {{
+              switch_refresh_sda_fabric_border_capability_observed | combine({
+                'borders_settings': switch_refresh_sda_fabric_border_capability_observed.borders_settings |
+                combine({'border_types': switch_refresh_sda_fabric_border_capability_required})
+              })
+            }}
+          allow_missing_ip_pool_metadata: true
+
+    - name: Reject divergent replacement configuration before enabling capabilities
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state != 'divergent'
+        fail_msg: >-
+          Replacement roles, base settings, or handoffs diverge from the manifest.
+          No capability update or source deletion was submitted.
+
+- name: Require prepared capabilities or manifest-backed capability repair
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_capability_current ==
+        switch_refresh_sda_fabric_border_capability_required or
+        switch_refresh_sda_fabric_border_capability_request.allow_enable | default(false) | bool
+    fail_msg: >-
+      Replacement border capabilities {{ switch_refresh_sda_fabric_border_capability_current }}
+      do not match required {{ switch_refresh_sda_fabric_border_capability_required }}.
+      Rerun Prepare to enable and verify the required capabilities. No source was deleted.
+
+- name: Enable only captured replacement capabilities during manifest continuation
+  ansible.builtin.include_role:
+    name: sda_fabric_devices
+  vars:
+    sda_fabric_devices_state: merged
+    sda_fabric_devices_config_verify: false
+    sda_fabric_devices_config:
+      - fabric_devices:
+          fabric_name: "{{ switch_refresh_sda_fabric_border_capability_request.fabric_name }}"
+          device_config:
+            - device_ip: "{{ switch_refresh_sda_fabric_border_capability_expected.device_ip }}"
+              device_roles: "{{ switch_refresh_sda_fabric_border_capability_expected.device_roles }}"
+              borders_settings:
+                border_types: "{{ switch_refresh_sda_fabric_border_capability_required }}"
+  when:
+    - switch_refresh_sda_fabric_border_capability_required | length > 0
+    - switch_refresh_sda_fabric_border_capability_current != switch_refresh_sda_fabric_border_capability_required
+    - switch_refresh_sda_fabric_border_capability_request.allow_enable | default(false) | bool
+
+- name: Regenerate replacement state after capability-only enablement
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: "{{ switch_refresh_sda_fabric_border_capability_request.fabric_name }}"
+      device_ip: "{{ switch_refresh_sda_fabric_border_capability_expected.device_ip }}"
+      capture_file: "{{ switch_refresh_sda_fabric_border_capability_request.capture_file }}"
+      expected_state: present
+      context: capability-only replacement enablement
+  when:
+    - switch_refresh_sda_fabric_border_capability_required | length > 0
+    - switch_refresh_sda_fabric_border_capability_current != switch_refresh_sda_fabric_border_capability_required
+
+- name: Preserve replacement state after capability-only enablement
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capability_observed: "{{ switch_refresh_sda_fabric_border_capture_result.device_config }}"
+  when:
+    - switch_refresh_sda_fabric_border_capability_required | length > 0
+    - switch_refresh_sda_fabric_border_capability_current != switch_refresh_sda_fabric_border_capability_required
+  no_log: true
+
+- name: Require live replacement capability match
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_border_capability_observed | cisco.catalystcenter.sda_border_types) ==
+        switch_refresh_sda_fabric_border_capability_required
+    fail_msg: Catalyst Center did not report the required capabilities; deletion and handoff application are blocked.
+
+- name: Publish capability-verified replacement configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_capability_result:
+      device_config: "{{ switch_refresh_sda_fabric_border_capability_observed }}"
+      required_border_types: "{{ switch_refresh_sda_fabric_border_capability_required }}"
+  no_log: true

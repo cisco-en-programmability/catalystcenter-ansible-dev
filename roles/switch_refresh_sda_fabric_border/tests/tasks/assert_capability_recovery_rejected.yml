@@ -1,0 +1,28 @@
+---
+- name: Reset simulated replacement to L3 only
+  ansible.builtin.set_fact:
+    capability_test_live: >-
+      {{ capability_test_base | combine({'borders_settings': capability_test_base.borders_settings |
+      combine({'border_types': ['LAYER_3']})}) }}
+    capability_test_reject: "{{ capability_test_failure.reject }}"
+    capability_test_stale: "{{ capability_test_failure.stale }}"
+
+- name: Require controller acceptance and live capability readback
+  block:
+    - name: Attempt manifest capability recovery
+      ansible.builtin.include_tasks: ../../tasks/ensure_replacement_capabilities.yml
+      vars:
+        switch_refresh_sda_fabric_border_capability_request:
+          original_device_config: "{{ capability_test_source }}"
+          expected_device_config: "{{ capability_test_expected }}"
+          actual_device_config: "{{ capability_test_live }}"
+          fabric_name: Global/USA/San Jose/BLDG23
+          capture_file: "{{ capability_test_workspace.path }}/failed.yml"
+          allow_enable: true
+    - name: Fail if unverified capabilities were accepted
+      ansible.builtin.fail:
+        msg: Controller rejection or stale readback unexpectedly passed.
+  rescue:
+    - name: Verify capability recovery failed before handoff replay
+      ansible.builtin.assert:
+        that: ansible_failed_task.name == capability_test_failure.task

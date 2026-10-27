@@ -30,6 +30,7 @@
       device_roles:
         - BORDER_NODE
       borders_settings:
+        border_types: [LAYER_2, LAYER_3]
         layer3_settings:
           local_autonomous_system_number: "65001"
     switch_refresh_sda_fabric_border_state_transform_old:
@@ -551,12 +552,18 @@
                 hostname: old-border-01.example.test
                 macAddress: 00:11:22:33:44:55
                 role: CORE
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
                 serialNumber: NEW-BORDER-01
                 hostname: temporary-border-01.example.test
                 role: CORE
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
         switch_refresh_sda_fabric_border_cutover_interface_records_override:
           - device_ip: 192.0.2.10
             interface_details:
@@ -600,12 +607,18 @@
                     serialNumber: OLD-BORDER-01
                     hostname: old-border-01.example.test
                     role: CORE
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
               - device_ip: 192.0.2.10
                 device_details:
                   - instanceUuid: new-uuid-01
                     serialNumber: NEW-BORDER-01
                     hostname: temporary-border-01.example.test
                     role: ACCESS
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
             switch_refresh_sda_fabric_border_cutover_interface_records_override: []
 
         - name: Fail when mismatched cutover inventory roles were accepted
@@ -641,6 +654,9 @@
               - instanceUuid: old-uuid-01
                 serialNumber: OLD-BORDER-01
                 role: CORE
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
@@ -649,6 +665,9 @@
                 managementState: Managed
                 reachabilityStatus: Reachable
                 role: CORE
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
         switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
           - device_ip: 192.0.2.10
             interface_details:
@@ -692,6 +711,9 @@
                   - instanceUuid: old-uuid-01
                     serialNumber: OLD-BORDER-01
                     role: BORDER_ROUTER
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
               - device_ip: 192.0.2.10
                 device_details:
                   - instanceUuid: new-uuid-01
@@ -699,6 +721,9 @@
                     managementState: Managed
                     reachabilityStatus: Reachable
                     role: BORDER_ROUTER
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
             switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
               - device_ip: 192.0.2.10
                 interface_details:
@@ -738,6 +763,9 @@
               - instanceUuid: old-uuid-01
                 serialNumber: OLD-BORDER-01
                 role: BORDER_ROUTER
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
           - device_ip: 192.0.2.10
             device_details:
               - instanceUuid: new-uuid-01
@@ -745,6 +773,9 @@
                 managementState: Managed
                 reachabilityStatus: Ping Reachable
                 role: BORDER_ROUTER
+                platformId: C9300-48P
+                softwareVersion: 17.12.4
+                deviceSupportLevel: Supported
 
     - name: Verify SDA-transit-only mapping does not require interface records
       ansible.builtin.assert:
@@ -778,6 +809,9 @@
                   - instanceUuid: old-uuid-01
                     serialNumber: OLD-BORDER-01
                     role: BORDER_ROUTER
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
               - device_ip: 192.0.2.10
                 device_details:
                   - instanceUuid: new-uuid-01
@@ -785,6 +819,9 @@
                     managementState: Managed
                     reachabilityStatus: Unreachable
                     role: BORDER_ROUTER
+                    platformId: C9300-48P
+                    softwareVersion: 17.12.4
+                    deviceSupportLevel: Supported
             switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
               - device_ip: 192.0.2.10
                 interface_details:
@@ -891,6 +928,13 @@
     - name: Verify hard deletion and serial handoff ordering contract
       ansible.builtin.assert:
         that:
+          - >-
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Verify replacement capabilities before destructive release or handoff restoration'
+            ) <
+            switch_refresh_sda_fabric_border_cutover_task_names.index(
+              'Persist deletion-started recovery boundary before old fabric removal'
+            )
           - >-
             switch_refresh_sda_fabric_border_cutover_task_names.index(
               'Reject old border configuration drift before destructive release'

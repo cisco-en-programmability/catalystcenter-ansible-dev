@@ -355,6 +355,26 @@
       }}
   no_log: true
 
+- name: Validate captured and replacement border capability intent
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_capability_entry.expected_new_device_config |
+        cisco.catalystcenter.sda_border_capability_config(
+          source=switch_refresh_sda_fabric_border_capability_entry.original_device_config
+        ) is mapping
+      - >-
+        switch_refresh_sda_fabric_border_capability_entry.base_new_device_config |
+        cisco.catalystcenter.sda_border_capability_config(
+          source=switch_refresh_sda_fabric_border_capability_entry.original_device_config
+        ) is mapping
+    fail_msg: Manifest replacement capabilities conflict with captured source intent.
+  loop: "{{ switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_capability_entry
+    label: "{{ switch_refresh_sda_fabric_border_capability_entry.new.management_ip }}"
+  no_log: true
+
 - name: Normalize and aggregate validated cutover manifest entries
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_manifest_validated_entries: >-

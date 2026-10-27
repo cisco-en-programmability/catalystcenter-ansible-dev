@@ -353,6 +353,20 @@
       BORDER_NODE must also include manager-ready Layer 3 border settings.
   when: switch_refresh_sda_fabric_border_capture_matches | length == 1
 
+- name: Require explicit live border capability readback
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_capture_device_config.borders_settings.border_types is defined
+      - >-
+        switch_refresh_sda_fabric_border_capture_device_config |
+        cisco.catalystcenter.sda_border_types | length > 0
+    fail_msg: >-
+      Catalyst Center must report valid explicit borderTypes for this device.
+      Capabilities cannot be inferred from absent handoffs during live refresh.
+  when:
+    - switch_refresh_sda_fabric_border_capture_matches | length == 1
+    - "'BORDER_NODE' in switch_refresh_sda_fabric_border_capture_device_config.device_roles"
+
 - name: Publish generated border configuration capture
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_capture_result:
