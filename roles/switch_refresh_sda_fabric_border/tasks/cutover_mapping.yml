@@ -144,6 +144,7 @@
         {{ switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config }}
       actual_device_config: >-
         {{ switch_refresh_sda_fabric_border_current_new_fabric_capture.device_config }}
+      allow_missing_ip_pool_metadata: true
 
 - name: Preserve current replacement configuration class
   ansible.builtin.set_fact:
@@ -329,6 +330,16 @@
     switch_refresh_sda_fabric_border_cutover_classification_result.action !=
     'verify_expected_config'
 
+- name: Build address-preserving replacement handoff mutation payload
+  ansible.builtin.include_tasks: build_replay_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replay_request:
+      device_config: >-
+        {{ switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config }}
+  when: >-
+    switch_refresh_sda_fabric_border_cutover_classification_result.action in
+    ['delete_old_fabric_then_inventory', 'delete_old_inventory', 'apply_expected_config']
+
 - name: Apply complete expected border handoff configuration to replacement
   ansible.builtin.include_role:
     name: sda_fabric_devices
@@ -343,7 +354,7 @@
           fabric_name: >-
             {{ switch_refresh_sda_fabric_border_active_cutover_plan.fabric_site_name_hierarchy }}
           device_config: >-
-            {{ [switch_refresh_sda_fabric_border_current_cutover_mapping.expected_new_device_config] }}
+            {{ [switch_refresh_sda_fabric_border_replay_result.device_config] }}
   when: >-
     switch_refresh_sda_fabric_border_cutover_classification_result.action in
     ['delete_old_fabric_then_inventory', 'delete_old_inventory', 'apply_expected_config']
@@ -379,6 +390,7 @@
         post-cutover replacement {{
         switch_refresh_sda_fabric_border_current_cutover_mapping.new.management_ip }}
       require_empty_handoffs: false
+      allow_missing_ip_pool_metadata: true
 
 - name: Mark replacement handoff verification in active manifest plan
   ansible.builtin.include_tasks: update_cutover_plan_entry.yml

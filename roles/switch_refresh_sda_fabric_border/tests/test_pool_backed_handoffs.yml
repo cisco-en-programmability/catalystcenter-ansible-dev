@@ -1,0 +1,388 @@
+---
+- name: Validate pool-backed prepare and cutover replay offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    catalystcenter_host: test-controller.example.test
+    catalystcenter_port: 443
+    pool_source:
+      device_ip: 204.1.2.2
+      device_roles: [BORDER_NODE, CONTROL_PLANE_NODE]
+      borders_settings:
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+          border_priority: 1
+          custom_bgp_router_id: ""
+          is_default_exit: true
+        layer3_handoff_ip_transit:
+          - interface_name: GigabitEthernet1/0/1
+            external_connectivity_ip_pool_name: TB4_SJ_AP
+            virtual_network_name: BLDG23_Campus_VN
+            vlan_id: 440
+            tcp_mss_adjustment: 510
+            local_ip_address: 204.1.100.5/30
+            remote_ip_address: 204.1.100.6/30
+            transit_network_name: BLDG23_IP_Transit
+          - interface_name: GigabitEthernet1/0/1
+            external_connectivity_ip_pool_name: TB4_SJ_AP
+            virtual_network_name: SJ_VN
+            vlan_id: 442
+            tcp_mss_adjustment: 510
+            local_ip_address: 204.1.100.13/30
+            remote_ip_address: 204.1.100.14/30
+            transit_network_name: BLDG23_IP_Transit
+          - interface_name: GigabitEthernet1/0/1
+            external_connectivity_ip_pool_name: TB4_SJ_AP
+            virtual_network_name: INFRA_VN
+            vlan_id: 441
+            tcp_mss_adjustment: 510
+            local_ip_address: 204.1.100.9/30
+            remote_ip_address: 204.1.100.10/30
+            transit_network_name: BLDG23_IP_Transit
+    refresh_item:
+      name: pool-backed-bn1
+      fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+      new_devices:
+        device_ips: [192.0.2.10]
+      device_mapping:
+        - old: {management_ip: 204.1.2.2}
+          new: {management_ip: 192.0.2.10}
+          handoff_interface_mappings:
+            - source_interface_name: GigabitEthernet1/0/1
+              destination_interface_name: HundredGigE1/0/1
+    pool_readback_cases:
+      - {name: original pool association, match: true, state: exact}
+      - {name: absent pool association, omit_pool: true, match: true, state: exact}
+      - name: empty pool association
+        changes: {external_connectivity_ip_pool_name: ""}
+        match: true
+        state: exact
+      - name: different pool association
+        changes: {external_connectivity_ip_pool_name: OTHER_POOL}
+        match: false
+        state: divergent
+      - name: changed local address
+        changes: {local_ip_address: 204.1.100.21/30}
+        omit_pool: true
+        match: false
+        state: divergent
+      - name: changed remote address
+        changes: {remote_ip_address: 204.1.100.22/30}
+        match: false
+        state: divergent
+      - name: changed VLAN
+        changes: {vlan_id: 999}
+        omit_pool: true
+        match: false
+        state: divergent
+      - name: changed VN
+        changes: {virtual_network_name: OTHER_VN}
+        omit_pool: true
+        match: false
+        state: divergent
+      - name: changed transit
+        changes: {transit_network_name: OTHER_TRANSIT}
+        omit_pool: true
+        match: false
+        state: divergent
+      - name: changed interface
+        changes: {interface_name: HundredGigE1/0/2}
+        omit_pool: true
+        match: false
+        state: divergent
+      - name: changed TCP MSS
+        changes: {tcp_mss_adjustment: 600}
+        omit_pool: true
+        match: false
+        state: divergent
+      - {name: partial apply without pool metadata, count: 2, omit_pool: true, match: false, state: subset}
+      - {name: empty replacement, count: 0, match: false, state: empty}
+    pool_invalid_address_cases:
+      - name: missing local IPv4
+        omit_field: local_ip_address
+      - name: missing remote IPv4
+        omit_field: remote_ip_address
+      - name: empty local IPv4
+        changes: {local_ip_address: ""}
+      - name: empty remote IPv4
+        changes: {remote_ip_address: ""}
+      - name: malformed local IPv4
+        changes: {local_ip_address: not-an-ip}
+      - name: malformed remote IPv4 with prefix
+        changes: {remote_ip_address: not-an-ip/30}
+      - name: IPv4 octet out of range
+        changes: {local_ip_address: 204.1.100.999/30}
+      - name: IPv6 in local IPv4 field
+        changes: {local_ip_address: '2001:db8::1/30'}
+      - name: IPv6 in remote IPv4 field
+        changes: {remote_ip_address: '2001:db8::2/30'}
+      - name: IPv4 prefix out of range
+        changes: {local_ip_address: 204.1.100.5/33}
+      - name: IPv4 missing prefix
+        changes: {local_ip_address: 204.1.100.5}
+      - name: IPv4 dotted netmask instead of CIDR prefix
+        changes: {local_ip_address: 204.1.100.5/255.255.255.252}
+      - name: IPv4 nonnumeric prefix
+        changes: {remote_ip_address: 204.1.100.6/bad}
+      - name: nonstring IPv4
+        changes: {local_ip_address: 123}
+      - name: IPv4 CIDR with trailing newline
+        changes: {local_ip_address: "204.1.100.5/30\n"}
+      - name: incomplete IPv6 pair
+        changes: {local_ipv6_address: '2001:db8::1/126'}
+      - name: malformed IPv6 pair
+        changes: {local_ipv6_address: not-an-ip, remote_ipv6_address: also-not-an-ip}
+      - name: malformed local IPv6 with prefix
+        changes: {local_ipv6_address: '2001:db8::gg/126', remote_ipv6_address: '2001:db8::2/126'}
+      - name: malformed remote IPv6 with prefix
+        changes: {local_ipv6_address: '2001:db8::1/126', remote_ipv6_address: '2001:db8::gg/126'}
+      - name: IPv4 in IPv6 fields
+        changes: {local_ipv6_address: 204.1.100.5/30, remote_ipv6_address: 204.1.100.6/30}
+      - name: IPv6 prefix out of range
+        changes: {local_ipv6_address: '2001:db8::1/129', remote_ipv6_address: '2001:db8::2/126'}
+      - name: IPv6 missing prefix
+        changes: {local_ipv6_address: '2001:db8::1', remote_ipv6_address: '2001:db8::2'}
+      - name: IPv6 nonnumeric prefix
+        changes: {local_ipv6_address: '2001:db8::1/bad', remote_ipv6_address: '2001:db8::2/126'}
+      - name: nonstring IPv6
+        changes: {local_ipv6_address: 123, remote_ipv6_address: 456}
+      - name: IPv6 CIDR with trailing newline
+        changes: {local_ipv6_address: '2001:db8::1/126', remote_ipv6_address: "2001:db8::2/126\n"}
+
+  tasks:
+    - name: Build prepare base and complete cutover intent from BN1 capture
+      ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
+      vars:
+        switch_refresh_sda_fabric_border_transform_request:
+          fabric_name: "{{ refresh_item.fabric_site_name_hierarchy }}"
+          new: "{{ refresh_item.device_mapping[0].new }}"
+          interface_mappings: "{{ refresh_item.device_mapping[0].handoff_interface_mappings }}"
+          original_device_config: "{{ pool_source }}"
+
+    - name: Preserve transformed intent
+      ansible.builtin.set_fact:
+        pool_transform: "{{ switch_refresh_sda_fabric_border_transform_result }}"
+
+    - name: Check original capture and handoff-free prepare configuration
+      ansible.builtin.assert:
+        that:
+          - pool_transform.original_device_config == pool_source
+          - pool_transform.base_new_device_config.device_roles == pool_source.device_roles
+          - pool_transform.base_new_device_config.borders_settings.layer3_handoff_ip_transit is not defined
+          - pool_transform.ip_transit_handoff_count == 3
+          - >-
+            pool_transform.expected_new_device_config.borders_settings.layer3_handoff_ip_transit |
+            map(attribute='external_connectivity_ip_pool_name') | unique | list == ['TB4_SJ_AP']
+
+    - name: Verify prepared base without any handoff
+      ansible.builtin.include_tasks: ../tasks/verify_generated_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_verify_request:
+          expected_device_config: "{{ pool_transform.base_new_device_config }}"
+          actual_device_config: "{{ pool_transform.base_new_device_config }}"
+          context: pool-backed source prepare base
+          require_empty_handoffs: true
+
+    - name: Build explicit-address mutation payload
+      ansible.builtin.include_tasks: ../tasks/build_replay_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replay_request:
+          device_config: "{{ pool_transform.expected_new_device_config }}"
+
+    - name: Preserve mutation payload
+      ansible.builtin.set_fact:
+        pool_mutation: "{{ switch_refresh_sda_fabric_border_replay_result.device_config }}"
+
+    - name: Verify every address is preserved and pool selectors are absent
+      ansible.builtin.assert:
+        that:
+          - pool_mutation.device_ip == '192.0.2.10'
+          - pool_mutation.device_roles == pool_source.device_roles
+          - >-
+            pool_mutation.borders_settings.layer3_handoff_ip_transit |
+            selectattr('external_connectivity_ip_pool_name', 'defined') | list | length == 0
+          - >-
+            pool_mutation.borders_settings.layer3_handoff_ip_transit |
+            map(attribute='local_ip_address') | list ==
+            pool_source.borders_settings.layer3_handoff_ip_transit | map(attribute='local_ip_address') | list
+          - >-
+            pool_mutation.borders_settings.layer3_handoff_ip_transit |
+            map(attribute='remote_ip_address') | list ==
+            pool_source.borders_settings.layer3_handoff_ip_transit | map(attribute='remote_ip_address') | list
+          - >-
+            pool_mutation.borders_settings.layer3_handoff_ip_transit |
+            map(attribute='interface_name') | unique | list == ['HundredGigE1/0/1']
+          - pool_transform.original_device_config == pool_source
+
+    - name: Check exact verification and partial recovery with controller readback variations
+      ansible.builtin.include_tasks: tasks/assert_ip_transit_readback.yml
+      loop: "{{ pool_readback_cases }}"
+      loop_control:
+        loop_var: pool_readback_case
+        label: "{{ pool_readback_case.name }}"
+
+    - name: Check old-source pool metadata drift remains strict after replacement comparisons
+      ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replacement_classification_request:
+          expected_device_config: "{{ pool_transform.expected_new_device_config }}"
+          actual_device_config: "{{ pool_mutation }}"
+
+    - name: Reject missing source pool association
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replacement_classification_result.state == 'divergent'
+
+    - name: Verify old-source comparison also retains strict pool metadata
+      ansible.builtin.include_tasks: ../tasks/verify_generated_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_verify_request:
+          expected_device_config: "{{ pool_transform.expected_new_device_config }}"
+          actual_device_config: "{{ pool_mutation }}"
+          context: strict source pool drift
+          fail_on_mismatch: false
+
+    - name: Confirm strict source comparison rejects missing pool metadata
+      ansible.builtin.assert:
+        that:
+          - not switch_refresh_sda_fabric_border_verify_result.match
+
+    - name: Reject malformed or incomplete captured addresses before preflight completes
+      ansible.builtin.include_tasks: tasks/assert_invalid_ip_transit_capture.yml
+      loop: "{{ pool_invalid_address_cases }}"
+      loop_control:
+        loop_var: pool_invalid_case
+        label: "{{ pool_invalid_case.name }}"
+
+    - name: Accept valid IPv4 and IPv6 host CIDRs including prefix boundaries
+      ansible.builtin.include_tasks: ../tasks/validate_ip_transit_handoffs.yml
+      vars:
+        switch_refresh_sda_fabric_border_ip_handoff_validation_request:
+          context: valid address-family and numeric-prefix coverage
+          handoffs:
+            - interface_name: HundredGigE1/0/1
+              local_ip_address: 204.1.100.5/30
+              remote_ip_address: 204.1.100.6/30
+              local_ipv6_address: '2001:db8::1/126'
+              remote_ipv6_address: '2001:db8::2/126'
+            - interface_name: HundredGigE1/0/1
+              local_ip_address: 204.1.100.5/32
+              remote_ip_address: 204.1.100.6/32
+              local_ipv6_address: '2001:db8::1/128'
+              remote_ipv6_address: '2001:db8::2/128'
+            - interface_name: HundredGigE1/0/1
+              local_ip_address: 204.1.100.5/0
+              remote_ip_address: 204.1.100.6/0
+              local_ipv6_address: '2001:db8::1/0'
+              remote_ipv6_address: '2001:db8::2/0'
+
+    - name: Create isolated manifest workspace
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: border-pool-test-
+      register: pool_workspace
+
+    - name: Verify pool-backed manifest recovery
+      block:
+        - name: Derive batch input fingerprint
+          ansible.builtin.include_tasks: ../tasks/derive_cutover_input_fingerprint.yml
+
+        - name: Build pool-backed cutover plan
+          ansible.builtin.set_fact:
+            switch_refresh_sda_fabric_border_cutover_manifest_file: "{{ pool_workspace.path }}/pool.yml"
+            switch_refresh_sda_fabric_border_cutover_file_safe_name: pool-backed-bn1
+            switch_refresh_sda_fabric_border_cutover_plan:
+              name: "{{ refresh_item.name }}"
+              file_safe_name: pool-backed-bn1
+              fabric_site_name_hierarchy: "{{ refresh_item.fabric_site_name_hierarchy }}"
+              new_management_ips: [192.0.2.10]
+              manifest_file: "{{ pool_workspace.path }}/pool.yml"
+              input_fingerprint: "{{ switch_refresh_sda_fabric_border_cutover_input_fingerprint }}"
+              status: captured
+              resolved_mappings:
+                - "{{ pool_transform | combine(pool_identity) }}"
+          vars:
+            pool_identity:
+              old_selector: {management_ip: 204.1.2.2}
+              old_management_ip: 204.1.2.2
+              new: {management_ip: 192.0.2.10}
+              interface_mappings: "{{ refresh_item.device_mapping[0].handoff_interface_mappings }}"
+              inventory_role: CORE
+              device_roles: [BORDER_NODE, CONTROL_PLANE_NODE]
+              old_identity:
+                management_ip: 204.1.2.2
+                inventory_uuid: old-uuid
+                serial_numbers: [OLD-BN1]
+                hostname: BN1.example.test
+              new_identity:
+                management_ip: 192.0.2.10
+                inventory_uuid: new-uuid
+                serial_numbers: [NEW-BN1]
+                hostname: replacement.example.test
+              status: captured
+
+        - name: Persist pool-backed manifest
+          ansible.builtin.include_tasks: ../tasks/persist_cutover_manifest.yml
+
+        - name: Reload pool-backed manifest without the old device
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Check original and expected pool metadata survived manifest recovery
+          ansible.builtin.assert:
+            that:
+              - switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].original_device_config == pool_source
+              - switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].expected_new_device_config == pool_transform.expected_new_device_config
+
+        - name: Rebuild creation payload from the recovered manifest
+          ansible.builtin.include_tasks: ../tasks/build_replay_config.yml
+          vars:
+            switch_refresh_sda_fabric_border_replay_request:
+              device_config: "{{ switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].expected_new_device_config }}"
+
+        - name: Check recovered replay uses the same explicit addresses
+          ansible.builtin.assert:
+            that:
+              - switch_refresh_sda_fabric_border_replay_result.device_config == pool_mutation
+
+        - name: Preserve valid cutover plan for manifest rejection checks
+          ansible.builtin.set_fact:
+            pool_valid_cutover_plan: "{{ switch_refresh_sda_fabric_border_cutover_plan }}"
+
+        - name: Reject malformed or incomplete addresses in fingerprint-valid source and replacement manifests
+          ansible.builtin.include_tasks: tasks/assert_invalid_ip_transit_manifest.yml
+          vars:
+            pool_manifest_config_key: "{{ pool_manifest_case[0] }}"
+            pool_invalid_case: "{{ pool_manifest_case[1] }}"
+          loop: >-
+            {{ ['original_device_config', 'expected_new_device_config'] |
+            product(pool_invalid_address_cases) | list }}
+          loop_control:
+            loop_var: pool_manifest_case
+            label: "{{ pool_manifest_case[0] }}: {{ pool_manifest_case[1].name }}"
+
+        - name: Confirm rejected plans did not overwrite the recovery manifest
+          ansible.builtin.include_tasks: ../tasks/load_cutover_manifest.yml
+
+        - name: Check recovery still contains the complete original capture
+          ansible.builtin.assert:
+            that:
+              - switch_refresh_sda_fabric_border_loaded_cutover_plan.resolved_mappings[0].original_device_config == pool_source
+      always:
+        - name: Remove isolated manifest workspace
+          ansible.builtin.file:
+            path: "{{ pool_workspace.path }}"
+            state: absent
+
+    - name: Preserve control-plane-only replay payloads without border settings
+      ansible.builtin.include_tasks: ../tasks/build_replay_config.yml
+      vars:
+        switch_refresh_sda_fabric_border_replay_request:
+          device_config:
+            device_ip: 192.0.2.10
+            device_roles: [CONTROL_PLANE_NODE]
+
+    - name: Check replay does not add border settings to a control-plane-only device
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_border_replay_result.device_config.device_roles == ['CONTROL_PLANE_NODE']
+          - switch_refresh_sda_fabric_border_replay_result.device_config.borders_settings is not defined

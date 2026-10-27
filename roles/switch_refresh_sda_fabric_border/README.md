@@ -44,6 +44,7 @@ Recovery is manifest-backed and rolls forward.
 ## Requirements
 
 - `cisco.catalystcenter` collection and a compatible Catalyst Center SDK
+- `ansible.utils` collection version 2.2.0 or later (below 7.0), for address-family validation
 - Python and dependency versions required by the roles called by this role
 - Old and replacement devices represented in the same Catalyst Center
 - A maintenance window that accounts for the border handoff outage
@@ -196,8 +197,9 @@ until both barriers pass.
 - Exact old-selector resolution with stable UUID and serial identity
 - Exact generator capture for the requested fabric, device, and supported role set
 - Complete source-to-destination interface mapping
-- Replay-safe IP-transit handoffs; a non-empty external-connectivity pool is
-  rejected because replay could reallocate the captured peer addresses
+- Address-preserving IP-transit replay using captured local/remote IPv4
+  addresses and complete IPv6 pairs when present; pool selectors are omitted
+  only from outgoing handoff creation payloads
 - Manager-compatible priority handling: default readback priority `10` is
   omitted from mutation payloads, while explicit priorities `1..9` are kept
 - Empty `custom_bgp_router_id` overrides are omitted from replacement payloads
@@ -217,6 +219,30 @@ outside the old/replacement pair. A single-border refresh therefore proceeds
 after explicit destructive cutover approval and causes a planned border outage
 between removal of the old device and verified handoff restoration on the
 replacement. Run that cutover in an approved maintenance window.
+
+## Pool-backed IP-transit handoffs
+
+Prepare accepts existing pool-backed handoffs, including their allocated peer
+addresses. The original capture and expected replacement configuration retain
+`external_connectivity_ip_pool_name` in the protected manifest. Prepare still
+adds only the handoff-free base configuration.
+
+At cutover, the role derives a separate creation payload that removes the pool
+selector and supplies the captured local/remote addresses, with mapped
+replacement interfaces. This selects the fabric manager's explicit-address
+path; supplying the pool name would override the captured addresses. Missing
+IPv4 addresses, invalid CIDR syntax or address families, and incomplete IPv6
+pairs fail preflight and manifest validation before old-device deletion. IPv4
+fields require IPv4 CIDRs with numeric prefixes 0..32; optional IPv6 fields
+require IPv6 CIDRs with numeric prefixes 0..128.
+
+Replacement verification and recovery accept the captured pool association or
+an absent/empty pool association in generated readback. A different non-empty
+pool, changed peer address, or any other changed handoff setting fails
+verification. Old-device drift checks remain strict, including the pool name.
+The role does not request or guarantee that Catalyst Center retains a pool
+association after explicit-address creation. Controller acceptance of the
+previous allocation and resulting pool metadata require lab validation.
 
 ## Manifest recovery
 

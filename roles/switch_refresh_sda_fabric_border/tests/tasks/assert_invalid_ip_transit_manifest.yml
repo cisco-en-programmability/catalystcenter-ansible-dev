@@ -1,0 +1,48 @@
+---
+- name: Build invalid manifest configuration
+  ansible.builtin.set_fact:
+    pool_bad_manifest_config: >-
+      {{
+        pool_config | combine({'borders_settings': pool_config.borders_settings |
+          combine({'layer3_handoff_ip_transit': [
+            pool_config.borders_settings.layer3_handoff_ip_transit[0] |
+            dict2items |
+            rejectattr('key', 'equalto', pool_invalid_case.omit_field | default('')) |
+            list | items2dict | combine(pool_invalid_case.changes | default({}))
+          ] + pool_config.borders_settings.layer3_handoff_ip_transit[1:]})})
+      }}
+  vars:
+    pool_config: "{{ pool_valid_cutover_plan.resolved_mappings[0][pool_manifest_config_key] }}"
+
+- name: Build invalid plan with consistent source fingerprint
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_cutover_plan: >-
+      {{
+        pool_valid_cutover_plan | combine({'resolved_mappings': [
+          pool_valid_cutover_plan.resolved_mappings[0] | combine({
+            pool_manifest_config_key: pool_bad_manifest_config,
+            'source_config_fingerprint': (
+              pool_bad_manifest_config if pool_manifest_config_key == 'original_device_config'
+              else pool_source
+            ) | to_json(sort_keys=true) | hash('sha256')
+          })
+        ]})
+      }}
+
+- name: Require valid explicit addresses before persisting a recovery plan
+  block:
+    - name: Persist plan with fresh fingerprints but invalid addresses
+      ansible.builtin.include_tasks: ../../tasks/persist_cutover_manifest.yml
+
+    - name: Fail when an invalid manifest was accepted
+      ansible.builtin.fail:
+        msg: An invalid explicit-address manifest unexpectedly passed.
+  rescue:
+    - name: Verify address validation rejected the invalid manifest
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task.name == 'Validate captured IP-transit handoff records'
+  always:
+    - name: Restore complete cutover plan
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_cutover_plan: "{{ pool_valid_cutover_plan }}"

@@ -1,0 +1,3 @@
+bugfixes:
+  - switch_refresh_sda_fabric_border - accept pool-backed IP-transit source handoffs and replay captured peer addresses without pool allocation selectors; preserve source metadata in manifests and handle absent replacement pool metadata during verification and recovery.
+  - switch_refresh_sda_fabric_border - reject malformed CIDRs, incorrect address families, invalid prefixes, and incomplete peer addresses during preflight and manifest validation before old-device deletion.
