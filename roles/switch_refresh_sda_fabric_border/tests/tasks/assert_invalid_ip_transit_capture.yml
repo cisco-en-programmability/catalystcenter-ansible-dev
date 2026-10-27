@@ -1,0 +1,29 @@
+---
+- name: Require valid captured addresses before any replacement mutation
+  block:
+    - name: Transform invalid pool-backed capture
+      ansible.builtin.include_tasks: ../../tasks/build_replacement_configs.yml
+      vars:
+        switch_refresh_sda_fabric_border_transform_request:
+          fabric_name: "{{ refresh_item.fabric_site_name_hierarchy }}"
+          new: "{{ refresh_item.device_mapping[0].new }}"
+          interface_mappings: "{{ refresh_item.device_mapping[0].handoff_interface_mappings }}"
+          original_device_config: >-
+            {{
+              pool_source | combine({'borders_settings': pool_source.borders_settings |
+                combine({'layer3_handoff_ip_transit': [
+                  pool_source.borders_settings.layer3_handoff_ip_transit[0] |
+                  dict2items |
+                  rejectattr('key', 'equalto', pool_invalid_case.omit_field | default('')) |
+                  list | items2dict | combine(pool_invalid_case.changes | default({}))
+                ]})})
+            }}
+
+    - name: Fail when an invalid capture was accepted
+      ansible.builtin.fail:
+        msg: An invalid explicit-address capture unexpectedly passed.
+  rescue:
+    - name: Verify validation rejected the invalid capture
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task.name == 'Validate captured IP-transit handoff records'

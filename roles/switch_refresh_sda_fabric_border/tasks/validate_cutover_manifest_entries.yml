@@ -490,42 +490,30 @@
       }}
   no_log: true
 
-- name: Reject pool-backed IP-transit replay in cutover manifests
-  ansible.builtin.assert:
-    that:
-      - >-
-        switch_refresh_sda_fabric_border_manifest_ip_handoff_pair.1
-        .external_connectivity_ip_pool_name |
-        default('') | string | trim | length == 0
-    fail_msg: >-
-      Pool-backed IP-transit replay is not supported because the fabric manager
-      ignores captured peer addresses and requests a new allocation when a
-      pool name is supplied.
-  loop: >-
-    {{
-      (
-        switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
-        subelements(
-          'original_device_config.borders_settings.layer3_handoff_ip_transit',
-          skip_missing=true
-        )
-      ) +
-      (
-        switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
-        subelements(
-          'expected_new_device_config.borders_settings.layer3_handoff_ip_transit',
-          skip_missing=true
-        )
-      )
-    }}
-  loop_control:
-    loop_var: switch_refresh_sda_fabric_border_manifest_ip_handoff_pair
-    label: >-
-      {{
-        switch_refresh_sda_fabric_border_manifest_ip_handoff_pair.1.interface_name |
-        default('invalid-ip-transit-handoff')
-      }}
-  no_log: true
+- name: Validate explicit IP-transit replay addresses in cutover manifests
+  ansible.builtin.include_tasks: validate_ip_transit_handoffs.yml
+  vars:
+    switch_refresh_sda_fabric_border_ip_handoff_validation_request:
+      handoffs: >-
+        {{
+          (
+            (
+              switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+              subelements(
+                'original_device_config.borders_settings.layer3_handoff_ip_transit',
+                skip_missing=true
+              )
+            ) +
+            (
+              switch_refresh_sda_fabric_border_manifest_entry_validation_request.entries |
+              subelements(
+                'expected_new_device_config.borders_settings.layer3_handoff_ip_transit',
+                skip_missing=true
+              )
+            )
+          ) | map('last') | list
+        }}
+      context: cutover manifest source and replacement configurations
 
 - name: Validate cutover manifest entry coverage and uniqueness
   ansible.builtin.assert:

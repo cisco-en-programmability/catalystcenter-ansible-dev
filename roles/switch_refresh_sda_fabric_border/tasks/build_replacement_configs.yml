@@ -186,29 +186,12 @@
       {{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
       default('invalid-l2-handoff') }}
 
-- name: Validate captured IP-transit handoff records
-  ansible.builtin.assert:
-    that:
-      - switch_refresh_sda_fabric_border_transform_handoff_item is mapping
-      - switch_refresh_sda_fabric_border_transform_handoff_item.interface_name is defined
-      - >-
-        switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
-        string | trim | length > 0
-      - >-
-        switch_refresh_sda_fabric_border_transform_handoff_item
-        .external_connectivity_ip_pool_name |
-        default('') | string | trim | length == 0
-    fail_msg: >-
-      Every generated IP-transit handoff must contain a non-empty
-      interface_name. Pool-backed IP-transit handoffs are not supported by
-      this initial role because the fabric manager ignores captured peer
-      addresses and requests a new allocation when the pool name is supplied.
-  loop: "{{ switch_refresh_sda_fabric_border_transform_ip_handoffs }}"
-  loop_control:
-    loop_var: switch_refresh_sda_fabric_border_transform_handoff_item
-    label: >-
-      {{ switch_refresh_sda_fabric_border_transform_handoff_item.interface_name |
-      default('invalid-ip-transit-handoff') }}
+- name: Validate captured IP-transit addresses for replacement replay
+  ansible.builtin.include_tasks: validate_ip_transit_handoffs.yml
+  vars:
+    switch_refresh_sda_fabric_border_ip_handoff_validation_request:
+      handoffs: "{{ switch_refresh_sda_fabric_border_transform_ip_handoffs }}"
+      context: prepare or normal-cutover source capture
 
 - name: Collect distinct source handoff interfaces
   ansible.builtin.set_fact:

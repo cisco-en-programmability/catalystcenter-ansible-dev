@@ -10,6 +10,7 @@
 #     context: <description>
 #     require_empty_handoffs: false
 #     fail_on_mismatch: true
+#     allow_missing_ip_pool_metadata: false  # true only for replacement readback
 # Output:
 #   switch_refresh_sda_fabric_border_verify_result
 
@@ -240,44 +241,28 @@
     label: actual-l2-handoff
   no_log: true
 
-- name: Canonicalize expected IP-transit handoffs
+- name: Compare IP-transit handoffs with scoped pool metadata handling
+  ansible.builtin.include_tasks: canonicalize_ip_transit_handoffs.yml
+  vars:
+    switch_refresh_sda_fabric_border_ip_comparison_request:
+      expected_handoffs: >-
+        {{ switch_refresh_sda_fabric_border_verify_expected_settings.layer3_handoff_ip_transit |
+        default([]) }}
+      actual_handoffs: >-
+        {{ switch_refresh_sda_fabric_border_verify_actual_settings.layer3_handoff_ip_transit |
+        default([]) }}
+      allow_missing_pool_metadata: >-
+        {{
+          switch_refresh_sda_fabric_border_verify_request.allow_missing_ip_pool_metadata |
+          default(false) | bool
+        }}
+
+- name: Preserve canonical IP-transit handoff comparison records
   ansible.builtin.set_fact:
     switch_refresh_sda_fabric_border_verify_expected_ip_records: >-
-      {{
-        switch_refresh_sda_fabric_border_verify_expected_ip_records +
-        [
-          switch_refresh_sda_fabric_border_verify_handoff_item |
-          to_json(sort_keys=true)
-        ]
-      }}
-  loop: >-
-    {{
-      switch_refresh_sda_fabric_border_verify_expected_settings
-      .layer3_handoff_ip_transit | default([])
-    }}
-  loop_control:
-    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
-    label: expected-ip-transit-handoff
-  no_log: true
-
-- name: Canonicalize actual IP-transit handoffs
-  ansible.builtin.set_fact:
+      {{ switch_refresh_sda_fabric_border_ip_comparison_result.expected_records }}
     switch_refresh_sda_fabric_border_verify_actual_ip_records: >-
-      {{
-        switch_refresh_sda_fabric_border_verify_actual_ip_records +
-        [
-          switch_refresh_sda_fabric_border_verify_handoff_item |
-          to_json(sort_keys=true)
-        ]
-      }}
-  loop: >-
-    {{
-      switch_refresh_sda_fabric_border_verify_actual_settings
-      .layer3_handoff_ip_transit | default([])
-    }}
-  loop_control:
-    loop_var: switch_refresh_sda_fabric_border_verify_handoff_item
-    label: actual-ip-transit-handoff
+      {{ switch_refresh_sda_fabric_border_ip_comparison_result.actual_records }}
   no_log: true
 
 - name: Build canonical generated border records

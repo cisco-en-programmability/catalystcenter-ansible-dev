@@ -626,29 +626,15 @@
             )
           }}
 
-    - name: Verify fingerprint-valid pool-backed manifest is rejected
-      block:
-        - name: Validate unsupported pool-backed manifest entry
-          ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
-          vars:
-            switch_refresh_sda_fabric_border_manifest_entry_validation_request:
-              entries:
-                - >-
-                  {{ switch_refresh_sda_fabric_border_manifest_pool_entry }}
-              expected_new_ips:
-                - 192.0.2.10
-              context: pool-backed replay negative test
-
-        - name: Fail when pool-backed manifest replay was accepted
-          ansible.builtin.fail:
-            msg: Pool-backed manifest replay unexpectedly passed validation.
-      rescue:
-        - name: Verify pool-backed manifest policy was enforced
-          ansible.builtin.assert:
-            that:
-              - >-
-                ansible_failed_task.name ==
-                'Reject pool-backed IP-transit replay in cutover manifests'
+    - name: Validate fingerprint-valid pool-backed manifest with captured addresses
+      ansible.builtin.include_tasks: ../tasks/validate_cutover_manifest_entries.yml
+      vars:
+        switch_refresh_sda_fabric_border_manifest_entry_validation_request:
+          entries:
+            - "{{ switch_refresh_sda_fabric_border_manifest_pool_entry }}"
+          expected_new_ips:
+            - 192.0.2.10
+          context: pool-backed address-preserving replay
 
     - name: Verify old and replacement UUID overlap is rejected
       block:
