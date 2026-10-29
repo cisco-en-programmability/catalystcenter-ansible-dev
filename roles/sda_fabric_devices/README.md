@@ -88,6 +88,7 @@ The following image is copied from the workflow documentation to help map the ro
               - CONTROL_PLANE_NODE
               - BORDER_NODE
               borders_settings:
+                border_types: [LAYER_2, LAYER_3]
                 layer3_settings:
                   local_autonomous_system_number: 1234
                   is_default_exit: true

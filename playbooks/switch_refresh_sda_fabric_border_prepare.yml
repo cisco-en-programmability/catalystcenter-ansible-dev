@@ -1,0 +1,15 @@
+---
+- name: Prepare replacement SDA fabric border devices
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/switch_refresh_sda_fabric_border_usecase.yml
+  vars:
+    switch_refresh_sda_fabric_border_phase: prepare
+    switch_refresh_sda_fabric_border_cutover_approved: false
+    switch_refresh_sda_fabric_border_resume_from_manifest: false
+  roles:
+    - role: switch_refresh_sda_fabric_border
+      tags:
+        - switch_refresh_sda_fabric_border_prepare

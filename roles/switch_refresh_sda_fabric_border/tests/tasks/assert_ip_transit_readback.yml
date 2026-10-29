@@ -1,0 +1,64 @@
+---
+- name: Initialize simulated replacement readback
+  ansible.builtin.set_fact:
+    pool_readback_handoffs: []
+
+- name: Build simulated replacement handoff readback
+  ansible.builtin.set_fact:
+    pool_readback_handoffs: >-
+      {{
+        pool_readback_handoffs + [
+          (
+            pool_readback_handoff | dict2items |
+            rejectattr('key', 'equalto', 'external_connectivity_ip_pool_name') |
+            items2dict
+            if pool_readback_case.omit_pool | default(false)
+            else pool_readback_handoff
+          ) | combine(pool_readback_case.changes | default({}))
+        ]
+      }}
+  loop: >-
+    {{ pool_transform.expected_new_device_config.borders_settings.layer3_handoff_ip_transit[
+    :pool_readback_case.count | default(3)] | reverse | list }}
+  loop_control:
+    loop_var: pool_readback_handoff
+
+- name: Build simulated replacement configuration
+  ansible.builtin.set_fact:
+    pool_readback_config: >-
+      {{
+        pool_transform.expected_new_device_config | combine(
+          {'borders_settings': pool_transform.expected_new_device_config.borders_settings |
+            combine({'layer3_handoff_ip_transit': pool_readback_handoffs})}
+        )
+      }}
+
+- name: Verify replacement configuration against captured intent
+  ansible.builtin.include_tasks: ../../tasks/verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: "{{ pool_transform.expected_new_device_config }}"
+      actual_device_config: "{{ pool_readback_config }}"
+      context: "{{ pool_readback_case.name }}"
+      allow_missing_ip_pool_metadata: true
+      fail_on_mismatch: false
+
+- name: Check exact configuration verification outcome
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_result.match == pool_readback_case.match
+
+- name: Classify replacement configuration for manifest resume
+  ansible.builtin.include_tasks: ../../tasks/classify_replacement_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replacement_classification_request:
+      expected_device_config: "{{ pool_transform.expected_new_device_config }}"
+      actual_device_config: "{{ pool_readback_config }}"
+      allow_missing_ip_pool_metadata: true
+
+- name: Check safe replacement recovery classification
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result.state ==
+        pool_readback_case.state

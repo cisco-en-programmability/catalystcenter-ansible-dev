@@ -1,0 +1,107 @@
+---
+- name: Initialize legacy recovery state and offline inventory
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_resume_from_manifest: true
+    switch_refresh_sda_fabric_border_cutover_approved: false
+    switch_refresh_sda_fabric_border_hostname_transfer_enabled: false
+    switch_refresh_sda_fabric_border_work_dir: "{{ capability_test_workspace.path }}"
+    switch_refresh_sda_fabric_border_active_cutover_mapping_results: []
+    switch_refresh_sda_fabric_border_inventory_observation_records_override:
+      - device_ip: 204.1.2.11
+        device_details:
+          - instanceUuid: new-uuid
+            serialNumber: NEW-BN2
+            hostname: replacement-bn2.example.test
+            managementState: Managed
+            reachabilityStatus: Reachable
+            role: CORE
+            platformId: C9300-48P
+            softwareVersion: 17.12.4
+            deviceSupportLevel: Supported
+    switch_refresh_sda_fabric_border_inventory_observation_interface_records_override:
+      - device_ip: 204.1.2.11
+        interface_details:
+          - {portName: GigabitEthernet2/0/10}
+          - {portName: GigabitEthernet2/0/11}
+    capability_test_reject: false
+    capability_test_stale: false
+    capability_test_payloads: []
+    capability_test_live: >-
+      {{ capability_test_base | combine({'borders_settings': capability_test_base.borders_settings |
+      combine({'border_types': ['LAYER_3']})}) }}
+
+- name: Build immutable old-deleted legacy mapping
+  ansible.builtin.set_fact:
+    capability_test_mapping:
+      old_selector: {serial_number: OLD-BN2}
+      old_management_ip: 204.1.2.2
+      new: {management_ip: 204.1.2.11}
+      interface_mappings:
+        - source_interface_name: GigabitEthernet1/0/10
+          destination_interface_name: GigabitEthernet2/0/10
+        - source_interface_name: GigabitEthernet1/0/11
+          destination_interface_name: GigabitEthernet2/0/11
+      inventory_role: CORE
+      device_roles: [BORDER_NODE]
+      old_identity:
+        management_ip: 204.1.2.2
+        inventory_uuid: old-uuid
+        serial_numbers: [OLD-BN2]
+        hostname: bn2.example.test
+      new_identity:
+        management_ip: 204.1.2.11
+        inventory_uuid: new-uuid
+        serial_numbers: [NEW-BN2]
+        hostname: replacement-bn2.example.test
+      original_device_config: "{{ capability_test_legacy_source }}"
+      base_new_device_config: >-
+        {{ capability_test_base | combine({'borders_settings': capability_test_base.borders_settings |
+        dict2items | rejectattr('key', 'equalto', 'border_types') | items2dict}) }}
+      expected_new_device_config: "{{ capability_test_legacy_expected }}"
+      source_config_fingerprint: "{{ capability_test_fingerprint }}"
+      source_handoff_interfaces: [GigabitEthernet1/0/10, GigabitEthernet1/0/11]
+      status: old_deleted
+
+- name: Build active legacy cutover plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_active_cutover_plan:
+      name: bn2-legacy-recovery
+      file_safe_name: bn2-legacy-recovery
+      fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+      new_management_ips: [204.1.2.11]
+      manifest_file: "{{ capability_test_workspace.path }}/bn2_border_cutover.yml"
+      input_fingerprint: "{{ 'bn2-legacy-input' | hash('sha256') }}"
+      resolved_mappings: ["{{ capability_test_mapping }}"]
+      status: old_deleted
+
+- name: Verify the all-batch manifest preflight repairs capabilities before execution
+  ansible.builtin.include_tasks: ../../tasks/preflight_manifest_capabilities.yml
+  vars:
+    refresh_item:
+      fabric_site_name_hierarchy: Global/USA/San Jose/BLDG23
+    switch_refresh_sda_fabric_border_cutover_workspace: "{{ capability_test_workspace.path }}/preflight"
+    switch_refresh_sda_fabric_border_capability_mapping: "{{ capability_test_mapping }}"
+
+- name: Prove capability-only preflight completed before any handoff apply
+  ansible.builtin.assert:
+    that:
+      - capability_test_payloads | length == 1
+      - capability_test_live.borders_settings.border_types == ['LAYER_2', 'LAYER_3']
+      - capability_test_live.borders_settings.layer2_handoff is not defined
+
+- name: Resume real serial cutover mapping from old_deleted
+  ansible.builtin.include_tasks: ../../tasks/cutover_mapping.yml
+  vars:
+    switch_refresh_sda_fabric_border_active_cutover_mapping: "{{ capability_test_mapping }}"
+
+- name: Verify complete recovery, capability-before-handoff ordering, and immutable capture
+  ansible.builtin.assert:
+    that:
+      - capability_test_payloads | length == 2
+      - capability_test_payloads[0][0].fabric_devices.device_config[0].borders_settings.keys() | list == ['border_types']
+      - capability_test_payloads[1][0].fabric_devices.device_config[0].borders_settings.layer2_handoff | length == 1
+      - switch_refresh_sda_fabric_border_active_cutover_plan.status == 'complete'
+      - switch_refresh_sda_fabric_border_active_cutover_mapping_results[0].handoff_verified | bool
+      - switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings[0].original_device_config == capability_test_legacy_source
+      - switch_refresh_sda_fabric_border_active_cutover_plan.resolved_mappings[0].expected_new_device_config == capability_test_legacy_expected
+      - switch_refresh_sda_fabric_border_persisted_cutover_manifest.devices[0].source_config_fingerprint == capability_test_fingerprint

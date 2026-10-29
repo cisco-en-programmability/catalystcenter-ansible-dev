@@ -1,0 +1,68 @@
+---
+# Readiness polling belongs to network_devices_info. This adapter preserves the
+# border-specific identity, reachability, support, and inventory-role checks.
+- name: Validate replacement border inventory readiness request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_prepare_inventory_readiness_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | map('string') | map('trim') |
+        reject('equalto', '') | unique | list | length ==
+        switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .expected_ips | length
+      - >-
+        (switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+        .timeout | int) > 0
+    fail_msg: Inventory readiness requires unique replacement IPs and a positive timeout.
+
+- name: Gather replacement border inventory with readiness validation
+  ansible.builtin.include_role:
+    name: network_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_border_prepare
+  vars:
+    catalystcenter_debug: false
+    network_devices_info_state: gathered
+    network_devices_info_config_verify: false
+    network_devices_info_config:
+      - network_devices:
+          - device_identifier:
+              - ip_address: >-
+                  {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_request.expected_ips }}
+            device_role: >-
+              {{
+                switch_refresh_sda_fabric_border_prepare_inventory_readiness_request
+                .required_role | default('') or omit
+              }}
+            collectionStatus: Managed
+            managementState: Managed
+            timeout: >-
+              {{ switch_refresh_sda_fabric_border_prepare_inventory_readiness_request.timeout | int }}
+            requested_info:
+              - device_info
+
+- name: Normalize gathered replacement inventory for border-specific validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_prepare_inventory_readiness_raw_result:
+      failed: "{{ network_devices_info_result.failed | default(false) }}"
+      catalystcenter_response:
+        response: >-
+          {{
+            network_devices_info_result.response | default([]) |
+            select('sequence') | reject('string') | flatten |
+            select('mapping') | selectattr('device_info', 'defined') |
+            map(attribute='device_info') | flatten |
+            map(attribute='device_details') | flatten
+          }}
+  no_log: true
+
+- name: Validate replacement inventory identity and operational details
+  ansible.builtin.include_tasks: validate_prepare_inventory_readiness_result.yml

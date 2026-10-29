@@ -32,6 +32,10 @@ This role manages Inventory in Cisco Catalyst Center using the `inventory_workfl
 - `inventory_config_verify`: Verify configuration after applying (default: `false`)
 - `inventory_config`: List of inventory configurations (required)
 
+Use `BORDER_ROUTER` for `inventory_config.role`. The module converts it to
+`BORDER ROUTER` for the role-update API and accepts either spelling in
+controller readback. Input validation rejects `BORDER ROUTER` in playbooks.
+
 ## Dependencies
 
 None

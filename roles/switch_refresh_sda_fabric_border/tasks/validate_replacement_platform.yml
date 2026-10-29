@@ -1,0 +1,19 @@
+---
+# Inventory identity is necessary; controller acceptance and live borderTypes
+# readback provide the capability gate for the currently running platform/image.
+- name: Require known supported replacement platform and software
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_platform_request.device_details.platformId |
+        default('', true) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_platform_request.device_details.softwareVersion |
+        default('', true) | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_border_platform_request.device_details.deviceSupportLevel |
+        default('', true) | string | trim | upper == 'SUPPORTED'
+    fail_msg: >-
+      Replacement platformId, softwareVersion, and Supported inventory status
+      are required before capability configuration, source deletion, or handoff
+      application. Context: {{ switch_refresh_sda_fabric_border_platform_request.context }}.
