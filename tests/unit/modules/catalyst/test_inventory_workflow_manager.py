@@ -18,6 +18,7 @@ from __future__ import absolute_import, division, print_function
 
 __metaclass__ = type
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from ansible_collections.cisco.catalystcenter.plugins.modules import (
@@ -174,6 +175,8 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
                 self.test_data.get("get_interface_details2_update_interface"),
                 self.test_data.get("update_interface_details_response"),
             ]
+        elif "playbook_update_role_border_router" in self._testMethodName:
+            self.run_catalystcenter_exec.side_effect = self.border_role_api_response
         elif "playbook_update_role_task_failure" in self._testMethodName:
             self.run_catalystcenter_exec.side_effect = [
                 self.test_data.get("get_device_list1_update_role"),
@@ -196,7 +199,7 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
                 self.test_data.get("get_device_list3_update_role"),
                 self.test_data.get("get_device_list4_update_role"),
                 Exception(
-                    "NCIM90673: 'BORDER_ROUTER' is not a valid role value for the device."
+                    "NCIM90673: Controller rejected the requested role."
                 ),
             ]
         elif "playbook_update_role" in self._testMethodName:
@@ -556,6 +559,9 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
             result.get("msg"),
             "Device(s) '['2.2.2.2']' role updated successfully to '['ACCESS']'",
         )
+        role_calls = [call for call in self.run_catalystcenter_exec.call_args_list
+                      if call.kwargs.get("function") == "update_device_role"]
+        self.assertEqual(role_calls[0].kwargs["params"]["role"], "ACCESS")
 
     def test_inventory_workflow_manager_playbook_update_role_api_failure(self):
         """A rejected role update must fail instead of being logged and ignored."""
@@ -578,6 +584,118 @@ class TestCatalystCenterInventoryWorkflow(TestCatalystModule):
 
         self.assertIn("Error while updating device role 'BORDER_ROUTER'", result["msg"])
         self.assertIn("NCIM90673", result["msg"])
+        role_calls = [call for call in self.run_catalystcenter_exec.call_args_list
+                      if call.kwargs.get("function") == "update_device_role"]
+        self.assertEqual(role_calls[0].kwargs["params"]["role"], "BORDER ROUTER")
+
+    def border_role_api_response(self, *args, **kwargs):
+        """Simulate inventory readback and validate the controller's role contract."""
+        function = kwargs["function"]
+        params = kwargs.get("params") or {}
+        if function == "get_device_list":
+            return {"response": [] if params.get("offset") else [deepcopy(self.border_role_device)]}
+        if function == "update_device_role":
+            self.assertEqual(params, {
+                "id": "73f91ecd-d61d-4014-98ce-10c400c35924",
+                "role": "BORDER ROUTER",
+                "roleSource": "MANUAL",
+            })
+            self.border_role_device.update(role=params["role"], roleSource=params["roleSource"])
+            return deepcopy(self.test_data["update_device_role"])
+        if function == "get_task_by_id":
+            return {"response": {"isError": False, "progress": "Device role updated successfully"}}
+        self.fail("Unexpected API call: {0}".format(function))
+
+    def run_border_role_workflow(self, desired_role, current_role, changed):
+        self.border_role_device = {
+            "id": "73f91ecd-d61d-4014-98ce-10c400c35924",
+            "managementIpAddress": "204.1.2.11",
+            "role": current_role,
+            "roleSource": "MANUAL",
+        }
+        set_module_args(dict(
+            catalystcenter_host="1.1.1.1",
+            catalystcenter_username="dummy",
+            catalystcenter_password="dummy",
+            catalystcenter_log=False,
+            catalystcenter_version="2.3.7.9",
+            state="merged",
+            config_verify=True,
+            config=[{"ip_address_list": ["204.1.2.11"], "role": desired_role}],
+        ))
+        result = self.execute_module(changed=changed, failed=False)
+        role_calls = [
+            call for call in self.run_catalystcenter_exec.call_args_list
+            if call.kwargs.get("function") == "update_device_role"
+        ]
+        self.assertEqual(len(role_calls), 1 if changed else 0)
+        self.assertEqual(self.border_role_device["role"], "BORDER ROUTER" if changed else current_role)
+        return result
+
+    def test_inventory_workflow_manager_playbook_update_role_border_router_underscore(self):
+        """Prepare's canonical role must reach the API with the required space."""
+        result = self.run_border_role_workflow("BORDER_ROUTER", "ACCESS", changed=True)
+        self.assertIn("BORDER_ROUTER", result["msg"])
+
+    def test_inventory_workflow_manager_playbook_update_role_border_router_spaced(self):
+        """The controller's spelling must be rejected as playbook input before API calls."""
+        set_module_args(dict(
+            catalystcenter_host="1.1.1.1",
+            catalystcenter_username="dummy",
+            catalystcenter_password="dummy",
+            catalystcenter_version="2.3.7.9",
+            state="merged",
+            config=[{"ip_address_list": ["204.1.2.11"], "role": "BORDER ROUTER"}],
+        ))
+        result = self.execute_module(changed=False, failed=True)
+        self.assertIn("BORDER ROUTER : Invalid choice provided", result["msg"])
+        self.run_catalystcenter_exec.assert_not_called()
+
+    def test_inventory_workflow_manager_playbook_update_role_border_router_after_ui(self):
+        """A role already assigned through the UI must not be written again."""
+        self.run_border_role_workflow("BORDER_ROUTER", "BORDER ROUTER", changed=False)
+
+    def test_inventory_workflow_manager_playbook_update_role_border_router_invalid_batch(self):
+        """Validate every entry before submitting any role updates."""
+        set_module_args(dict(
+            catalystcenter_host="1.1.1.1",
+            catalystcenter_username="dummy",
+            catalystcenter_password="dummy",
+            catalystcenter_version="2.3.7.9",
+            state="merged",
+            config=[
+                {"ip_address_list": ["204.1.2.10"], "role": "BORDER_ROUTER"},
+                {"ip_address_list": ["204.1.2.11"], "role": "BORDER ROUTER"},
+            ],
+        ))
+        result = self.execute_module(changed=False, failed=True)
+        self.assertIn("BORDER ROUTER : Invalid choice provided", result["msg"])
+        self.run_catalystcenter_exec.assert_not_called()
+
+    def test_inventory_workflow_manager_playbook_update_role_border_router_legacy_readback(self):
+        """The canonical input must also match underscore-form controller readback."""
+        self.run_border_role_workflow("BORDER_ROUTER", "BORDER_ROUTER", changed=False)
+
+    def test_inventory_workflow_manager_accepts_documented_role_inputs(self):
+        """Public role choices remain valid and unchanged during validation."""
+        roles = ["ACCESS", "DISTRIBUTION", "CORE", "BORDER_ROUTER", "UNKNOWN"]
+        manager = inventory_workflow_manager.Inventory.__new__(inventory_workflow_manager.Inventory)
+        manager.config = [{"role": role} for role in roles]
+        manager.result = {}
+        with patch.object(manager, "log"):
+            manager.validate_input()
+        self.assertEqual(manager.status, "success")
+        self.assertEqual([entry["role"] for entry in manager.validated_config], roles)
+
+    def test_inventory_workflow_manager_border_role_readback_verification(self):
+        """Verification must equate role aliases and still reject actual drift."""
+        manager = inventory_workflow_manager.Inventory.__new__(inventory_workflow_manager.Inventory)
+        manager.config = [{"role": "BORDER_ROUTER"}]
+        with patch.object(manager, "get_device_response") as readback:
+            for role, expected in (("BORDER ROUTER", True), ("BORDER_ROUTER", True), ("ACCESS", False), (None, False)):
+                with self.subTest(role=role):
+                    readback.return_value = {"role": role}
+                    self.assertEqual(manager.check_device_role("204.1.2.11"), expected)
 
     def test_inventory_workflow_manager_playbook_update_role_task_failure(self):
         """An asynchronous role task failure must not be overwritten as success."""

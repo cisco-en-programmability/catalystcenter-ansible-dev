@@ -278,6 +278,9 @@ options:
             domains or segments together. They often serve as gateways between
             different networks, such as connecting an enterprise network to the
             internet or connecting multiple branch offices.
+          - Use C(BORDER_ROUTER) in playbook input. The module sends it to the
+            role-update API as C(BORDER ROUTER) and accepts either spelling
+            in controller readback.
           - C(UNKNOWN) - This role is assigned to devices whose roles or functions
             have not been identified or classified within Cisco Catalyst Center.
             This could happen if the platform is unable to determine the device's
@@ -1453,7 +1456,10 @@ class Inventory(CatalystCenterBase):
             "snmp_version": {"type": "str"},
             "update_mgmt_ipaddresslist": {"type": "list", "elements": "dict"},
             "username": {"type": "str"},
-            "role": {"type": "str"},
+            "role": {
+                "type": "str",
+                "choices": ["ACCESS", "DISTRIBUTION", "CORE", "BORDER_ROUTER", "UNKNOWN"],
+            },
             "device_resync": {"type": "bool"},
             "reboot_device": {"type": "bool"},
             "credential_update": {"type": "bool"},
@@ -3838,6 +3844,11 @@ class Inventory(CatalystCenterBase):
 
         return response
 
+    @staticmethod
+    def _device_role_for_api(role):
+        """Translate the module's border-role alias to the controller's API spelling."""
+        return "BORDER ROUTER" if role == "BORDER_ROUTER" else role
+
     def check_device_role(self, device_ip):
         """
         Checks if the device role and role source for a device in Cisco Catalyst Center match the specified values in the configuration.
@@ -3855,7 +3866,7 @@ class Inventory(CatalystCenterBase):
         role = self.config[0].get("role")
         response = self.get_device_response(device_ip)
 
-        return response.get("role") == role
+        return self._device_role_for_api(response.get("role")) == self._device_role_for_api(role)
 
     def check_interface_details(self, device_ip, interface_name):
         """
@@ -6326,6 +6337,7 @@ class Inventory(CatalystCenterBase):
         if config.get("role"):
             devices_to_update_role = self.get_device_ips_from_config_priority()
             device_role = config.get("role")
+            api_device_role = self._device_role_for_api(device_role)
             role_update_count = 0
             for device_ip in devices_to_update_role:
                 device_id = self.get_device_ids([device_ip])
@@ -6345,7 +6357,7 @@ class Inventory(CatalystCenterBase):
                 )
                 response = response.get("response")[0]
 
-                if response.get("role") == device_role:
+                if self._device_role_for_api(response.get("role")) == api_device_role:
                     self.status = "success"
                     self.result["changed"] = False
                     self.device_role_already_updated.append(device_role)
@@ -6358,7 +6370,7 @@ class Inventory(CatalystCenterBase):
                     continue
 
                 device_role_params = {
-                    "role": device_role,
+                    "role": api_device_role,
                     "roleSource": "MANUAL",
                     "id": device_id[0],
                 }
