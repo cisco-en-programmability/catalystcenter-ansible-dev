@@ -1,0 +1,217 @@
+---
+- name: Reject old-device removal after replacement restoration has started
+  ansible.builtin.assert:
+    that:
+      - edge_same_ip_manifest.stage_index | int < 5
+    fail_msg: >-
+      This snapshot has entered restore. capture_and_remove cannot be rerun
+      against management IPs that may now belong to the replacement switches.
+
+- name: Freeze the starting removal checkpoint for this invocation
+  ansible.builtin.set_fact:
+    edge_same_ip_removal_start_stage: "{{ edge_same_ip_manifest.stage_index | int }}"
+
+- name: Revalidate old switch identities before resuming removal
+  ansible.builtin.include_tasks: refresh_inventory.yml
+
+- name: Reject any replacement or unrelated inventory identity during removal
+  ansible.builtin.set_fact:
+    edge_same_ip_active_old_ips: >-
+      {{
+        edge_same_ip_live_records |
+        cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old')
+      }}
+  no_log: true
+
+- name: Remove original host-port configuration for the entire old batch
+  when: edge_same_ip_removal_start_stage | int < 1
+  block:
+    - name: Refresh old switch identities immediately before host-port deletion
+      ansible.builtin.include_tasks: refresh_inventory.yml
+
+    - name: Scope host-port deletion to unchanged old switch identities
+      ansible.builtin.set_fact:
+        edge_same_ip_active_old_ips: >-
+          {{
+            edge_same_ip_live_records |
+            cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old')
+          }}
+      no_log: true
+
+    - name: Select original host-port configuration for the remaining old switches
+      ansible.builtin.set_fact:
+        edge_same_ip_port_delete_config: >-
+          {{
+            edge_same_ip_manifest.payloads.cleanup |
+            cisco.catalystcenter.edge_same_ip_subset(edge_same_ip_active_old_ips, 'host')
+          }}
+      no_log: true
+
+    - name: Delete the original port assignments and port channels in one call
+      cisco.catalystcenter.sda_host_port_onboarding_workflow_manager:
+        state: deleted
+        config: "{{ edge_same_ip_port_delete_config }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      when: edge_same_ip_port_delete_config | length > 0
+      no_log: true
+
+    - name: Verify original host-port configuration is absent
+      ansible.builtin.include_tasks: verify_ports.yml
+      vars:
+        edge_same_ip_expected_ports: []
+        edge_same_ip_verify_port_ips: "{{ edge_same_ip_active_old_ips }}"
+      when: edge_same_ip_active_old_ips | length > 0
+
+    - name: Record verified old host-port removal
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('ports_removed') }}
+      no_log: true
+
+    - name: Persist the verified host-port removal checkpoint
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Remove the entire old batch from the fabric
+  when: edge_same_ip_removal_start_stage | int < 2
+  block:
+    - name: Refresh old switch identities immediately before fabric deletion
+      ansible.builtin.include_tasks: refresh_inventory.yml
+
+    - name: Scope fabric deletion to unchanged old switch identities
+      ansible.builtin.set_fact:
+        edge_same_ip_active_old_ips: >-
+          {{
+            edge_same_ip_live_records |
+            cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old')
+          }}
+        edge_same_ip_fabric_delete_entries: []
+      no_log: true
+
+    - name: Build one fabric removal entry for each remaining old switch
+      ansible.builtin.set_fact:
+        edge_same_ip_fabric_delete_entries: >-
+          {{ edge_same_ip_fabric_delete_entries + [{'device_ip': edge_same_ip_old_ip}] }}
+      loop: "{{ edge_same_ip_active_old_ips }}"
+      loop_control:
+        loop_var: edge_same_ip_old_ip
+      no_log: true
+
+    - name: Delete old fabric memberships in one workflow call
+      cisco.catalystcenter.sda_fabric_devices_workflow_manager:
+        state: deleted
+        config:
+          - fabric_devices:
+              fabric_name: "{{ edge_same_ip_plan.site }}"
+              device_config: "{{ edge_same_ip_fabric_delete_entries }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      when: edge_same_ip_active_old_ips | length > 0
+      no_log: true
+
+    - name: Verify the old batch is absent from its fabric
+      ansible.builtin.include_tasks: validate_fabric.yml
+      vars:
+        edge_same_ip_fabric_expected: absent
+        edge_same_ip_fabric_ips: "{{ edge_same_ip_active_old_ips }}"
+      when: edge_same_ip_active_old_ips | length > 0
+
+    - name: Record verified old fabric removal
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('fabric_removed') }}
+      no_log: true
+
+    - name: Persist the verified fabric removal checkpoint
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Unprovision and ensure inventory absence for the entire old batch
+  when: edge_same_ip_removal_start_stage | int < 3
+  block:
+    - name: Refresh old switch identities immediately before unprovisioning
+      ansible.builtin.include_tasks: refresh_inventory.yml
+
+    - name: Scope unprovisioning to unchanged old switch identities
+      ansible.builtin.set_fact:
+        edge_same_ip_active_old_ips: >-
+          {{
+            edge_same_ip_live_records |
+            cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old')
+          }}
+        edge_same_ip_unprovision_config: []
+      no_log: true
+
+    - name: Build the aggregate old switch unprovisioning configuration
+      ansible.builtin.set_fact:
+        edge_same_ip_unprovision_config: >-
+          {{
+            edge_same_ip_unprovision_config + [
+              {'management_ip_address': edge_same_ip_old_ip, 'clean_config': false}
+            ]
+          }}
+      loop: "{{ edge_same_ip_active_old_ips }}"
+      loop_control:
+        loop_var: edge_same_ip_old_ip
+      no_log: true
+
+    - name: Unprovision or delete all remaining old switches in one workflow call
+      cisco.catalystcenter.provision_workflow_manager:
+        state: deleted
+        config: "{{ edge_same_ip_unprovision_config }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      when: edge_same_ip_unprovision_config | length > 0
+      no_log: true
+
+    # Newer controllers can delete inventory during unprovisioning. Resolve
+    # remaining old identities again rather than assuming both APIs are needed.
+    - name: Refresh inventory after version-dependent unprovisioning
+      ansible.builtin.include_tasks: refresh_inventory.yml
+
+    - name: Scope inventory deletion to old records that still exist
+      ansible.builtin.set_fact:
+        edge_same_ip_active_old_ips: >-
+          {{
+            edge_same_ip_live_records |
+            cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old')
+          }}
+      no_log: true
+
+    - name: Delete remaining old inventory records in one workflow call
+      cisco.catalystcenter.inventory_workflow_manager:
+        state: deleted
+        config:
+          - ip_address_list: "{{ edge_same_ip_active_old_ips }}"
+            clean_config: false
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      when: edge_same_ip_active_old_ips | length > 0
+      no_log: true
+
+- name: Verify old inventory records are absent by management IP and serial
+  ansible.builtin.include_tasks: verify_old_absent.yml
+
+- name: Record verified old inventory absence
+  ansible.builtin.set_fact:
+    edge_same_ip_manifest: >-
+      {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('old_inventory_absent') }}
+  when: edge_same_ip_manifest.stage_index | int < 3
+  no_log: true
+
+- name: Persist the verified inventory removal checkpoint
+  ansible.builtin.include_tasks: persist.yml
+  when: edge_same_ip_manifest.stage_index | int == 3
+
+- name: Record the customer IP release handoff
+  ansible.builtin.set_fact:
+    edge_same_ip_manifest: >-
+      {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('awaiting_ip_release') }}
+  when: edge_same_ip_manifest.stage_index | int < 4
+  no_log: true
+
+- name: Persist the customer IP release handoff
+  ansible.builtin.include_tasks: persist.yml
+
+- name: Report the completed capture and removal batch
+  ansible.builtin.debug:
+    msg: >-
+      Batch {{ edge_same_ip_plan.name }} is awaiting customer IP release.
+      Isolate the old switches, release the address allocations, prepare the
+      replacement hardware and seed ports, then run phase restore using this
+      snapshot directory.

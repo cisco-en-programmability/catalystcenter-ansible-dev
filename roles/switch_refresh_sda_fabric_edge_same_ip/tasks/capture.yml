@@ -1,0 +1,197 @@
+---
+# Capture every workflow payload before publishing the first durable checkpoint.
+# This file is never called once a manifest exists, including after a failure.
+- name: Read all old switch identities before capture
+  cisco.catalystcenter.network_device_info:
+    managementIpAddress: "{{ edge_same_ip_plan.ips }}"
+    limit: 500
+  register: edge_same_ip_capture_inventory
+  no_log: true
+
+- name: Save the exact old inventory records for capture validation
+  ansible.builtin.set_fact:
+    edge_same_ip_captured_records: >-
+      {{ edge_same_ip_capture_inventory | cisco.catalystcenter.edge_same_ip_devices }}
+  no_log: true
+
+- name: Inspect unpublished generator file paths
+  ansible.builtin.stat:
+    path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
+    follow: false
+  loop:
+    - inventory
+    - provision
+    - fabric
+    - cleanup
+    - restore
+  loop_control:
+    loop_var: edge_same_ip_capture_component
+  register: edge_same_ip_capture_path_stats
+  no_log: true
+
+- name: Require regular files for any unpublished generator outputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        not edge_same_ip_capture_path.stat.exists or
+        (edge_same_ip_capture_path.stat.isreg | default(false))
+      - not (edge_same_ip_capture_path.stat.islnk | default(false))
+    fail_msg: Refusing to replace a generator output that is not a regular file.
+  loop: "{{ edge_same_ip_capture_path_stats.results }}"
+  loop_control:
+    loop_var: edge_same_ip_capture_path
+  no_log: true
+
+- name: Remove unpublished outputs from an interrupted capture
+  ansible.builtin.file:
+    path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
+    state: absent
+  loop:
+    - inventory
+    - provision
+    - fabric
+    - cleanup
+    - restore
+  loop_control:
+    loop_var: edge_same_ip_capture_component
+  no_log: true
+
+- name: Capture inventory configuration for the entire batch
+  cisco.catalystcenter.inventory_playbook_config_generator:
+    state: gathered
+    file_path: "{{ edge_same_ip_batch_dir }}/inventory.yml"
+    file_mode: overwrite
+    config: "{{ edge_same_ip_plan.generator_configs.inventory }}"
+  no_log: true
+
+- name: Capture wired provisioning configuration for the entire batch
+  cisco.catalystcenter.provision_playbook_config_generator:
+    state: gathered
+    file_path: "{{ edge_same_ip_batch_dir }}/provision.yml"
+    file_mode: overwrite
+    config: "{{ edge_same_ip_plan.generator_configs.provision }}"
+  no_log: true
+
+- name: Capture fabric membership configuration for the entire batch
+  cisco.catalystcenter.sda_fabric_devices_playbook_config_generator:
+    state: gathered
+    file_path: "{{ edge_same_ip_batch_dir }}/fabric.yml"
+    file_mode: overwrite
+    config: "{{ edge_same_ip_plan.generator_configs.fabric }}"
+  no_log: true
+
+- name: Capture original host-port configuration for old-device cleanup
+  cisco.catalystcenter.sda_host_port_onboarding_playbook_config_generator:
+    state: gathered
+    file_path: "{{ edge_same_ip_batch_dir }}/cleanup.yml"
+    file_mode: overwrite
+    config: "{{ edge_same_ip_plan.generator_configs.cleanup }}"
+  no_log: true
+
+- name: Generate mapped replacement host-port configuration for the entire batch
+  cisco.catalystcenter.sda_host_port_migration_playbook_config_generator:
+    state: gathered
+    file_path: "{{ edge_same_ip_batch_dir }}/restore.yml"
+    file_mode: overwrite
+    config: "{{ edge_same_ip_plan.generator_configs.restore }}"
+  no_log: true
+
+- name: Record explicitly allowed empty host-port captures
+  ansible.builtin.copy:
+    dest: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
+    content: "config: []\n"
+    force: false
+    mode: "0600"
+  loop:
+    - cleanup
+    - restore
+  loop_control:
+    loop_var: edge_same_ip_capture_component
+  when: edge_same_ip_plan.allow_empty_host_port_config | default(false) | bool
+  no_log: true
+
+- name: Restrict captured configuration file permissions
+  ansible.builtin.file:
+    path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
+    state: file
+    mode: "0600"
+  loop:
+    - inventory
+    - provision
+    - fabric
+    - cleanup
+    - restore
+  loop_control:
+    loop_var: edge_same_ip_capture_component
+  no_log: true
+
+- name: Read every fresh configuration capture
+  ansible.builtin.slurp:
+    src: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
+  loop:
+    - inventory
+    - provision
+    - fabric
+    - cleanup
+    - restore
+  loop_control:
+    loop_var: edge_same_ip_capture_component
+  register: edge_same_ip_capture_files
+  no_log: true
+
+- name: Initialize the batch configuration captures
+  ansible.builtin.set_fact:
+    edge_same_ip_captured_payloads: {}
+  no_log: true
+
+- name: Collect the native workflow configuration from each fresh capture
+  ansible.builtin.set_fact:
+    edge_same_ip_captured_payloads: >-
+      {{
+        edge_same_ip_captured_payloads |
+        combine({
+          edge_same_ip_capture_file.edge_same_ip_capture_component:
+            (edge_same_ip_capture_file.content | b64decode | from_yaml).config
+        })
+      }}
+  loop: "{{ edge_same_ip_capture_files.results }}"
+  loop_control:
+    loop_var: edge_same_ip_capture_file
+  no_log: true
+
+- name: Validate all captures and construct the immutable batch snapshot
+  ansible.builtin.set_fact:
+    edge_same_ip_manifest: >-
+      {{
+        edge_same_ip_plan |
+        cisco.catalystcenter.edge_same_ip_snapshot(
+          edge_same_ip_captured_records,
+          edge_same_ip_captured_payloads,
+          edge_same_ip_controller
+        )
+      }}
+  no_log: true
+
+- name: Recheck old switch identities after all configuration captures
+  ansible.builtin.include_tasks: refresh_inventory.yml
+
+- name: Require every captured old device to remain unchanged before publishing
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          edge_same_ip_live_records |
+          cisco.catalystcenter.edge_same_ip_identity_guard(edge_same_ip_manifest, 'old') |
+          sort
+        ) == edge_same_ip_plan.ips | sort
+    fail_msg: Old switch identities changed during capture; no configuration was removed.
+  no_log: true
+
+- name: Confirm captured old switch fabric membership before publishing
+  ansible.builtin.include_tasks: validate_fabric.yml
+  vars:
+    edge_same_ip_fabric_expected: present
+    edge_same_ip_fabric_ips: "{{ edge_same_ip_plan.ips }}"
+
+- name: Publish the validated snapshot before any old-device mutation
+  ansible.builtin.include_tasks: persist.yml

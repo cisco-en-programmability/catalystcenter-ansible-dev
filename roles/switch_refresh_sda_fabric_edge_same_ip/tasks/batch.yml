@@ -1,0 +1,71 @@
+---
+- name: Select immutable same-IP batch plan
+  ansible.builtin.set_fact:
+    edge_same_ip_plan: "{{ edge_same_ip_batch_plan }}"
+    edge_same_ip_batch_dir: "{{ edge_same_ip_snapshot_root }}/{{ edge_same_ip_batch_plan.name }}"
+    edge_same_ip_manifest: {}
+  no_log: true
+
+- name: Inspect batch snapshot path
+  ansible.builtin.stat:
+    path: "{{ edge_same_ip_batch_dir }}"
+    follow: false
+  register: edge_same_ip_batch_stat
+
+- name: Validate batch snapshot path
+  ansible.builtin.assert:
+    that:
+      - not edge_same_ip_batch_stat.stat.exists or (edge_same_ip_batch_stat.stat.isdir | default(false) and not edge_same_ip_batch_stat.stat.islnk | default(false))
+    fail_msg: Batch snapshot paths must be directories and cannot be symlinks.
+
+- name: Create protected batch snapshot directory
+  ansible.builtin.file:
+    path: "{{ edge_same_ip_batch_dir }}"
+    state: directory
+    mode: '0700'
+
+- name: Inspect saved manifest
+  ansible.builtin.stat:
+    path: "{{ edge_same_ip_batch_dir }}/manifest.json"
+    follow: false
+  register: edge_same_ip_manifest_stat
+
+- name: Validate saved manifest file type
+  ansible.builtin.assert:
+    that:
+      - not edge_same_ip_manifest_stat.stat.exists or (edge_same_ip_manifest_stat.stat.isreg | default(false) and not edge_same_ip_manifest_stat.stat.islnk | default(false))
+      - switch_refresh_sda_fabric_edge_same_ip_phase != 'restore' or edge_same_ip_manifest_stat.stat.exists
+    fail_msg: Restore requires an existing regular manifest file captured by phase 1.
+
+- name: Read saved manifest
+  ansible.builtin.slurp:
+    src: "{{ edge_same_ip_batch_dir }}/manifest.json"
+  register: edge_same_ip_manifest_file
+  when: edge_same_ip_manifest_stat.stat.exists
+  no_log: true
+
+- name: Validate saved controller, input fingerprint, identities, and payload hashes
+  ansible.builtin.set_fact:
+    edge_same_ip_manifest: >-
+      {{ edge_same_ip_manifest_file.content | b64decode | from_json |
+         cisco.catalystcenter.edge_same_ip_manifest(edge_same_ip_plan, edge_same_ip_controller) }}
+  when: edge_same_ip_manifest_stat.stat.exists
+  no_log: true
+
+- name: Capture the complete old-switch batch before teardown
+  ansible.builtin.include_tasks: capture.yml
+  when:
+    - switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+    - not edge_same_ip_manifest_stat.stat.exists
+
+- name: Remove the old-switch batch using captured identities
+  ansible.builtin.include_tasks: capture_and_remove.yml
+  when: switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+
+- name: Restore the replacement-switch batch from saved configuration
+  ansible.builtin.include_tasks: restore.yml
+  when: switch_refresh_sda_fabric_edge_same_ip_phase == 'restore'
+
+- name: Report batch checkpoint
+  ansible.builtin.debug:
+    msg: "Batch {{ edge_same_ip_plan.name }}: {{ edge_same_ip_manifest.stage }}"

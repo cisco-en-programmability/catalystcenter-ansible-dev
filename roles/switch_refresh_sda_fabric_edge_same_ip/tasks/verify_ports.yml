@@ -1,0 +1,19 @@
+---
+- name: Initialize host-port postcondition verification
+  ansible.builtin.set_fact:
+    edge_same_ip_ports_verified: false
+
+- name: Poll host-port configuration against the expected saved payload
+  ansible.builtin.include_tasks: verify_ports_attempt.yml
+  loop: "{{ range(0, edge_same_ip_poll_retries | int) | list }}"
+  loop_control:
+    loop_var: edge_same_ip_port_attempt
+    label: "{{ edge_same_ip_port_attempt + 1 }}"
+
+- name: Require the exact host-port postcondition
+  ansible.builtin.assert:
+    that:
+      - edge_same_ip_ports_verified | bool
+    fail_msg: >-
+      Host-port configuration does not match the expected saved payload.
+      The previous checkpoint remains available for a safe rerun.

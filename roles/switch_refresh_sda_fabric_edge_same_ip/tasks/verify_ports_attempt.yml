@@ -1,0 +1,73 @@
+---
+- name: Check host-port configuration while the postcondition is unresolved
+  when: not (edge_same_ip_ports_verified | bool)
+  block:
+    - name: Inspect the temporary verification export
+      ansible.builtin.stat:
+        path: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+        follow: false
+      register: edge_same_ip_port_verify_stat
+
+    - name: Require a regular temporary verification export
+      ansible.builtin.assert:
+        that:
+          - not edge_same_ip_port_verify_stat.stat.exists or (edge_same_ip_port_verify_stat.stat.isreg | default(false) and not edge_same_ip_port_verify_stat.stat.islnk | default(false))
+        fail_msg: Refusing to replace a verification export through a symlink.
+
+    - name: Remove stale verification export
+      ansible.builtin.file:
+        path: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+        state: absent
+
+    - name: Export current host ports for all devices being verified
+      cisco.catalystcenter.sda_host_port_onboarding_playbook_config_generator:
+        state: gathered
+        file_path: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+        file_mode: overwrite
+        config:
+          component_specific_filters:
+            components_list:
+              - port_assignments
+              - port_channels
+            port_assignments:
+              - fabric_site_name_hierarchy: "{{ edge_same_ip_plan.site }}"
+                device_ips: "{{ edge_same_ip_verify_port_ips | default(edge_same_ip_plan.ips) }}"
+            port_channels:
+              - fabric_site_name_hierarchy: "{{ edge_same_ip_plan.site }}"
+                device_ips: "{{ edge_same_ip_verify_port_ips | default(edge_same_ip_plan.ips) }}"
+      no_log: true
+
+    - name: Represent a successful empty verification export explicitly
+      ansible.builtin.copy:
+        dest: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+        content: "config: []\n"
+        force: false
+        mode: '0600'
+      no_log: true
+
+    - name: Protect the verification export
+      ansible.builtin.file:
+        path: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+        state: file
+        mode: '0600'
+
+    - name: Read current host-port configuration
+      ansible.builtin.slurp:
+        src: "{{ edge_same_ip_batch_dir }}/verify_ports.yml"
+      register: edge_same_ip_port_verify_file
+      no_log: true
+
+    - name: Compare current ports with the saved desired configuration
+      ansible.builtin.set_fact:
+        edge_same_ip_ports_verified: >-
+          {{ edge_same_ip_expected_ports |
+             cisco.catalystcenter.edge_same_ip_ports_match(
+               (edge_same_ip_port_verify_file.content | b64decode | from_yaml).config) }}
+      no_log: true
+
+    - name: Wait before the next host-port verification attempt
+      ansible.builtin.pause:
+        seconds: "{{ edge_same_ip_poll_delay | int }}"
+      when:
+        - not (edge_same_ip_ports_verified | bool)
+        - edge_same_ip_port_attempt | int + 1 < edge_same_ip_poll_retries | int

@@ -1,0 +1,17 @@
+---
+catalystcenter_host: ""
+catalystcenter_username: ""
+catalystcenter_password: ""
+catalystcenter_verify: false
+catalystcenter_port: 443
+catalystcenter_version: "2.3.7.9"
+
+switch_refresh_sda_fabric_edge_same_ip_phase: capture_and_remove
+switch_refresh_sda_fabric_edge_same_ip_batches: []
+# Required: use a persistent directory shared by both phase invocations.
+switch_refresh_sda_fabric_edge_same_ip_snapshot_dir: ""
+switch_refresh_sda_fabric_edge_same_ip_config_verify: true
+switch_refresh_sda_fabric_edge_same_ip_timeout: 1200
+switch_refresh_sda_fabric_edge_same_ip_poll_interval: 10
+switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout: 604800
+switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval: 30
