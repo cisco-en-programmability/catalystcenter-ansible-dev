@@ -1,0 +1,234 @@
+---
+- name: Require completed old-device removal before restoration
+  ansible.builtin.assert:
+    that:
+      - edge_same_ip_manifest.stage_index | int >= 4
+    fail_msg: >-
+      Restore requires phase capture_and_remove to reach awaiting_ip_release.
+      Complete the old-device removal before starting this phase.
+
+- name: Freeze the starting restoration checkpoint
+  ansible.builtin.set_fact:
+    edge_same_ip_restore_start_stage: "{{ edge_same_ip_manifest.stage_index | int }}"
+
+- name: Establish the customer handoff boundary before any replacement changes
+  when: edge_same_ip_restore_start_stage | int == 4
+  block:
+    - name: Independently verify old identities and management IPs are absent
+      ansible.builtin.include_tasks: verify_old_absent.yml
+
+    - name: Record that restoration has started and permanently disable teardown
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('restore_started') }}
+      no_log: true
+
+    - name: Persist the restoration boundary before LAN automation
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Read current identities before resuming restoration
+  ansible.builtin.include_tasks: refresh_inventory.yml
+
+- name: Reject known wrong identities while allowing pending replacement collection
+  ansible.builtin.set_fact:
+    edge_same_ip_new_preflight_ready: >-
+      {{ edge_same_ip_inventory_lookup |
+         cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest) }}
+  no_log: true
+
+- name: LAN automate the complete replacement batch
+  when: edge_same_ip_restore_start_stage | int < 6
+  block:
+    - name: Build the complete LAN automation input with captured hostnames and sites
+      ansible.builtin.set_fact:
+        edge_same_ip_lan_execution_config: >-
+          {{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_lan_config(edge_same_ip_manifest) }}
+      no_log: true
+
+    - name: Run all replacement discovery mappings in one workflow invocation
+      cisco.catalystcenter.lan_automation_workflow_manager:
+        state: merged
+        config: "{{ edge_same_ip_lan_execution_config }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+        catalystcenter_api_task_timeout: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int }}"
+        catalystcenter_task_poll_interval: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int }}"
+      when: >-
+        not (edge_same_ip_inventory_lookup |
+             cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest))
+      no_log: true
+
+    - name: Wait for LAN automation configuration to finish
+      ansible.builtin.include_tasks: wait_for_lan_automation.yml
+
+    - name: Wait for every replacement serial at its requested management IP
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ""
+
+    - name: Save verified LAN automation completion and replacement UUIDs
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest |
+             cisco.catalystcenter.edge_same_ip_checkpoint('lan_automated', edge_same_ip_live_records) }}
+      no_log: true
+
+    - name: Persist LAN automation completion
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Ensure the complete replacement batch has inventory role ACCESS
+  when: edge_same_ip_restore_start_stage | int < 7
+  block:
+    - name: Verify all replacement identities immediately before inventory updates
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ""
+
+    - name: Restore inventory roles in one workflow invocation
+      cisco.catalystcenter.inventory_workflow_manager:
+        state: merged
+        config: "{{ edge_same_ip_manifest.payloads.inventory }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      no_log: true
+
+    - name: Verify replacement readiness with inventory role ACCESS
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ACCESS
+
+    - name: Record verified replacement inventory readiness
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest |
+             cisco.catalystcenter.edge_same_ip_checkpoint('inventory_ready', edge_same_ip_live_records) }}
+      no_log: true
+
+    - name: Persist replacement inventory readiness
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Provision the complete replacement batch to its captured sites
+  when: edge_same_ip_restore_start_stage | int < 8
+  block:
+    - name: Verify all replacement identities immediately before provisioning
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ACCESS
+
+    - name: Restore captured provisioning in one workflow invocation
+      cisco.catalystcenter.provision_workflow_manager:
+        state: merged
+        config: "{{ edge_same_ip_manifest.payloads.provision }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      no_log: true
+
+    - name: Verify the captured provisioning postconditions
+      ansible.builtin.include_tasks: validate_provisioning.yml
+
+    - name: Record verified replacement provisioning
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('provisioned') }}
+      no_log: true
+
+    - name: Persist replacement provisioning
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Restore fabric membership for the complete replacement batch
+  when: edge_same_ip_restore_start_stage | int < 9
+  block:
+    - name: Verify all replacement identities immediately before fabric enrollment
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ACCESS
+
+    - name: Independently confirm provisioning before fabric enrollment
+      ansible.builtin.include_tasks: validate_provisioning.yml
+
+    - name: Restore captured fabric membership in one workflow invocation
+      cisco.catalystcenter.sda_fabric_devices_workflow_manager:
+        state: merged
+        config: "{{ edge_same_ip_manifest.payloads.fabric }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      no_log: true
+
+    - name: Verify replacement fabric membership
+      ansible.builtin.include_tasks: validate_fabric.yml
+      vars:
+        edge_same_ip_fabric_expected: present
+        edge_same_ip_fabric_ips: "{{ edge_same_ip_plan.ips }}"
+
+    - name: Record verified replacement fabric membership
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('fabric_added') }}
+      no_log: true
+
+    - name: Persist replacement fabric membership
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Restore the complete mapped host-port configuration
+  when: edge_same_ip_restore_start_stage | int < 10
+  block:
+    - name: Verify all replacement identities immediately before host-port restoration
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ACCESS
+
+    - name: Independently confirm fabric membership before port restoration
+      ansible.builtin.include_tasks: validate_fabric.yml
+      vars:
+        edge_same_ip_fabric_expected: present
+        edge_same_ip_fabric_ips: "{{ edge_same_ip_plan.ips }}"
+
+    - name: Apply mapped port assignments and channels in one workflow invocation
+      cisco.catalystcenter.sda_host_port_onboarding_workflow_manager:
+        state: merged
+        config: "{{ edge_same_ip_manifest.payloads.restore }}"
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+      when: edge_same_ip_manifest.payloads.restore | length > 0
+      no_log: true
+
+    - name: Verify the mapped host-port postcondition
+      ansible.builtin.include_tasks: verify_ports.yml
+      vars:
+        edge_same_ip_expected_ports: "{{ edge_same_ip_manifest.payloads.restore }}"
+        edge_same_ip_verify_port_ips: "{{ edge_same_ip_plan.ips }}"
+
+    - name: Record verified mapped host-port restoration
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('ports_restored') }}
+      no_log: true
+
+    - name: Persist mapped host-port restoration
+      ansible.builtin.include_tasks: persist.yml
+
+- name: Validate the complete restored batch including resumed completed runs
+  block:
+    - name: Confirm every saved replacement identity is still ready
+      ansible.builtin.include_tasks: wait_ready.yml
+      vars:
+        edge_same_ip_required_role: ACCESS
+
+    - name: Confirm every captured site assignment is restored
+      ansible.builtin.include_tasks: validate_provisioning.yml
+
+    - name: Confirm every replacement fabric membership is restored
+      ansible.builtin.include_tasks: validate_fabric.yml
+      vars:
+        edge_same_ip_fabric_expected: present
+        edge_same_ip_fabric_ips: "{{ edge_same_ip_plan.ips }}"
+
+    - name: Confirm all mapped port assignments and channels are restored
+      ansible.builtin.include_tasks: verify_ports.yml
+      vars:
+        edge_same_ip_expected_ports: "{{ edge_same_ip_manifest.payloads.restore }}"
+        edge_same_ip_verify_port_ips: "{{ edge_same_ip_plan.ips }}"
+
+    - name: Record completed same-IP switch refresh
+      ansible.builtin.set_fact:
+        edge_same_ip_manifest: >-
+          {{ edge_same_ip_manifest | cisco.catalystcenter.edge_same_ip_checkpoint('complete') }}
+      no_log: true
+
+    - name: Persist completed same-IP switch refresh
+      ansible.builtin.include_tasks: persist.yml

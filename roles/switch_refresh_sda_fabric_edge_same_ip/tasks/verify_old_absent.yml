@@ -1,0 +1,38 @@
+---
+- name: Wait for the reused management IP set to be absent
+  cisco.catalystcenter.network_device_info:
+    managementIpAddress: "{{ edge_same_ip_plan.ips }}"
+    limit: 500
+  register: edge_same_ip_old_ip_absence
+  until: (edge_same_ip_old_ip_absence | cisco.catalystcenter.edge_same_ip_devices | length) == 0
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  no_log: true
+
+- name: Verify captured old UUIDs have no remaining fabric memberships
+  cisco.catalystcenter.sda_fabric_devices_info:
+    networkDeviceId: "{{ edge_same_ip_old_identity.uuid }}"
+    limit: 500
+  register: edge_same_ip_old_fabric_absence
+  until:
+    - edge_same_ip_old_fabric_absence.catalystcenter_response is mapping
+    - edge_same_ip_old_fabric_absence.catalystcenter_response.response is defined
+    - (edge_same_ip_old_fabric_absence.catalystcenter_response.response | type_debug) == 'list'
+    - edge_same_ip_old_fabric_absence.catalystcenter_response.response | length == 0
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  loop: "{{ edge_same_ip_manifest.old_devices }}"
+  loop_control:
+    loop_var: edge_same_ip_old_identity
+    label: "{{ edge_same_ip_old_identity.management_ip }}"
+  no_log: true
+
+- name: Wait for captured old serials to be absent even if an address changed
+  cisco.catalystcenter.network_device_info:
+    serialNumber: "{{ edge_same_ip_manifest.old_devices | map(attribute='serial_number') | map('split', ',') | flatten | unique | list }}"
+    limit: 500
+  register: edge_same_ip_old_serial_absence
+  until: (edge_same_ip_old_serial_absence | cisco.catalystcenter.edge_same_ip_devices | length) == 0
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  no_log: true

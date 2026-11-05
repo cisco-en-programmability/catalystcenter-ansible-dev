@@ -1,0 +1,20 @@
+---
+- name: Inspect checkpoint destination
+  ansible.builtin.stat:
+    path: "{{ edge_same_ip_batch_dir }}/manifest.json"
+    follow: false
+  register: edge_same_ip_checkpoint_stat
+
+- name: Require a regular checkpoint destination
+  ansible.builtin.assert:
+    that:
+      - not edge_same_ip_checkpoint_stat.stat.exists or (edge_same_ip_checkpoint_stat.stat.isreg | default(false) and not edge_same_ip_checkpoint_stat.stat.islnk | default(false))
+    fail_msg: Refusing to write a checkpoint through a symlink or nonregular file.
+
+- name: Atomically save complete manifest and checkpoint
+  ansible.builtin.copy:
+    dest: "{{ edge_same_ip_batch_dir }}/manifest.json"
+    content: "{{ edge_same_ip_manifest | to_nice_json }}\n"
+    mode: '0600'
+    unsafe_writes: false
+  no_log: true
