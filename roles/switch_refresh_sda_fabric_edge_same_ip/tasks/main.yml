@@ -1,0 +1,131 @@
+---
+- name: Validate same-IP refresh execution controls
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_edge_same_ip_phase in ['capture_and_remove', 'restore']
+      - not ansible_check_mode
+      - ansible_play_hosts_all | length == 1
+      - catalystcenter_host is string
+      - catalystcenter_host | trim | length > 0
+      - catalystcenter_version is version('2.3.7.9', '>=')
+      - switch_refresh_sda_fabric_edge_same_ip_snapshot_dir is string
+      - switch_refresh_sda_fabric_edge_same_ip_snapshot_dir is match('^/.+')
+      - switch_refresh_sda_fabric_edge_same_ip_snapshot_dir == (switch_refresh_sda_fabric_edge_same_ip_snapshot_dir | trim)
+      - (switch_refresh_sda_fabric_edge_same_ip_config_verify | type_debug) == 'bool'
+      - switch_refresh_sda_fabric_edge_same_ip_timeout | int > 0
+      - switch_refresh_sda_fabric_edge_same_ip_poll_interval | int > 0
+      - switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int > 0
+      - switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int > 0
+    fail_msg: >-
+      Same-IP refresh requires one play host, Catalyst Center >= 2.3.7.9,
+      capture_and_remove or restore phase, an explicit absolute persistent
+      snapshot directory, and positive polling controls. Check mode cannot
+      capture or restore live controller state; use --syntax-check instead.
+
+- name: Build all same-IP refresh batch plans before controller changes
+  ansible.builtin.set_fact:
+    edge_same_ip_plans: >-
+      {{ switch_refresh_sda_fabric_edge_same_ip_batches | cisco.catalystcenter.edge_same_ip_plan }}
+    edge_same_ip_controller: "{{ catalystcenter_host | lower | trim }}"
+    edge_same_ip_snapshot_root: "{{ switch_refresh_sda_fabric_edge_same_ip_snapshot_dir | regex_replace('/+$', '') }}"
+    edge_same_ip_poll_delay: "{{ switch_refresh_sda_fabric_edge_same_ip_poll_interval | int }}"
+    edge_same_ip_poll_retries: >-
+      {{ ((switch_refresh_sda_fabric_edge_same_ip_timeout | int) +
+          (switch_refresh_sda_fabric_edge_same_ip_poll_interval | int) - 1) //
+         (switch_refresh_sda_fabric_edge_same_ip_poll_interval | int) }}
+  no_log: true
+
+- name: Execute same-IP refresh on the Ansible controller
+  delegate_to: localhost
+  block:
+    - name: Inspect snapshot root without following links
+      ansible.builtin.stat:
+        path: "{{ edge_same_ip_snapshot_root }}"
+        follow: false
+      register: edge_same_ip_root_stat
+
+    - name: Require a real snapshot directory
+      ansible.builtin.assert:
+        that:
+          - edge_same_ip_snapshot_root | length > 0
+          - not edge_same_ip_root_stat.stat.exists or (edge_same_ip_root_stat.stat.isdir | default(false) and not edge_same_ip_root_stat.stat.islnk | default(false))
+        fail_msg: The snapshot root must be a directory, not a symlink or another file type.
+
+    - name: Create protected persistent snapshot root
+      ansible.builtin.file:
+        path: "{{ edge_same_ip_snapshot_root }}"
+        state: directory
+        mode: '0700'
+
+    - name: Acquire exclusive snapshot lock
+      ansible.builtin.command:
+        argv:
+          - mkdir
+          - '-m'
+          - '0700'
+          - "{{ edge_same_ip_snapshot_root }}/.lock"
+      changed_when: true
+
+    - name: Run batches while holding the snapshot lock
+      block:
+        - name: Check replacement serials before any old-device removal
+          cisco.catalystcenter.network_device_info:
+            serialNumber: >-
+              {{ edge_same_ip_plans | map(attribute='serial_by_ip') |
+                 map('dict2items') | flatten | map(attribute='value') |
+                 map('split', ',') | flatten | unique | list }}
+            limit: 500
+          register: edge_same_ip_replacement_preflight
+          when: switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+          no_log: true
+
+        - name: Require replacement serials to be distinct from existing inventory
+          ansible.builtin.assert:
+            that:
+              - (edge_same_ip_replacement_preflight | cisco.catalystcenter.edge_same_ip_devices | length) == 0
+            fail_msg: >-
+              Replacement serials already exist in controller inventory.
+              Verify the replacement identities and PnP readiness before
+              removing any old switches.
+          when: switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+          no_log: true
+
+        - name: Refresh each complete batch in configured order
+          ansible.builtin.include_tasks: batch.yml
+          loop: "{{ edge_same_ip_plans }}"
+          loop_control:
+            loop_var: edge_same_ip_batch_plan
+            label: "{{ edge_same_ip_batch_plan.name }}"
+          no_log: true
+      always:
+        - name: Release snapshot lock
+          ansible.builtin.file:
+            path: "{{ edge_same_ip_snapshot_root }}/.lock"
+            state: absent
+  module_defaults:
+    cisco.catalystcenter.network_device_info: &edge_same_ip_connection
+      catalystcenter_host: "{{ catalystcenter_host }}"
+      catalystcenter_username: "{{ catalystcenter_username }}"
+      catalystcenter_password: "{{ catalystcenter_password }}"
+      catalystcenter_verify: "{{ catalystcenter_verify }}"
+      catalystcenter_port: "{{ catalystcenter_port }}"
+      catalystcenter_version: "{{ catalystcenter_version }}"
+      catalystcenter_debug: false
+    cisco.catalystcenter.sda_provision_device_info: *edge_same_ip_connection
+    cisco.catalystcenter.sda_fabric_devices_info: *edge_same_ip_connection
+    cisco.catalystcenter.lan_automation_sessions_info: *edge_same_ip_connection
+    cisco.catalystcenter.inventory_playbook_config_generator: &edge_same_ip_workflow
+      <<: *edge_same_ip_connection
+      catalystcenter_log: false
+      catalystcenter_api_task_timeout: "{{ switch_refresh_sda_fabric_edge_same_ip_timeout | int }}"
+      catalystcenter_task_poll_interval: "{{ switch_refresh_sda_fabric_edge_same_ip_poll_interval | int }}"
+    cisco.catalystcenter.provision_playbook_config_generator: *edge_same_ip_workflow
+    cisco.catalystcenter.sda_fabric_devices_playbook_config_generator: *edge_same_ip_workflow
+    cisco.catalystcenter.sda_host_port_onboarding_playbook_config_generator: *edge_same_ip_workflow
+    cisco.catalystcenter.sda_host_port_migration_playbook_config_generator: *edge_same_ip_workflow
+    cisco.catalystcenter.inventory_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.provision_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.sda_fabric_devices_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.sda_host_port_onboarding_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.fabric_devices_info_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.lan_automation_workflow_manager: *edge_same_ip_workflow

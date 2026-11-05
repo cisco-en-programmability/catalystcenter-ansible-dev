@@ -123,6 +123,39 @@ class TestSdaHostPortMigrationPlaybookConfigGenerator(TestCatalystModule):
         )
 
     @patch("builtins.open", new_callable=mock_open)
+    def test_same_ip_migration_remaps_assignments_and_channels(self, mock_file):
+        config = deepcopy(self.playbook_config_assignments_and_channels)
+        for entries in config["component_specific_filters"].values():
+            for entry in entries:
+                entry["destination_device_ip"] = entry["source_device_ip"]
+        set_module_args(self._base_config_args(config))
+
+        result = self.execute_module(changed=True)
+
+        self.assertEqual(result["changed"], True)
+        data = yaml.safe_load(self._get_written_yaml(mock_file))
+        self.assertEqual(len(data["config"]), 1)
+        device_config = data["config"][0]
+        self.assertEqual(device_config["ip_address"], "10.10.10.101")
+        self.assertEqual(
+            [item["interface_name"] for item in device_config["port_assignments"]],
+            ["GigabitEthernet1/0/25", "GigabitEthernet1/0/2"],
+        )
+        self.assertEqual(
+            device_config["port_assignments"][0]["data_vlan_name"],
+            "Data_VLAN_100",
+        )
+        self.assertEqual(
+            device_config["port_assignments"][0]["security_group_name"],
+            "SGT_Employees",
+        )
+        self.assertEqual(
+            device_config["port_channels"][0]["interface_names"],
+            ["GigabitEthernet1/0/26", "GigabitEthernet1/0/4"],
+        )
+        self.assertEqual(device_config["port_channels"][0]["protocol"], "LACP")
+
+    @patch("builtins.open", new_callable=mock_open)
     def test_partial_interface_remap_keeps_unmapped_interfaces_one_to_one(self, mock_file):
         set_module_args(self._base_config_args(self.playbook_config_partial_remap))
 

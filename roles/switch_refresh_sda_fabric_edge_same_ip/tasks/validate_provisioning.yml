@@ -1,0 +1,19 @@
+---
+# These information queries are per IP because the API accepts a single IP.
+# The provisioning workflow itself always receives the complete batch.
+- name: Verify provisioning against each captured site assignment
+  cisco.catalystcenter.sda_provision_device_info:
+    deviceManagementIpAddress: "{{ edge_same_ip_provision_entry.management_ip_address }}"
+  register: edge_same_ip_provision_lookup
+  until:
+    - edge_same_ip_provision_lookup.catalystcenter_response is mapping
+    - edge_same_ip_provision_lookup.catalystcenter_response.status | default('') | lower == 'success'
+    - edge_same_ip_provision_lookup.catalystcenter_response.deviceManagementIpAddress | default('') == edge_same_ip_provision_entry.management_ip_address
+    - edge_same_ip_provision_lookup.catalystcenter_response.siteNameHierarchy | default('') == edge_same_ip_provision_entry.site_name_hierarchy
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  loop: "{{ edge_same_ip_manifest.payloads.provision }}"
+  loop_control:
+    loop_var: edge_same_ip_provision_entry
+    label: "{{ edge_same_ip_provision_entry.management_ip_address }}"
+  no_log: true

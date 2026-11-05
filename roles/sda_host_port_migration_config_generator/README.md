@@ -66,3 +66,10 @@ Role-specific variables:
 
 The generated file contains a top-level `config` key that can be loaded and
 passed to the `sda_host_port_onboarding` role.
+
+For device replacement that reuses the source management IP, set
+`destination_device_ip` equal to `source_device_ip`. Generate and save the
+mapped configuration while the old device is still available, then apply it
+after the replacement is ready at that IP. Capture the original port
+configuration separately for old-device cleanup; the migration output contains
+destination interface names and is intended for restoration.
