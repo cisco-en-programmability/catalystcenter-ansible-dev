@@ -11134,8 +11134,8 @@ class TestCatalystCenterNetworkDevicesInfoWorkflowManager(TestCatalystModule):
             result.get("response"),
             (
                 "'software_versions' is not a valid key in network device entry. "
-                "Allowed keys are: device_family, device_identifier, device_role, "
-                "device_type, interval, os_type, output_file_info, requested_info, "
+                "Allowed keys are: collectionStatus, device_family, device_identifier, device_role, "
+                "device_type, interval, managementState, os_type, output_file_info, requested_info, "
                 "retries, site_hierarchy, software_version, timeout"
             ),
         )

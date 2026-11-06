@@ -1,0 +1,25 @@
+---
+# Copyright (c) 2026 Cisco and/or its affiliates.
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+DOCUMENTATION:
+  name: sda_border_capability_config
+  version_added: "2.13.0"
+  short_description: Add captured SDA border capabilities to a runtime configuration
+  description:
+    - Return a copy of a device configuration with explicit required border capabilities.
+    - Preserve the source record and reject conflicting explicit replacement capabilities.
+  author: Cisco Systems (@cisco)
+  options:
+    _input:
+      description: Generated or legacy device configuration.
+      type: dict
+      required: true
+    source:
+      description: Original captured source used to resolve legacy replacement capabilities.
+      type: dict
+EXAMPLES: |
+  runtime_device: "{{ expected_device | cisco.catalystcenter.sda_border_capability_config(source=captured_device) }}"
+RETURN:
+  _value:
+    description: Independent device configuration with explicit border types.
+    type: dict

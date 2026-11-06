@@ -1,0 +1,38 @@
+---
+- name: Verify replacement identity, platform, software, and interfaces before capability repair
+  ansible.builtin.include_tasks: observe_cutover_inventory.yml
+  vars:
+    switch_refresh_sda_fabric_border_inventory_observation_request:
+      old_identity: "{{ switch_refresh_sda_fabric_border_capability_mapping.old_identity }}"
+      new_identity: "{{ switch_refresh_sda_fabric_border_capability_mapping.new_identity }}"
+      inventory_role: "{{ switch_refresh_sda_fabric_border_capability_mapping.inventory_role }}"
+      interface_mappings: "{{ switch_refresh_sda_fabric_border_capability_mapping.interface_mappings }}"
+      validate_replacement_interfaces: true
+      context: manifest capability preflight
+
+- name: Capture current replacement capability state for manifest preflight
+  ansible.builtin.include_tasks: capture_border_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_capture_request:
+      fabric_name: "{{ refresh_item.fabric_site_name_hierarchy }}"
+      device_ip: "{{ switch_refresh_sda_fabric_border_capability_mapping.new.management_ip }}"
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_cutover_workspace ~ '/capabilities_' ~
+        (switch_refresh_sda_fabric_border_capability_mapping.new.management_ip |
+        regex_replace('[^A-Za-z0-9_.-]', '_')) ~ '.yml' }}
+      expected_state: present
+      context: all-batch manifest capability preflight before source deletion
+
+- name: Enable and verify manifest replacement capabilities before any batch executes
+  ansible.builtin.include_tasks: ensure_replacement_capabilities.yml
+  vars:
+    switch_refresh_sda_fabric_border_capability_request:
+      original_device_config: "{{ switch_refresh_sda_fabric_border_capability_mapping.original_device_config }}"
+      expected_device_config: "{{ switch_refresh_sda_fabric_border_capability_mapping.expected_new_device_config }}"
+      actual_device_config: "{{ switch_refresh_sda_fabric_border_capture_result.device_config }}"
+      fabric_name: "{{ refresh_item.fabric_site_name_hierarchy }}"
+      capture_file: >-
+        {{ switch_refresh_sda_fabric_border_cutover_workspace ~ '/capabilities_verified_' ~
+        (switch_refresh_sda_fabric_border_capability_mapping.new.management_ip |
+        regex_replace('[^A-Za-z0-9_.-]', '_')) ~ '.yml' }}
+      allow_enable: true

@@ -1,0 +1,78 @@
+---
+# Source drift checks are strict. Replacement readback may omit the captured
+# pool association after explicit-address creation; a different pool or any
+# other changed handoff field must still be divergent.
+- name: Initialize IP-transit comparison
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_ip_comparison_allow_missing_pool: >-
+      {{
+        switch_refresh_sda_fabric_border_ip_comparison_request
+        .allow_missing_pool_metadata | default(false) | bool
+      }}
+    switch_refresh_sda_fabric_border_ip_comparison_raw_expected: >-
+      {{
+        switch_refresh_sda_fabric_border_ip_comparison_request.expected_handoffs |
+        map('to_json', sort_keys=true) | list
+      }}
+    switch_refresh_sda_fabric_border_ip_comparison_expected: []
+    switch_refresh_sda_fabric_border_ip_comparison_actual: []
+  no_log: true
+
+- name: Canonicalize expected IP-transit comparison records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_ip_comparison_expected: >-
+      {{
+        switch_refresh_sda_fabric_border_ip_comparison_expected + [
+          (
+            switch_refresh_sda_fabric_border_ip_comparison_handoff |
+            dict2items |
+            rejectattr('key', 'equalto', 'external_connectivity_ip_pool_name') |
+            list | items2dict
+            if switch_refresh_sda_fabric_border_ip_comparison_allow_missing_pool
+            else switch_refresh_sda_fabric_border_ip_comparison_handoff
+          ) | to_json(sort_keys=true)
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_ip_comparison_request.expected_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_ip_comparison_handoff
+    label: expected-ip-transit-handoff
+  no_log: true
+
+- name: Canonicalize observed IP-transit comparison records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_ip_comparison_actual: >-
+      {{
+        switch_refresh_sda_fabric_border_ip_comparison_actual + [
+          (
+            switch_refresh_sda_fabric_border_ip_comparison_handoff |
+            dict2items |
+            rejectattr('key', 'equalto', 'external_connectivity_ip_pool_name') |
+            list | items2dict
+            if (
+              switch_refresh_sda_fabric_border_ip_comparison_allow_missing_pool and
+              (
+                switch_refresh_sda_fabric_border_ip_comparison_handoff
+                .external_connectivity_ip_pool_name | default('') == '' or
+                (
+                  switch_refresh_sda_fabric_border_ip_comparison_handoff |
+                  to_json(sort_keys=true)
+                ) in switch_refresh_sda_fabric_border_ip_comparison_raw_expected
+              )
+            )
+            else switch_refresh_sda_fabric_border_ip_comparison_handoff
+          ) | to_json(sort_keys=true)
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_border_ip_comparison_request.actual_handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_ip_comparison_handoff
+    label: observed-ip-transit-handoff
+  no_log: true
+
+- name: Publish canonical IP-transit comparison records
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_ip_comparison_result:
+      expected_records: "{{ switch_refresh_sda_fabric_border_ip_comparison_expected }}"
+      actual_records: "{{ switch_refresh_sda_fabric_border_ip_comparison_actual }}"
+  no_log: true

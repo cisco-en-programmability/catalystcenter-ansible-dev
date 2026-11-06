@@ -29,6 +29,7 @@ __author__ = "Archit Soni"
 __email__ = "soni.archit03@gmail.com"
 __version__ = "1.0.0"
 
+from copy import deepcopy
 from unittest.mock import patch
 from ansible_collections.cisco.catalystcenter.plugins.modules import (
     sda_fabric_devices_playbook_config_generator,
@@ -214,9 +215,14 @@ class TestCatalystCenterBrownfieldSdaFabricDevicesPlaybookGenerator(TestCatalyst
 
         elif "test_filter_fabric_name_device_ip_case_3" in self._testMethodName:
             # Test Case 3: Filter by fabric_name + device_ip
-            # This filters to a single device (205.1.1.10 - the border/CP node)
-            # When device_ip is specified, module first queries device_list to get network_device_id
-            # Then queries fabric_devices with both fabric_id and networkDeviceId
+            # The border/CP node is managed but only "Ping Reachable" in inventory.
+            # Its existing fabric configuration should still be exportable by IP.
+            ping_reachable_device = deepcopy(
+                self.test_data.get("get_device_list_device_2_case_1")
+            )
+            ping_reachable_device["response"][0]["reachabilityStatus"] = (
+                "Ping Reachable"
+            )
 
             self.run_catalystcenter_exec.side_effect = [
                 # Initialization phase
@@ -224,9 +230,11 @@ class TestCatalystCenterBrownfieldSdaFabricDevicesPlaybookGenerator(TestCatalyst
                 self.test_data.get("get_fabric_sites_case_1"),
                 self.test_data.get("get_transit_networks_case_1"),
                 # get_device_list to resolve device_ip to network_device_id (EXTRA call for device_ip filter)
-                self.test_data.get("get_device_list_device_2_case_1"),
+                ping_reachable_device,
                 # get_fabric_devices with fabric_id + networkDeviceId - returns only the matching device
                 self.test_data.get("get_fabric_devices_filtered_border_cp_case_1"),
+                # Resolve the fabric device ID back to its management IP for output.
+                ping_reachable_device,
                 # get_fabric_site_wired_settings
                 self.test_data.get(
                     "get_embedded_wireless_controller_settings_empty_response"
@@ -587,6 +595,16 @@ class TestCatalystCenterBrownfieldSdaFabricDevicesPlaybookGenerator(TestCatalyst
             "YAML configuration file generated successfully for module 'sda_fabric_devices_workflow_manager'",
             str(result.get("msg")),
         )
+        fabric_query = self.run_catalystcenter_exec.call_args_list[4].kwargs
+        self.assertEqual(fabric_query["function"], "get_fabric_devices")
+        self.assertEqual(
+            fabric_query["params"]["networkDeviceId"],
+            "98ab039a-9fa6-4cdc-934f-fb0159a0ebb6",
+        )
+        with open(result["msg"]["file_path"], encoding="utf-8") as generated_file:
+            generated_yaml = generated_file.read()
+        self.assertIn("device_ip: 205.1.1.10", generated_yaml)
+        self.assertIn("CONTROL_PLANE_NODE", generated_yaml)
 
     def test_filter_fabric_name_edge_role_case_4(self):
         """

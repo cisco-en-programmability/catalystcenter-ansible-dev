@@ -1,0 +1,52 @@
+---
+- name: Verify unsupported role set fails transformation
+  block:
+    - name: Build unsupported source role-set fixture
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_border_role_test_source: >-
+          {{
+            {
+              'device_ip': '198.51.100.10',
+              'device_roles':
+                switch_refresh_sda_fabric_border_role_case.device_roles
+            } |
+            combine(
+              {
+                'borders_settings':
+                  switch_refresh_sda_fabric_border_state_transform_old
+                  .borders_settings
+              }
+              if 'BORDER_NODE' in
+              switch_refresh_sda_fabric_border_role_case.device_roles
+              else {}
+            )
+          }}
+
+    - name: Transform unsupported source role set
+      ansible.builtin.include_tasks: ../../tasks/build_replacement_configs.yml
+      vars:
+        switch_refresh_sda_fabric_border_transform_request:
+          fabric_name: Global/Test/Fabric
+          new:
+            management_ip: 192.0.2.10
+          interface_mappings: []
+          original_device_config: >-
+            {{ switch_refresh_sda_fabric_border_role_test_source }}
+
+    - name: Fail when unsupported source role set was accepted
+      ansible.builtin.fail:
+        msg: >-
+          Unsupported role set
+          {{ switch_refresh_sda_fabric_border_role_case.device_roles }} was
+          accepted.
+  rescue:
+    - name: Verify role-set validation rejected the transformation
+      ansible.builtin.assert:
+        that:
+          - >-
+            ansible_failed_task.name ==
+            'Validate border replacement transformation request'
+        fail_msg: >-
+          Unsupported role set
+          {{ switch_refresh_sda_fabric_border_role_case.device_roles }} failed
+          for an unexpected reason.

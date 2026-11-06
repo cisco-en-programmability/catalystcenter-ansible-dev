@@ -1,0 +1,78 @@
+---
+# Pool-backed source records are replayed with explicit addresses. Validate
+# these before prepare mutations and before accepting a recovery manifest.
+- name: Validate IP-transit handoff validation request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_ip_handoff_validation_request is mapping
+      - >-
+        (switch_refresh_sda_fabric_border_ip_handoff_validation_request.handoffs |
+        type_debug) == 'list'
+
+- name: Validate captured IP-transit handoff records
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_ip_handoff is mapping
+      - switch_refresh_sda_fabric_border_ip_handoff.interface_name | default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.interface_name |
+        default('') | trim | length > 0
+      - switch_refresh_sda_fabric_border_ip_handoff.local_ip_address | default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.local_ip_address |
+        default('') | regex_search('^[^/%\s]+/(?:[0-9]|[12][0-9]|3[0-2])\Z') is not none
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.local_ip_address.split('/')[0]
+        is ansible.utils.ipv4_address
+      - switch_refresh_sda_fabric_border_ip_handoff.remote_ip_address | default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.remote_ip_address |
+        default('') | regex_search('^[^/%\s]+/(?:[0-9]|[12][0-9]|3[0-2])\Z') is not none
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.remote_ip_address.split('/')[0]
+        is ansible.utils.ipv4_address
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address | default('') is none or
+        switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address | default('') is string
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address | default('') is none or
+        switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address | default('') is string
+      - >-
+        (
+          switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address |
+          default('', true) | string | trim | length > 0
+        ) == (
+          switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address |
+          default('', true) | string | trim | length > 0
+        )
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address |
+        default('', true) == '' or
+        (
+          switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address |
+          regex_search('^[^/%\s]+/(?:[0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])\Z') is not none and
+          switch_refresh_sda_fabric_border_ip_handoff.local_ipv6_address.split('/')[0]
+          is ansible.utils.ipv6_address
+        )
+      - >-
+        switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address |
+        default('', true) == '' or
+        (
+          switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address |
+          regex_search('^[^/%\s]+/(?:[0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])\Z') is not none and
+          switch_refresh_sda_fabric_border_ip_handoff.remote_ipv6_address.split('/')[0]
+          is ansible.utils.ipv6_address
+        )
+    fail_msg: >-
+      Every IP-transit handoff requires an interface_name and captured local
+      and remote IPv4 addresses in CIDR notation with numeric prefixes 0..32
+      for address-preserving replay. Optional IPv6 addresses must be a valid
+      IPv6 CIDR pair with numeric prefixes 0..128. The pool name is retained in the capture
+      but omitted from creation requests so it cannot override these addresses.
+      Context: {{ switch_refresh_sda_fabric_border_ip_handoff_validation_request.context }}.
+  loop: "{{ switch_refresh_sda_fabric_border_ip_handoff_validation_request.handoffs }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_ip_handoff
+    label: >-
+      {{ switch_refresh_sda_fabric_border_ip_handoff.interface_name |
+      default('invalid-ip-transit-handoff') }}

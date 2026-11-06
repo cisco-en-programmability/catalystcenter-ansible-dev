@@ -26,7 +26,10 @@
 #         they must all refer to the same physical device
 #
 # Retry and Timeout Parameters (Optional):
-#   timeout: Maximum time in seconds to wait for operations (default: 120)
+#   timeout: Maximum time in seconds (default: 1200 with readiness validation, otherwise 120)
+#   collectionStatus: Optional expected collection status; enables readiness polling
+#   managementState: Optional expected management state; enables readiness polling
+#   Readiness checks poll every 10 seconds, independently of retries and interval.
 #   retries: Number of retry attempts for failed operations (default: 3)
 #   interval: Time in seconds between retry attempts (default: 10)
 #
@@ -106,7 +109,10 @@ network_device_type:
   
   device_identifier: list(include('device_id_type'), required=False)
 
-  timeout: int(min=1, max=3600, required=False, default=120)
+  # The module supplies the timeout default according to whether readiness is enabled.
+  timeout: int(min=1, required=False)
+  collectionStatus: str(min=1, required=False)
+  managementState: str(min=1, required=False)
   retries: int(min=0, max=10, required=False, default=3)
   interval: int(min=1, max=300, required=False, default=10)
 

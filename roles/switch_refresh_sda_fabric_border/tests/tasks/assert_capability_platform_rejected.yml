@@ -1,0 +1,16 @@
+---
+- name: Require usable platform inventory before capability configuration
+  block:
+    - name: Validate unsupported or incomplete replacement
+      ansible.builtin.include_tasks: ../../tasks/validate_replacement_platform.yml
+      vars:
+        switch_refresh_sda_fabric_border_platform_request:
+          device_details: "{{ capability_test_supported_platform | combine(capability_test_platform_changes) }}"
+          context: invalid platform fixture
+    - name: Fail if invalid replacement platform passed
+      ansible.builtin.fail:
+        msg: Invalid replacement platform unexpectedly passed.
+  rescue:
+    - name: Verify platform validation failed before configuration or deletion
+      ansible.builtin.assert:
+        that: ansible_failed_task.name == 'Require known supported replacement platform and software'
