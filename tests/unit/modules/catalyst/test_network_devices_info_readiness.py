@@ -3,6 +3,10 @@
 
 """Exercise readiness timing and results without controller access or real sleeps."""
 
+from __future__ import absolute_import, division, print_function
+
+__metaclass__ = type
+
 from copy import deepcopy
 from types import SimpleNamespace
 from unittest import TestCase
