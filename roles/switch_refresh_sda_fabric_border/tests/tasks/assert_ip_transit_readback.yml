@@ -18,8 +18,7 @@
         ]
       }}
   loop: >-
-    {{ pool_transform.expected_new_device_config.borders_settings.layer3_handoff_ip_transit[
-    : pool_readback_case.count | default(3)] | reverse | list }}
+    {{ pool_transform.expected_new_device_config.borders_settings.layer3_handoff_ip_transit[: pool_readback_case.count | default(3)] | reverse | list }}
   loop_control:
     loop_var: pool_readback_handoff
 
