@@ -2,6 +2,10 @@
 # Licensed under the Apache License, Version 2.0.
 """Run real refresh tasks with controller roles replaced in an isolated collection."""
 
+from __future__ import absolute_import, division, print_function
+
+__metaclass__ = type
+
 import os
 from pathlib import Path
 import shutil

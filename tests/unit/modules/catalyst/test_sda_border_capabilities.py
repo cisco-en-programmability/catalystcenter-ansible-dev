@@ -2,6 +2,10 @@
 # Licensed under the Apache License, Version 2.0.
 """Regress mixed L2/L3 capture, capability-only preparation, and handoff gating."""
 
+from __future__ import absolute_import, division, print_function
+
+__metaclass__ = type
+
 from copy import deepcopy
 from unittest import TestCase
 from unittest.mock import Mock, patch

@@ -3,6 +3,10 @@
 
 """Expose shared SDA capability handling to refresh task files."""
 
+from __future__ import absolute_import, division, print_function
+
+__metaclass__ = type
+
 from ansible.errors import AnsibleFilterError
 from ansible_collections.cisco.catalystcenter.plugins.module_utils.sda_border_capabilities import (
     capability_config,
