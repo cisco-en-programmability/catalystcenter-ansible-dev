@@ -261,6 +261,54 @@ def edge_same_ip_devices(raw_module_result):
     return deepcopy(records)
 
 
+def _api_records(result, label):
+    """Require a successful structured query before interpreting empty data."""
+    _mapping(result, label + " result")
+    if result.get("failed") or result.get("unreachable"):
+        _fail(label + " failed; the requested state is unproven")
+    response = _mapping(result.get("catalystcenter_response"), label + " API response")
+    rows = _list(response.get("response"), label + " response records", nonempty=False)
+    for row in rows:
+        _mapping(row, label + " record")
+    return rows
+
+
+def edge_same_ip_site_id(result, plan):
+    """Resolve an exact hierarchy without depending on old inventory records."""
+    matches = [row for row in _api_records(result, "site lookup") if row.get("nameHierarchy") == plan["site"]]
+    if len(matches) != 1:
+        _fail("site lookup must resolve exactly one site for the saved fabric hierarchy")
+    return _string(matches[0].get("id"), "site ID")
+
+
+def edge_same_ip_fabric_id(result, site_id, allow_empty=False):
+    """Resolve the fabric ID, which is distinct from the network hierarchy ID."""
+    _string(site_id, "site ID")
+    rows = _api_records(result, "fabric lookup")
+    if not rows and allow_empty:
+        return ""
+    if len(rows) != 1 or rows[0].get("siteId") != site_id:
+        _fail("fabric lookup must resolve exactly one fabric for the saved site ID")
+    return _string(rows[0].get("id"), "fabric ID")
+
+
+def edge_same_ip_old_fabric(result, fabric_id, device_uuid, expected_state="absent"):
+    """Evaluate UUID membership independently of whether inventory still exists."""
+    _string(fabric_id, "fabric ID")
+    _string(device_uuid, "old device UUID")
+    if expected_state not in ("present", "absent", "any"):
+        _fail("old fabric expected state must be present, absent or any")
+    rows = _api_records(result, "old UUID fabric lookup")
+    for row in rows:
+        if row.get("fabricId") != fabric_id or row.get("networkDeviceId") != device_uuid:
+            _fail("old UUID fabric lookup returned a different fabric or device")
+    if len(rows) > 1:
+        _fail("old UUID fabric lookup returned duplicate memberships")
+    if expected_state == "any":
+        return True
+    return bool(rows) if expected_state == "present" else not rows
+
+
 def _identity(record):
     _mapping(record, "device identity")
     return {"management_ip": _ip(record.get("managementIpAddress", record.get("management_ip"))),
@@ -407,15 +455,19 @@ def _validate_original_identities(identities, plan):
 
 def _capture_checksum(manifest):
     """Checksum immutable capture fields separately from resumable progress."""
-    return _hash({field: manifest.get(field) for field in CAPTURE_FIELDS})
+    # Keep the original checksum algorithm for snapshots created before the
+    # fabric-ID fix. Their saved hierarchy can still resolve the ID on resume.
+    fields = CAPTURE_FIELDS + ("fabric_id",) if manifest.get("schema_version") == 2 else CAPTURE_FIELDS
+    return _hash({field: manifest.get(field) for field in fields})
 
 
-def edge_same_ip_snapshot(plan, records, payloads, controller):
+def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None):
     """Freeze original identities and both original and mapped workflow payloads."""
+    fabric_id = _string(fabric_id, "fabric ID")
     identities = _identities(records, plan["ips"])
     _validate_original_identities(identities, plan)
     payloads = _validate_payloads(plan, payloads)
-    manifest = {"schema_version": 1, "controller": _string(controller, "controller"),
+    manifest = {"schema_version": 2, "controller": _string(controller, "controller"), "fabric_id": fabric_id,
                 "fingerprint": plan["fingerprint"], "name": plan["name"], "site": plan["site"],
                 "ips": deepcopy(plan["ips"]), "serial_by_ip": deepcopy(plan["serial_by_ip"]),
                 "old_devices": identities, "payloads": payloads,
@@ -431,9 +483,16 @@ def edge_same_ip_snapshot(plan, records, payloads, controller):
 def edge_same_ip_manifest(manifest, plan, controller):
     """Validate a persisted manifest against the current controller and input."""
     _mapping(manifest, "snapshot manifest")
+    schema = manifest.get("schema_version")
+    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2):
+        _fail("saved manifest schema version is unsupported")
+    if schema == 2:
+        _string(manifest.get("fabric_id"), "saved fabric ID")
+    elif "fabric_id" in manifest:
+        _fail("legacy snapshots cannot contain an unprotected fabric ID")
     if manifest.get("capture_checksum") != _capture_checksum(manifest):
         _fail("saved immutable capture checksum mismatch")
-    for key, expected in (("schema_version", 1), ("controller", controller), ("fingerprint", plan["fingerprint"]),
+    for key, expected in (("controller", controller), ("fingerprint", plan["fingerprint"]),
                           ("name", plan["name"]), ("site", plan["site"]), ("ips", plan["ips"]),
                           ("serial_by_ip", plan["serial_by_ip"])):
         if manifest.get(key) != expected:
@@ -680,4 +739,5 @@ class FilterModule:
             "edge_same_ip_manifest", "edge_same_ip_checkpoint", "edge_same_ip_identity_guard",
             "edge_same_ip_ready", "edge_same_ip_lan_config", "edge_same_ip_subset", "edge_same_ip_ports_match",
             "edge_same_ip_fabric",
+            "edge_same_ip_site_id", "edge_same_ip_fabric_id", "edge_same_ip_old_fabric",
         )}

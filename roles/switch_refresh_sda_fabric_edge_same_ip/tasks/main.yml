@@ -113,6 +113,9 @@
       catalystcenter_debug: false
     cisco.catalystcenter.sda_provision_device_info: *edge_same_ip_connection
     cisco.catalystcenter.sda_fabric_devices_info: *edge_same_ip_connection
+    cisco.catalystcenter.sites_info: *edge_same_ip_connection
+    cisco.catalystcenter.sda_fabric_sites_info: *edge_same_ip_connection
+    cisco.catalystcenter.sda_fabric_zones_info: *edge_same_ip_connection
     cisco.catalystcenter.lan_automation_sessions_info: *edge_same_ip_connection
     cisco.catalystcenter.inventory_playbook_config_generator: &edge_same_ip_workflow
       <<: *edge_same_ip_connection
