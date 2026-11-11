@@ -1,0 +1,13 @@
+---
+- name: Restore replacement SDA edge switch batches at their original management IPs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/switch_refresh_sda_fabric_edge_same_ip_usecase.yml
+  vars:
+    # Run only after old switches are isolated, individual IP allocations are
+    # released, seed ports are ready, and replacements are in the PnP state.
+    switch_refresh_sda_fabric_edge_same_ip_phase: restore
+  roles:
+    - role: cisco.catalystcenter.switch_refresh_sda_fabric_edge_same_ip

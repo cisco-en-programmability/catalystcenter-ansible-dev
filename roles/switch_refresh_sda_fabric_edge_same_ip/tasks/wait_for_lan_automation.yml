@@ -1,0 +1,20 @@
+---
+# LAN automation may return after recognizing a previously running session.
+# Require a structured inactive-session response before provisioning devices.
+- name: Wait for LAN automation sessions to finish
+  cisco.catalystcenter.lan_automation_sessions_info:
+  register: edge_same_ip_lan_sessions
+  until:
+    - edge_same_ip_lan_sessions.catalystcenter_response is mapping
+    - edge_same_ip_lan_sessions.catalystcenter_response.response is mapping
+    - edge_same_ip_lan_sessions.catalystcenter_response.response.activeSessionIds is defined
+    - (edge_same_ip_lan_sessions.catalystcenter_response.response.activeSessionIds | type_debug) == 'list'
+    - edge_same_ip_lan_sessions.catalystcenter_response.response.activeSessions is defined
+    - edge_same_ip_lan_sessions.catalystcenter_response.response.activeSessions | string == '0'
+    - edge_same_ip_lan_sessions.catalystcenter_response.response.activeSessionIds | length == 0
+  retries: >-
+    {{ ((switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int) +
+        (switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int) - 1) //
+       (switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int) }}
+  delay: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int }}"
+  no_log: true

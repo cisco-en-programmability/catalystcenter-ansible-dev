@@ -183,6 +183,7 @@ ansible-playbook example_playbook.yml --ask-vault-pass
 | **fabric_devices_info** | SDA fabric devices information and inventory queries | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/fabric_devices_info/README.md) |
 | **wired_campus_automation** | Wired campus automation workflows | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/wired_campus_automation/README.md) |
 | **lan_automation** | LAN automation (underlay) workflows | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/lan_automation/README.md) |
+| **switch_refresh_sda_fabric_edge_same_ip** | Capture/remove and restore SDA edge switches while reusing management IPs | [📖 Guide](switch_refresh_sda_fabric_edge_same_ip/README.md) |
 
 ### 🔍 Assurance & Monitoring
 

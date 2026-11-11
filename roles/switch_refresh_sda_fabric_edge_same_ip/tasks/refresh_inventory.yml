@@ -1,0 +1,13 @@
+---
+- name: Read all batch management IPs from inventory
+  cisco.catalystcenter.network_device_info:
+    managementIpAddress: "{{ edge_same_ip_plan.ips }}"
+    limit: 500
+  register: edge_same_ip_inventory_lookup
+  no_log: true
+
+- name: Normalize exact live inventory records
+  ansible.builtin.set_fact:
+    edge_same_ip_live_records: >-
+      {{ edge_same_ip_inventory_lookup | cisco.catalystcenter.edge_same_ip_devices }}
+  no_log: true

@@ -1,0 +1,71 @@
+---
+# Define vault_* variables in encrypted Ansible Vault or an inventory secret
+# store. These examples contain documentation IP addresses and fake serials.
+catalystcenter_host: "{{ vault_catalystcenter_host }}"
+catalystcenter_port: 443
+catalystcenter_username: "{{ vault_catalystcenter_username }}"
+catalystcenter_password: "{{ vault_catalystcenter_password }}"
+catalystcenter_version: "2.3.7.9"
+catalystcenter_verify: true
+catalystcenter_debug: false
+catalystcenter_log: false
+
+# Both phases must use the same durable directory and unchanged batch inputs.
+# The controller account must be able to create/write this directory.
+switch_refresh_sda_fabric_edge_same_ip_snapshot_dir: >-
+  /var/lib/catalystcenter/edge-refresh/change-123
+
+switch_refresh_sda_fabric_edge_same_ip_config_verify: true
+
+switch_refresh_sda_fabric_edge_same_ip_batches:
+  - name: building-edge-refresh
+    fabric_site_name_hierarchy: Global/Region/Building
+    onboarding_method: lan_automation
+    # Set true only when no host-port configuration is expected on a device.
+    allow_empty_host_port_config: false
+
+    new_devices:
+      # These are the OLD management addresses that the replacements reuse.
+      device_ips:
+        - "192.0.2.10"
+        - "192.0.2.11"
+      lan_automation_config:
+        - lan_automation:
+            discovered_device_site_name_hierarchy: Global/Region/Building
+            primary_device_management_ip_address: "198.51.100.10"
+            primary_device_interface_names:
+              - GigabitEthernet1/0/1
+              - GigabitEthernet1/0/2
+            ip_pools:
+              - ip_pool_name: LAN_AUTO_MAIN
+                ip_pool_role: MAIN_POOL
+              - ip_pool_name: LAN_AUTO_P2P
+                ip_pool_role: PHYSICAL_LINK_POOL
+            discovery_level: 2
+            discovery_timeout: 40
+            discovery_devices:
+              - device_serial_number: NEW-SERIAL-01
+                device_management_ip_address: "192.0.2.10"
+                device_site_name_hierarchy: Global/Region/Building
+              - device_serial_number: NEW-SERIAL-02
+                device_management_ip_address: "192.0.2.11"
+                device_site_name_hierarchy: Global/Region/Building
+            launch_and_wait: true
+
+    # Each management_ip identifies both source and destination. The capture
+    # phase saves the old UUID/serial; replacement serials are listed above.
+    device_mapping:
+      - management_ip: "192.0.2.10"
+        interface_migration:
+          only_mapped: false
+          port_assignments:
+            - source: GigabitEthernet1/0/5
+              destination: GigabitEthernet1/0/10
+          port_channels: []
+      - management_ip: "192.0.2.11"
+        interface_migration:
+          only_mapped: false
+          port_assignments: []
+          port_channels:
+            - source: GigabitEthernet1/0/47
+              destination: TenGigabitEthernet1/1/1
