@@ -8,6 +8,7 @@ templating, and retries still execute through ansible-playbook.
 """
 
 from copy import deepcopy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ pytestmark = pytest.mark.skipif(PLAYBOOK is None, reason="ansible-playbook is re
 
 MODULES = (
     "network_device_info", "sda_provision_device_info", "sda_fabric_devices_info", "lan_automation_sessions_info",
+    "sites_info", "sda_fabric_sites_info", "sda_fabric_zones_info",
     "inventory_playbook_config_generator", "provision_playbook_config_generator",
     "sda_fabric_devices_playbook_config_generator",
     "sda_host_port_onboarding_playbook_config_generator",
@@ -120,10 +122,25 @@ def execute(module, args):
                 devices = [d for d in devices if d["id"] == args["id"]]
             result["catalystcenter_response"] = {"response": devices}
         elif module == "sda_fabric_devices_info":
+            # Match the SDK contract, and keep memberships independent from
+            # inventory so deleting a device cannot hide a stale fabric row.
+            if not isinstance(args.get("fabricId"), str) or not args["fabricId"].strip():
+                raise TypeError("fabricId must be a non-empty string")
+            if state.get("reject_fabric_queries"):
+                raise TypeError("Injected fabric-query contract failure")
             result["catalystcenter_response"] = {"response": [
-                {"networkDeviceId": device["id"], "fabricId": "fabric-1", "deviceRoles": state["fabric"][ip]}
-                for ip, device in state["devices"].items()
-                if ip in state["fabric"] and device["id"] == args.get("networkDeviceId")]}
+                deepcopy(row) for row in state["fabric_memberships"].values()
+                if row["fabricId"] == args["fabricId"] and row["networkDeviceId"] == args.get("networkDeviceId")]}
+        elif module == "sites_info":
+            result["catalystcenter_response"] = {"response": state.get("site_rows", [
+                {"id": "site-1", "nameHierarchy": "Global/Region/Building"}])}
+        elif module in ("sda_fabric_sites_info", "sda_fabric_zones_info"):
+            if state.get("fabric_lookup_failed"):
+                raise RuntimeError("Injected fabric-site lookup failure")
+            default = [{"id": "fabric-1", "siteId": "site-1"}] if module == "sda_fabric_sites_info" else []
+            rows = state.get("fabric_sites" if module == "sda_fabric_sites_info" else "fabric_zones", default)
+            result["catalystcenter_response"] = {"response": [
+                row for row in rows if row.get("siteId") == args.get("siteId")]}
         elif module == "sda_provision_device_info":
             ip = args["deviceManagementIpAddress"]
             result["catalystcenter_response"] = {
@@ -210,8 +227,13 @@ def execute(module, args):
                         if ip in apply_ips:
                             if args["state"] == "deleted":
                                 state["fabric"].pop(ip, None)
+                                if not state.get("keep_stale_fabric_memberships"):
+                                    state["fabric_memberships"].pop(state["devices"][ip]["id"], None)
                             else:
                                 state["fabric"][ip] = entry["device_roles"]
+                                uuid = state["devices"][ip]["id"]
+                                state["fabric_memberships"][uuid] = {
+                                    "networkDeviceId": uuid, "fabricId": "fabric-1", "deviceRoles": entry["device_roles"]}
             elif module == "sda_host_port_onboarding_workflow_manager":
                 for entry in args["config"]:
                     ip = entry["ip_address"]
@@ -284,6 +306,8 @@ def _initial_state():
                                "protocol": "LACP", "connected_device_type": "TRUNKING_DEVICE"}],
         }
     return {"devices": devices, "ports": ports, "fabric": {ip: ["EDGE_NODE"] for ip in IPS},
+            "fabric_memberships": {device["id"]: {"networkDeviceId": device["id"], "fabricId": "fabric-1",
+                                                    "deviceRoles": ["EDGE_NODE"]} for device in devices.values()},
             "provisioned": {ip: SITE + "/Floor" + str(index + 1) for index, ip in enumerate(IPS)},
             "calls": []}
 
@@ -389,10 +413,25 @@ def _mutations(calls):
             and call["module"] != "fabric_devices_info_workflow_manager"]
 
 
+def _legacy_manifest(manifest, stage="fabric_removed", index=2):
+    """Model the checksum produced by the original role, before fabric IDs."""
+    legacy = deepcopy(manifest)
+    legacy.update(schema_version=1, stage=stage, stage_index=index)
+    legacy.pop("fabric_id", None)
+    fields = ("schema_version", "controller", "fingerprint", "name", "site", "ips",
+              "serial_by_ip", "old_devices", "payloads", "hashes")
+    content = json.dumps({key: legacy[key] for key in fields}, sort_keys=True,
+                         separators=(",", ":"), ensure_ascii=True)
+    legacy["capture_checksum"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return legacy
+
+
 def test_capture_passes_complete_batch_and_preserves_original_and_mapped_ports(captured):
     manifest = captured.manifest()
     assert captured.state()["devices"] == {}
     assert len(manifest["old_devices"]) == 2
+    assert manifest["schema_version"] == 2
+    assert manifest["fabric_id"] == "fabric-1"
     assert manifest["payloads"]["cleanup"][0]["port_assignments"][0]["interface_name"] == "GigabitEthernet1/0/5"
     assert manifest["payloads"]["restore"][0]["port_assignments"][0]["interface_name"] == "GigabitEthernet1/0/10"
     assert manifest["payloads"]["restore"][0]["port_channels"][0]["interface_names"] == [
@@ -408,6 +447,12 @@ def test_capture_passes_complete_batch_and_preserves_original_and_mapped_ports(c
         "provision_workflow_manager", "inventory_workflow_manager"]
     assert all(set(call["targets"]) == set(IPS) for call in mutations)
     assert mutations[0]["args"]["config"] == manifest["payloads"]["cleanup"]
+    fabric_queries = [call for call in calls if call["module"] == "sda_fabric_devices_info"]
+    assert fabric_queries
+    assert all(call["args"]["fabricId"] == "fabric-1" for call in fabric_queries)
+    assert {call["args"]["networkDeviceId"] for call in fabric_queries} == {item["uuid"] for item in manifest["old_devices"]}
+    first_mutation = calls.index(mutations[0])
+    assert any(call["module"] == "sda_fabric_devices_info" for call in calls[:first_mutation])
     assert captured.manifest_path.stat().st_mode & 0o777 == 0o600
 
 
@@ -540,3 +585,99 @@ def test_unprovisioning_that_already_deletes_inventory_skips_redundant_delete(tm
     assert case.manifest()["stage"] == "awaiting_ip_release"
     assert not any(call["module"] == "inventory_workflow_manager" and call["args"]["state"] == "deleted"
                    for call in case.state()["calls"])
+
+
+@pytest.mark.parametrize("phase", ["capture_and_remove", "restore"])
+def test_legacy_snapshots_resolve_fabric_after_old_inventory_deletion(captured, tmp_path, phase):
+    case = OfflineRole(tmp_path, baseline=captured)
+    legacy = _legacy_manifest(case.manifest(), *(('awaiting_ip_release', 4) if phase == "restore" else ('fabric_removed', 2)))
+    case.manifest_path.write_text(json.dumps(legacy))
+    assert case.state()["devices"] == {}
+    case.run(phase)
+    final = case.manifest()
+    assert final["stage"] == ("complete" if phase == "restore" else "awaiting_ip_release")
+    assert final["schema_version"] == 1
+    assert "fabric_id" not in final
+    assert final["capture_checksum"] == legacy["capture_checksum"]
+    assert final["payloads"] == legacy["payloads"]
+    calls = case.state()["calls"]
+    assert any(call["module"] == "sites_info" and call["args"]["nameHierarchy"] == SITE for call in calls)
+    assert any(call["module"] == "sda_fabric_sites_info" and call["args"]["siteId"] == "site-1" for call in calls)
+    assert all(call["args"]["fabricId"] == "fabric-1" for call in calls if call["module"] == "sda_fabric_devices_info")
+    assert not any(call["module"].endswith("_playbook_config_generator")
+                   and not call["args"]["file_path"].endswith("verify_ports.yml") for call in calls)
+    if phase == "capture_and_remove":
+        assert _mutations(calls) == []
+
+
+def test_stale_uuid_membership_blocks_legacy_recovery_even_without_inventory(captured, tmp_path):
+    case = OfflineRole(tmp_path, baseline=captured)
+    legacy = _legacy_manifest(case.manifest())
+    case.manifest_path.write_text(json.dumps(legacy))
+    state = case.state()
+    uuid = legacy["old_devices"][0]["uuid"]
+    state["fabric_memberships"][uuid] = {"networkDeviceId": uuid, "fabricId": "fabric-1", "deviceRoles": ["EDGE_NODE"]}
+    case.save_state(state)
+    case.run("capture_and_remove", success=False)
+    assert case.state()["devices"] == {}
+    assert case.manifest()["stage"] == "fabric_removed"
+    assert _mutations(case.state()["calls"]) == []
+    state = case.state()
+    state["fabric_memberships"].clear()
+    case.save_state(state)
+    case.run("capture_and_remove")
+    assert case.manifest()["stage"] == "awaiting_ip_release"
+    assert case.manifest()["capture_checksum"] == legacy["capture_checksum"]
+
+
+def test_fabric_query_contract_is_checked_before_old_device_mutations(tmp_path):
+    case = OfflineRole(tmp_path)
+    state = case.state()
+    state["reject_fabric_queries"] = True
+    case.save_state(state)
+    case.run("capture_and_remove", success=False)
+    assert set(case.state()["devices"]) == set(IPS)
+    assert case.manifest()["stage"] == "captured"
+    assert _mutations(case.state()["calls"]) == []
+
+
+@pytest.mark.parametrize("failure", ["api_error", "missing", "ambiguous"])
+def test_unresolvable_fabric_fails_before_capturing_or_removing_devices(tmp_path, failure):
+    case = OfflineRole(tmp_path)
+    state = case.state()
+    if failure == "api_error":
+        state["fabric_lookup_failed"] = True
+    elif failure == "missing":
+        state["fabric_sites"] = []
+    else:
+        state["fabric_sites"] = [{"id": "fabric-1", "siteId": "site-1"}, {"id": "fabric-2", "siteId": "site-1"}]
+    case.save_state(state)
+    case.run("capture_and_remove", success=False)
+    calls = case.state()["calls"]
+    assert _mutations(calls) == []
+    assert not any(call["module"].endswith("_playbook_config_generator") for call in calls)
+    assert not case.manifest_path.exists()
+
+
+def test_changed_fabric_identity_cannot_retarget_a_saved_snapshot(captured, tmp_path):
+    case = OfflineRole(tmp_path, baseline=captured)
+    state = case.state()
+    state["fabric_sites"] = [{"id": "recreated-fabric", "siteId": "site-1"}]
+    case.save_state(state)
+    case.run("restore", success=False)
+    assert _mutations(case.state()["calls"]) == []
+    assert not any(call["module"] == "sda_fabric_devices_info" for call in case.state()["calls"])
+    assert case.manifest()["fabric_id"] == "fabric-1"
+
+
+def test_legacy_scope_can_resolve_a_zone_without_old_inventory(captured, tmp_path):
+    case = OfflineRole(tmp_path, baseline=captured)
+    case.manifest_path.write_text(json.dumps(_legacy_manifest(case.manifest())))
+    state = case.state()
+    state["fabric_sites"] = []
+    state["fabric_zones"] = [{"id": "fabric-1", "siteId": "site-1"}]
+    case.save_state(state)
+    case.run("capture_and_remove")
+    assert case.manifest()["stage"] == "awaiting_ip_release"
+    assert any(call["module"] == "sda_fabric_zones_info" for call in case.state()["calls"])
+    assert _mutations(case.state()["calls"]) == []

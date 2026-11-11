@@ -1,6 +1,8 @@
 """Offline contracts for the same-IP refresh planner and recovery manifest."""
 
 from copy import deepcopy
+import hashlib
+import json
 from unittest import TestCase
 
 from ansible.errors import AnsibleFilterError
@@ -171,7 +173,7 @@ class TestSameIpPlanner(TestCase):
 class TestSameIpSnapshot(TestCase):
     def setUp(self):
         self.plan = filters.edge_same_ip_plan([batch()])[0]
-        self.manifest = filters.edge_same_ip_snapshot(self.plan, records(), payloads(), "controller.example.test")
+        self.manifest = filters.edge_same_ip_snapshot(self.plan, records(), payloads(), "controller.example.test", "fabric-1")
 
     def test_snapshot_contains_original_and_mapped_ports_without_lan_secrets(self):
         self.assertNotIn("never-saved", str(self.manifest))
@@ -181,6 +183,44 @@ class TestSameIpSnapshot(TestCase):
         self.assertEqual(cleanup[0]["port_assignments"][0]["interface_name"], "GigabitEthernet1/0/5")
         self.assertEqual(restore[0]["port_assignments"][0]["interface_name"], "GigabitEthernet1/0/10")
         self.assertEqual(filters.edge_same_ip_manifest(self.manifest, self.plan, "controller.example.test"), self.manifest)
+
+    def test_new_snapshot_requires_and_protects_fabric_identity(self):
+        self.assertEqual(self.manifest["schema_version"], 2)
+        self.assertEqual(self.manifest["fabric_id"], "fabric-1")
+        for value in (None, "", " "):
+            with self.subTest(value=value), self.assertRaisesRegex(AnsibleFilterError, "fabric ID"):
+                filters.edge_same_ip_snapshot(self.plan, records(), payloads(), "controller", value)
+        changed = deepcopy(self.manifest)
+        changed["fabric_id"] = "other-fabric"
+        with self.assertRaisesRegex(AnsibleFilterError, "checksum mismatch"):
+            filters.edge_same_ip_manifest(changed, self.plan, "controller.example.test")
+
+    def test_legacy_snapshot_retains_original_checksum_and_resumes(self):
+        legacy = deepcopy(self.manifest)
+        legacy["schema_version"] = 1
+        del legacy["fabric_id"]
+        # This is the original schema-1 algorithm, independent of the current
+        # helper. A recovery fix must not invalidate already-published captures.
+        fields = ("schema_version", "controller", "fingerprint", "name", "site", "ips",
+                  "serial_by_ip", "old_devices", "payloads", "hashes")
+        content = json.dumps({key: legacy[key] for key in fields}, sort_keys=True,
+                             separators=(",", ":"), ensure_ascii=True)
+        legacy["capture_checksum"] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        validated = filters.edge_same_ip_manifest(legacy, self.plan, "controller.example.test")
+        advanced = filters.edge_same_ip_checkpoint(validated, "awaiting_ip_release")
+        self.assertEqual(advanced["capture_checksum"], legacy["capture_checksum"])
+        self.assertNotIn("fabric_id", advanced)
+        filters.edge_same_ip_manifest(advanced, self.plan, "controller.example.test")
+        legacy["fabric_id"] = "unprotected-fabric"
+        with self.assertRaisesRegex(AnsibleFilterError, "unprotected"):
+            filters.edge_same_ip_manifest(legacy, self.plan, "controller.example.test")
+
+    def test_rejects_unknown_or_boolean_manifest_schema(self):
+        for value in (True, 0, 3, "2"):
+            manifest = deepcopy(self.manifest)
+            manifest["schema_version"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(AnsibleFilterError, "schema version"):
+                filters.edge_same_ip_manifest(manifest, self.plan, "controller.example.test")
 
     def test_rejects_input_and_controller_changes_on_resume(self):
         value = batch()
@@ -217,40 +257,40 @@ class TestSameIpSnapshot(TestCase):
             value = payloads()
             value[component] = []
             with self.subTest(component=component), self.assertRaises(AnsibleFilterError):
-                filters.edge_same_ip_snapshot(self.plan, records(), value, "controller")
+                filters.edge_same_ip_snapshot(self.plan, records(), value, "controller", "fabric-1")
         value = payloads()
         value["fabric"][0]["fabric_devices"]["device_config"][0]["device_roles"].append("BORDER_NODE")
         with self.assertRaisesRegex(AnsibleFilterError, "pure EDGE_NODE"):
-            filters.edge_same_ip_snapshot(self.plan, records(), value, "controller")
+            filters.edge_same_ip_snapshot(self.plan, records(), value, "controller", "fabric-1")
 
     def test_rejects_stale_or_unmapped_restoration_payload(self):
         value = payloads()
         value["restore"] = deepcopy(value["cleanup"])
         with self.assertRaisesRegex(AnsibleFilterError, "does not match the original"):
-            filters.edge_same_ip_snapshot(self.plan, records(), value, "controller")
+            filters.edge_same_ip_snapshot(self.plan, records(), value, "controller", "fabric-1")
 
     def test_normalizes_identical_inventory_stack_exports(self):
         value = payloads()
         value["inventory"].append(deepcopy(value["inventory"][0]))
-        manifest = filters.edge_same_ip_snapshot(self.plan, records(), value, "controller")
+        manifest = filters.edge_same_ip_snapshot(self.plan, records(), value, "controller", "fabric-1")
         self.assertEqual(len(manifest["payloads"]["inventory"]), 2)
 
     def test_original_and_replacement_serials_must_differ(self):
         value = records()
         value[0]["serialNumber"] = "NEW-0"
         with self.assertRaisesRegex(AnsibleFilterError, "different serial"):
-            filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller")
+            filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller", "fabric-1")
 
     def test_original_identity_cannot_be_another_devices_replacement(self):
         value = records()
         value[0]["serialNumber"] = "NEW-1"
         with self.assertRaisesRegex(AnsibleFilterError, "different serial"):
-            filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller")
+            filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller", "fabric-1")
         for field in ("id", "serialNumber"):
             value = records()
             value[1][field] = value[0][field]
             with self.subTest(field=field), self.assertRaisesRegex(AnsibleFilterError, "must be unique"):
-                filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller")
+                filters.edge_same_ip_snapshot(self.plan, value, payloads(), "controller", "fabric-1")
         manifest = deepcopy(self.manifest)
         manifest["old_devices"][0]["serial_number"] = "NEW-1"
         manifest["capture_checksum"] = filters._capture_checksum(manifest)
@@ -265,14 +305,14 @@ class TestSameIpSnapshot(TestCase):
         plan = filters.edge_same_ip_plan([value])[0]
         configs = payloads()
         configs["cleanup"] = configs["restore"] = []
-        manifest = filters.edge_same_ip_snapshot(plan, records(), configs, "controller")
+        manifest = filters.edge_same_ip_snapshot(plan, records(), configs, "controller", "fabric-1")
         self.assertEqual(manifest["payloads"]["cleanup"], [])
         self.assertEqual(filters.edge_same_ip_subset([{"ip_address": IPS[0], "port_assignments": []}], IPS), [])
 
     def test_captured_floor_sites_populate_lan_devices_and_validate_supplied_site(self):
         configs = payloads()
         configs["provision"][0]["site_name_hierarchy"] = SITE + "/Floor1"
-        manifest = filters.edge_same_ip_snapshot(self.plan, records(), configs, "controller")
+        manifest = filters.edge_same_ip_snapshot(self.plan, records(), configs, "controller", "fabric-1")
         lan = filters.edge_same_ip_lan_config(self.plan, manifest)[0]["lan_automation"]
         self.assertEqual(lan["discovery_devices"][0]["device_site_name_hierarchy"], SITE + "/Floor1")
         self.assertEqual(lan["discovery_devices"][0]["device_host_name"], "edge-0")
@@ -288,7 +328,7 @@ class TestSameIpSnapshot(TestCase):
         configs = payloads()
         configs["provision"][0]["site_name_hierarchy"] = SITE + "/Floor1"
         with self.assertRaisesRegex(AnsibleFilterError, "conflicts"):
-            filters.edge_same_ip_snapshot(plan, records(), configs, "controller")
+            filters.edge_same_ip_snapshot(plan, records(), configs, "controller", "fabric-1")
         self.plan["lan_config"][0]["lan_automation"]["discovery_devices"][0]["device_site_name_hierarchy"] = SITE + "/Floor2"
         with self.assertRaisesRegex(AnsibleFilterError, "conflicts"):
             filters.edge_same_ip_manifest(self.manifest, self.plan, "controller.example.test")
@@ -306,10 +346,59 @@ class TestSameIpSnapshot(TestCase):
             filters.edge_same_ip_checkpoint(new, "provisioned", changed)
 
 
+class TestSameIpFabricQueries(TestCase):
+    def setUp(self):
+        self.plan = filters.edge_same_ip_plan([batch()])[0]
+        self.row = {"fabricId": "fabric-1", "networkDeviceId": "old-uuid"}
+
+    def test_site_lookup_requires_one_exact_hierarchy(self):
+        self.assertEqual(filters.edge_same_ip_site_id(raw([
+            {"id": "site-1", "nameHierarchy": SITE}, {"id": "child", "nameHierarchy": SITE + "/Floor"}]),
+            self.plan), "site-1")
+        for rows in ([], [{"id": "wrong", "nameHierarchy": SITE + "/Floor"}],
+                     [{"id": "one", "nameHierarchy": SITE}, {"id": "two", "nameHierarchy": SITE}]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(AnsibleFilterError, "exactly one site"):
+                filters.edge_same_ip_site_id(raw(rows), self.plan)
+
+    def test_fabric_lookup_checks_scope_and_only_accepts_explicit_empty_fallback(self):
+        self.assertEqual(filters.edge_same_ip_fabric_id(raw([{"id": "fabric-1", "siteId": "site-1"}]), "site-1"),
+                         "fabric-1")
+        self.assertEqual(filters.edge_same_ip_fabric_id(raw([]), "site-1", True), "")
+        for rows in ([], [{"id": "fabric-1", "siteId": "wrong-site"}],
+                     [{"id": "fabric-1", "siteId": "site-1"}] * 2):
+            with self.subTest(rows=rows), self.assertRaisesRegex(AnsibleFilterError, "exactly one fabric"):
+                filters.edge_same_ip_fabric_id(raw(rows), "site-1")
+
+    def test_query_errors_and_malformed_responses_are_never_absence(self):
+        for result in ({"failed": True}, {}, {"catalystcenter_response": {"response": None}}, raw(["invalid"])):
+            with self.subTest(result=result), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_old_fabric(result, "fabric-1", "old-uuid")
+            with self.subTest(result=result), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_fabric_id(result, "site-1", True)
+
+    def test_uuid_membership_requires_both_fabric_and_device_ids(self):
+        for fabric_id, uuid in ((None, "old-uuid"), ("fabric-1", None), ("", "old-uuid")):
+            with self.subTest(fabric_id=fabric_id, uuid=uuid), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_old_fabric(raw([]), fabric_id, uuid)
+        self.assertTrue(filters.edge_same_ip_old_fabric(raw([]), "fabric-1", "old-uuid"))
+        self.assertFalse(filters.edge_same_ip_old_fabric(raw([self.row]), "fabric-1", "old-uuid"))
+        self.assertTrue(filters.edge_same_ip_old_fabric(raw([self.row]), "fabric-1", "old-uuid", "present"))
+        self.assertTrue(filters.edge_same_ip_old_fabric(raw([self.row]), "fabric-1", "old-uuid", "any"))
+        self.assertTrue(filters.edge_same_ip_old_fabric(raw([]), "fabric-1", "old-uuid", "any"))
+
+    def test_uuid_lookup_rejects_wrong_scope_and_duplicate_memberships(self):
+        for field in ("fabricId", "networkDeviceId"):
+            row = dict(self.row, **{field: "wrong"})
+            with self.subTest(field=field), self.assertRaisesRegex(AnsibleFilterError, "different fabric or device"):
+                filters.edge_same_ip_old_fabric(raw([row]), "fabric-1", "old-uuid")
+        with self.assertRaisesRegex(AnsibleFilterError, "duplicate memberships"):
+            filters.edge_same_ip_old_fabric(raw([self.row, self.row]), "fabric-1", "old-uuid")
+
+
 class TestSameIpIdentityAndPostconditions(TestCase):
     def setUp(self):
         self.plan = filters.edge_same_ip_plan([batch()])[0]
-        self.manifest = filters.edge_same_ip_snapshot(self.plan, records(), payloads(), "controller.example.test")
+        self.manifest = filters.edge_same_ip_snapshot(self.plan, records(), payloads(), "controller.example.test", "fabric-1")
 
     def test_teardown_guard_rejects_replacement_at_reused_ip(self):
         with self.assertRaisesRegex(AnsibleFilterError, "refusing to target the replacement"):

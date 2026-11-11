@@ -167,7 +167,8 @@
         cisco.catalystcenter.edge_same_ip_snapshot(
           edge_same_ip_captured_records,
           edge_same_ip_captured_payloads,
-          edge_same_ip_controller
+          edge_same_ip_controller,
+          edge_same_ip_fabric_id
         )
       }}
   no_log: true

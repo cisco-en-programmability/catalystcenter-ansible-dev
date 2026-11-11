@@ -23,6 +23,13 @@
       }}
   no_log: true
 
+- name: Check the UUID fabric query contract before any destructive workflow
+  ansible.builtin.include_tasks: verify_old_fabric.yml
+  vars:
+    # A resumed removal can already have removed some or all memberships.
+    # Validate the query and response without requiring them to remain present.
+    edge_same_ip_old_fabric_expected: any
+
 - name: Remove original host-port configuration for the entire old batch
   when: edge_same_ip_removal_start_stage | int < 1
   block:

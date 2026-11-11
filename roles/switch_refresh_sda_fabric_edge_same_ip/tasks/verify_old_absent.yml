@@ -10,22 +10,9 @@
   no_log: true
 
 - name: Verify captured old UUIDs have no remaining fabric memberships
-  cisco.catalystcenter.sda_fabric_devices_info:
-    networkDeviceId: "{{ edge_same_ip_old_identity.uuid }}"
-    limit: 500
-  register: edge_same_ip_old_fabric_absence
-  until:
-    - edge_same_ip_old_fabric_absence.catalystcenter_response is mapping
-    - edge_same_ip_old_fabric_absence.catalystcenter_response.response is defined
-    - (edge_same_ip_old_fabric_absence.catalystcenter_response.response | type_debug) == 'list'
-    - edge_same_ip_old_fabric_absence.catalystcenter_response.response | length == 0
-  retries: "{{ edge_same_ip_poll_retries | int }}"
-  delay: "{{ edge_same_ip_poll_delay | int }}"
-  loop: "{{ edge_same_ip_manifest.old_devices }}"
-  loop_control:
-    loop_var: edge_same_ip_old_identity
-    label: "{{ edge_same_ip_old_identity.management_ip }}"
-  no_log: true
+  ansible.builtin.include_tasks: verify_old_fabric.yml
+  vars:
+    edge_same_ip_old_fabric_expected: absent
 
 - name: Wait for captured old serials to be absent even if an address changed
   cisco.catalystcenter.network_device_info:

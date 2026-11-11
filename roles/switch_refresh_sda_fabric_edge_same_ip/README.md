@@ -216,6 +216,22 @@ saved configuration/manifest files use mode `0600`. The manifest binds the
 snapshot to the controller and batch inputs and records payload
 checksums, old identities, replacement identities, and progress checkpoints.
 
+New snapshots use schema 2 and include the resolved fabric ID in the immutable
+capture checksum. Each phase resolves the saved hierarchy through the site and
+fabric-site APIs (with a fabric-zone fallback) and checks it against that ID.
+A fabric recreated at the same hierarchy cannot silently replace the captured
+fabric scope. UUID membership queries always pass both `fabricId` and the
+captured `networkDeviceId`; their query contract is checked before old-device
+mutations, and membership absence is checked independently of inventory.
+
+Schema-1 snapshots created by earlier versions remain valid with their original
+checksums. The role resolves their fabric ID from the saved hierarchy even when
+all old inventory records have already been deleted. If an earlier run stopped
+at the old-UUID verification task, retain the snapshot directory and unchanged
+inputs, install this fix, and rerun `capture_and_remove`. It resumes verification
+without recapturing or deleting already-absent devices, then reaches
+`awaiting_ip_release`. No manual snapshot edits or regeneration are required.
+
 A `.lock` directory under `snapshot_dir` prevents simultaneous runs against the
 same snapshots. Normal completion or task failure removes the lock. If the
 Ansible process is interrupted, a lock may remain. Confirm that no run is still
