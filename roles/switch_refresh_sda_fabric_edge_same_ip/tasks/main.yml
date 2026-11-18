@@ -27,6 +27,7 @@
     edge_same_ip_plans: >-
       {{ switch_refresh_sda_fabric_edge_same_ip_batches | cisco.catalystcenter.edge_same_ip_plan }}
     edge_same_ip_controller: "{{ catalystcenter_host | lower | trim }}"
+    edge_same_ip_manifests: {}
     edge_same_ip_snapshot_root: "{{ switch_refresh_sda_fabric_edge_same_ip_snapshot_dir | regex_replace('/+$', '') }}"
     edge_same_ip_poll_delay: "{{ switch_refresh_sda_fabric_edge_same_ip_poll_interval | int }}"
     edge_same_ip_poll_retries: >-
@@ -85,9 +86,25 @@
               - (edge_same_ip_replacement_preflight | cisco.catalystcenter.edge_same_ip_devices | length) == 0
             fail_msg: >-
               Replacement serials already exist in controller inventory.
-              Verify the replacement identities and PnP readiness before
+              Verify the replacement identities and onboarding preparation before
               removing any old switches.
           when: switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+          no_log: true
+
+        - name: Prepare all batch snapshots before any device mutation
+          ansible.builtin.include_tasks: batch.yml
+          loop: "{{ edge_same_ip_plans }}"
+          loop_control:
+            loop_var: edge_same_ip_batch_plan
+            label: "{{ edge_same_ip_batch_plan.name }}"
+          vars:
+            edge_same_ip_run_stage: capture
+          no_log: true
+
+        - name: Validate all saved onboarding scopes and generated seed claims
+          ansible.builtin.assert:
+            that:
+              - edge_same_ip_plans | cisco.catalystcenter.edge_same_ip_onboarding_preflight(edge_same_ip_manifests)
           no_log: true
 
         - name: Refresh each complete batch in configured order
@@ -96,6 +113,8 @@
           loop_control:
             loop_var: edge_same_ip_batch_plan
             label: "{{ edge_same_ip_batch_plan.name }}"
+          vars:
+            edge_same_ip_run_stage: execute
           no_log: true
       always:
         - name: Release snapshot lock
@@ -132,3 +151,5 @@
     cisco.catalystcenter.sda_host_port_onboarding_workflow_manager: *edge_same_ip_workflow
     cisco.catalystcenter.fabric_devices_info_workflow_manager: *edge_same_ip_workflow
     cisco.catalystcenter.lan_automation_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.lan_automation_playbook_config_generator: *edge_same_ip_workflow
+    cisco.catalystcenter.discovery_workflow_manager: *edge_same_ip_workflow

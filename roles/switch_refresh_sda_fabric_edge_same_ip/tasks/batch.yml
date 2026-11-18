@@ -64,11 +64,20 @@
 
 - name: Remove the old-switch batch using captured identities
   ansible.builtin.include_tasks: capture_and_remove.yml
-  when: switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+  when:
+    - switch_refresh_sda_fabric_edge_same_ip_phase == 'capture_and_remove'
+    - edge_same_ip_run_stage | default('execute') == 'execute'
 
 - name: Restore the replacement-switch batch from saved configuration
   ansible.builtin.include_tasks: restore.yml
-  when: switch_refresh_sda_fabric_edge_same_ip_phase == 'restore'
+  when:
+    - switch_refresh_sda_fabric_edge_same_ip_phase == 'restore'
+    - edge_same_ip_run_stage | default('execute') == 'execute'
+
+- name: Retain each verified manifest for cross-batch onboarding checks
+  ansible.builtin.set_fact:
+    edge_same_ip_manifests: "{{ edge_same_ip_manifests | combine({edge_same_ip_plan.name: edge_same_ip_manifest}) }}"
+  no_log: true
 
 - name: Report batch checkpoint
   ansible.builtin.debug:

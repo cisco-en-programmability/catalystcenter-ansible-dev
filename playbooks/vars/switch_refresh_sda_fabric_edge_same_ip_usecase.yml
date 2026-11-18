@@ -1,71 +1,93 @@
 ---
-# Define vault_* variables in encrypted Ansible Vault or an inventory secret
-# store. These examples contain documentation IP addresses and fake serials.
+# Supply vault_* variables through Ansible Vault or an inventory secret store.
 catalystcenter_host: "{{ vault_catalystcenter_host }}"
-catalystcenter_port: 443
 catalystcenter_username: "{{ vault_catalystcenter_username }}"
 catalystcenter_password: "{{ vault_catalystcenter_password }}"
-catalystcenter_version: "2.3.7.9"
+catalystcenter_port: 443
+catalystcenter_version: "3.1.3.0"
 catalystcenter_verify: true
 catalystcenter_debug: false
 catalystcenter_log: false
 
-# Both phases must use the same durable directory and unchanged batch inputs.
-# The controller account must be able to create/write this directory.
+# Both phases use the same mappings and durable snapshot directory.
 switch_refresh_sda_fabric_edge_same_ip_snapshot_dir: >-
   /var/lib/catalystcenter/edge-refresh/change-123
-
 switch_refresh_sda_fabric_edge_same_ip_config_verify: true
+switch_refresh_sda_fabric_edge_same_ip_timeout: 1200
+switch_refresh_sda_fabric_edge_same_ip_poll_interval: 10
+switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout: 604800
+switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval: 30
 
 switch_refresh_sda_fabric_edge_same_ip_batches:
-  - name: building-edge-refresh
+  # Keep the example batches that apply to your deployment.
+  - name: lan-automation-edge-refresh
     fabric_site_name_hierarchy: Global/Region/Building
     onboarding_method: lan_automation
-    # Set true only when no host-port configuration is expected on a device.
     allow_empty_host_port_config: false
-
-    new_devices:
-      # These are the OLD management addresses that the replacements reuse.
-      device_ips:
-        - "192.0.2.10"
-        - "192.0.2.11"
-      lan_automation_config:
-        - lan_automation:
-            discovered_device_site_name_hierarchy: Global/Region/Building
-            primary_device_management_ip_address: "198.51.100.10"
-            primary_device_interface_names:
-              - GigabitEthernet1/0/1
-              - GigabitEthernet1/0/2
-            ip_pools:
-              - ip_pool_name: LAN_AUTO_MAIN
-                ip_pool_role: MAIN_POOL
-              - ip_pool_name: LAN_AUTO_P2P
-                ip_pool_role: PHYSICAL_LINK_POOL
-            discovery_level: 2
-            discovery_timeout: 40
-            discovery_devices:
-              - device_serial_number: NEW-SERIAL-01
-                device_management_ip_address: "192.0.2.10"
-                device_site_name_hierarchy: Global/Region/Building
-              - device_serial_number: NEW-SERIAL-02
-                device_management_ip_address: "192.0.2.11"
-                device_site_name_hierarchy: Global/Region/Building
-            launch_and_wait: true
-
-    # Each management_ip identifies both source and destination. The capture
-    # phase saves the old UUID/serial; replacement serials are listed above.
+    # Optional; injected during restore, never saved in the snapshot.
+    # new_devices:
+    #   isis_domain_pwd: "{{ vault_lan_automation_isis_domain_pwd }}"
     device_mapping:
       - management_ip: "192.0.2.10"
+        replacement_serial_number: NEW-SERIAL-01
         interface_migration:
           only_mapped: false
           port_assignments:
             - source: GigabitEthernet1/0/5
               destination: GigabitEthernet1/0/10
-          port_channels: []
-      - management_ip: "192.0.2.11"
-        interface_migration:
-          only_mapped: false
-          port_assignments: []
           port_channels:
             - source: GigabitEthernet1/0/47
               destination: TenGigabitEthernet1/1/1
+      - management_ip: "192.0.2.11"
+        replacement_serial_number: NEW-SERIAL-02
+        # Omit interface_migration to preserve existing interface names.
+
+  # Prepare replacement IPs, routing, old hostnames, and SSH/SNMP after phase 1.
+  - name: discovery-edge-refresh
+    fabric_site_name_hierarchy: Global/Region/Building
+    onboarding_method: discovery
+    allow_empty_host_port_config: false
+    new_devices:
+      discovery:
+        protocol_order: ssh
+        retry: 2
+        use_global_credentials: false
+        discovery_specific_credentials:
+          cli_credentials_list:
+            - username: "{{ vault_shared_cli_username }}"
+              password: "{{ vault_shared_cli_password }}"
+              enable_password: "{{ vault_shared_enable_password }}"
+          snmp_v3_credential:
+            username: "{{ vault_shared_snmp_username }}"
+            snmp_mode: AUTHPRIV
+            auth_type: SHA
+            auth_password: "{{ vault_shared_snmp_auth_password }}"
+            privacy_type: AES128
+            privacy_password: "{{ vault_shared_snmp_privacy_password }}"
+    device_mapping:
+      - management_ip: "192.0.2.20"
+        replacement_serial_number: NEW-SERIAL-20
+      - management_ip: "192.0.2.21"
+        replacement_serial_number: NEW-SERIAL-21
+        discovery:
+          # Replace this credential type; inherit the shared SNMP credentials.
+          discovery_specific_credentials:
+            cli_credentials_list:
+              - username: "{{ vault_edge_21_cli_username }}"
+                password: "{{ vault_edge_21_cli_password }}"
+                enable_password: "{{ vault_edge_21_enable_password }}"
+
+  - name: global-credentials-edge-refresh
+    fabric_site_name_hierarchy: Global/Region/Building
+    onboarding_method: discovery
+    new_devices:
+      discovery:
+        protocol_order: ssh
+        retry: 2
+        use_global_credentials: true
+        # Optional global_credentials selectors use the Discovery module schema.
+    device_mapping:
+      - management_ip: "192.0.2.30"
+        replacement_serial_number: NEW-SERIAL-30
+      - management_ip: "192.0.2.31"
+        replacement_serial_number: NEW-SERIAL-31

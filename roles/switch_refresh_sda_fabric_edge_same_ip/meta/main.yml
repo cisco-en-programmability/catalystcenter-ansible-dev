@@ -2,7 +2,7 @@
 galaxy_info:
   author: Cisco Systems
   description: >-
-    Refresh SDA fabric edge switches in two phases while reusing management IPs
+    Refresh SDA fabric edge switches using LAN automation or discovery with reused management IPs
   company: Cisco Systems
   license: GPL-3.0-or-later
   min_ansible_version: "2.16"

@@ -887,6 +887,87 @@ ansible-playbook -i host_inventory_dnac1/hosts.yml cvp/lan_automation/playbook/l
 
 ---
 
+## Capture LAN automation configuration for physical replacement
+
+Use `cisco.catalystcenter.lan_automation_playbook_config_generator` **before
+deleting the existing devices**. It captures the current hostname, management
+IP, and exact site assignment from inventory, and retrieves the seed devices,
+seed interfaces, pools, and supported options from LAN automation session
+history. Catalyst Center 2.3.7.9 or later is required.
+
+```yaml
+- name: Save LAN automation settings before replacement
+  cisco.catalystcenter.lan_automation_playbook_config_generator:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    file_path: ./replacement_lan_automation.yml
+    config:
+      site_name_hierarchy: Global/Region/Building
+      ip_address_list:
+        - "192.0.2.10"
+        - "192.0.2.11"
+    # Optional when all exported sessions use this password:
+    # isis_domain_pwd: "{{ vault_lan_automation_isis_domain_pwd }}"
+```
+
+The generated file contains a single top-level `config` list. Only requested
+devices are included; devices from the same source session are grouped together.
+For example, a generated discovery entry is:
+
+```yaml
+discovery_devices:
+  - device_serial_number: REPLACE_WITH_SERIAL_FOR_192_0_2_10
+    device_host_name: access-01
+    device_management_ip_address: "192.0.2.10"
+    device_site_name_hierarchy: Global/Region/Building/Floor1
+```
+
+Replace every `REPLACE_WITH_SERIAL_FOR_<IP>` value with the corresponding **new
+physical device's serial number** before replay. No replacement serials are
+needed during capture. If the original session used an IS-IS password, supply
+`isis_domain_pwd` during generation or add it to each appropriate generated
+`lan_automation` entry afterward; the status API cannot recover the password.
+An input supplied through a Vault variable resolves before the generated file is
+written, so encrypt that file with Ansible Vault if it contains a password.
+
+After editing the file, removing the old devices through your replacement
+workflow, and connecting the new devices in the required PnP state, replay it:
+
+```yaml
+- name: Load the edited LAN automation configuration
+  ansible.builtin.include_vars:
+    file: ./replacement_lan_automation.yml
+    name: replacement_lan
+
+- name: LAN automate the replacement devices
+  cisco.catalystcenter.lan_automation_workflow_manager:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    state: merged
+    config: "{{ replacement_lan.config }}"
+```
+
+The generator selects the latest stopped, inactive session with discovery
+evidence for the current device serial number in its site ancestry. It rejects
+missing or ambiguous matches before writing any output. A site filter includes
+descendants while preserving each device's actual current site. The primary and
+peer seeds, seed interfaces, and IP pools must remain available. Individual
+physical-link IP addresses and SDA fabric or host-port settings require their
+respective workflows.
+
+`file_mode: overwrite` is the default. `file_mode: append` combines distinct
+entries in one replayable `config` list and rejects conflicting duplicate
+management IPs. Repeating an unchanged capture reports `changed: false`.
+Check mode predicts file changes without writing files or directories. Capture
+uses GET APIs only and does not delete or modify any devices.
+
+See the [capture playbook](../../playbooks/lan_automation_config_generator.yml)
+for a complete example.
+
 ## References
 
 For comprehensive instructions on LAN Automation configuration and the complete parameter specification, refer to:

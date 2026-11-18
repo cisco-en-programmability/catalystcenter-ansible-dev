@@ -236,6 +236,7 @@ Config-generator roles extract current device/controller configurations and writ
 | **events_and_notifications_config_generator** | Events and Notifications Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/events_and_notifications_config_generator/README.md) |
 | **inventory_config_generator** | Inventory Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/inventory_config_generator/README.md) |
 | **ise_radius_integration_config_generator** | ISE Radius Integration Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/ise_radius_integration_config_generator/README.md) |
+| **lan_automation_config_generator** | LAN Automation Config Generator | [📖 Guide](lan_automation_config_generator/README.md) |
 | **network_profile_switching_config_generator** | Network Profile Switching Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/network_profile_switching_config_generator/README.md) |
 | **network_profile_wireless_config_generator** | Network Profile Wireless Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/network_profile_wireless_config_generator/README.md) |
 | **network_settings_config_generator** | Network Settings Config Generator | [📖 Guide](https://github.com/cisco-en-programmability/catalystcenter-ansible/blob/main/roles/network_settings_config_generator/README.md) |
@@ -318,9 +319,9 @@ Config-generator roles extract current device/controller configurations and writ
 
 ## 📊 Role Statistics
 
-- **Total Roles**: 69
+- **Total Roles**: 70
 - **Workflow-manager Roles**: 39
-- **Config-generator Roles**: 30
+- **Config-generator Roles**: 31
 
 ---
 

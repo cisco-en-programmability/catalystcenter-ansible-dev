@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: Cisco Systems
+  description: Generate LAN automation configuration for physical replacement
+  company: Cisco Systems
+  license: GPL-3.0-or-later
+  min_ansible_version: "2.16"
+  platforms:
+    - name: GenericLinux
+      versions: [all]
+  galaxy_tags: [cisco, catalystcenter, networking, automation, generator]
+dependencies: []

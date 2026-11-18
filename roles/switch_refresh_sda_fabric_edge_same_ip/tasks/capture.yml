@@ -1,6 +1,15 @@
 ---
 # Capture every workflow payload before publishing the first durable checkpoint.
 # This file is never called once a manifest exists, including after a failure.
+- name: Select capture components for the onboarding method
+  ansible.builtin.set_fact:
+    edge_same_ip_capture_components: >-
+      {{ ['inventory', 'provision', 'fabric', 'cleanup', 'restore'] +
+         (['lan_automation'] if edge_same_ip_plan.onboarding_method == 'lan_automation'
+          and not edge_same_ip_plan.legacy_input else []) }}
+    edge_same_ip_captured_lan: []
+  no_log: true
+
 - name: Read all old switch identities before capture
   cisco.catalystcenter.network_device_info:
     managementIpAddress: "{{ edge_same_ip_plan.ips }}"
@@ -18,12 +27,7 @@
   ansible.builtin.stat:
     path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
     follow: false
-  loop:
-    - inventory
-    - provision
-    - fabric
-    - cleanup
-    - restore
+  loop: "{{ edge_same_ip_capture_components }}"
   loop_control:
     loop_var: edge_same_ip_capture_component
   register: edge_same_ip_capture_path_stats
@@ -46,15 +50,30 @@
   ansible.builtin.file:
     path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
     state: absent
-  loop:
-    - inventory
-    - provision
-    - fabric
-    - cleanup
-    - restore
+  loop: "{{ edge_same_ip_capture_components }}"
   loop_control:
     loop_var: edge_same_ip_capture_component
   no_log: true
+
+- name: Capture LAN automation configuration through the generator role
+  ansible.builtin.include_role:
+    name: cisco.catalystcenter.lan_automation_config_generator
+    public: false
+    apply:
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_config_generator_config:
+      site_name_hierarchy: "{{ edge_same_ip_plan.site }}"
+      ip_address_list: "{{ edge_same_ip_plan.ips }}"
+    lan_automation_config_generator_file_path: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
+    lan_automation_config_generator_file_mode: overwrite
+    # IS-IS passwords are supplied only during restore, never captured to disk.
+    lan_automation_config_generator_isis_domain_pwd: null
+  when:
+    - edge_same_ip_plan.onboarding_method == 'lan_automation'
+    - not edge_same_ip_plan.legacy_input
 
 - name: Capture inventory configuration for the entire batch
   cisco.catalystcenter.inventory_playbook_config_generator:
@@ -115,12 +134,7 @@
     path: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
     state: file
     mode: "0600"
-  loop:
-    - inventory
-    - provision
-    - fabric
-    - cleanup
-    - restore
+  loop: "{{ edge_same_ip_capture_components }}"
   loop_control:
     loop_var: edge_same_ip_capture_component
   no_log: true
@@ -128,12 +142,7 @@
 - name: Read every fresh configuration capture
   ansible.builtin.slurp:
     src: "{{ edge_same_ip_batch_dir }}/{{ edge_same_ip_capture_component }}.yml"
-  loop:
-    - inventory
-    - provision
-    - fabric
-    - cleanup
-    - restore
+  loop: "{{ edge_same_ip_capture_components }}"
   loop_control:
     loop_var: edge_same_ip_capture_component
   register: edge_same_ip_capture_files
@@ -157,6 +166,20 @@
   loop: "{{ edge_same_ip_capture_files.results }}"
   loop_control:
     loop_var: edge_same_ip_capture_file
+  when: edge_same_ip_capture_file.edge_same_ip_capture_component != 'lan_automation'
+  no_log: true
+
+- name: Read generated LAN automation configuration
+  ansible.builtin.slurp:
+    src: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
+  register: edge_same_ip_lan_capture_file
+  when: "'lan_automation' in edge_same_ip_capture_components"
+  no_log: true
+
+- name: Load the generated LAN automation input
+  ansible.builtin.set_fact:
+    edge_same_ip_captured_lan: "{{ (edge_same_ip_lan_capture_file.content | b64decode | from_yaml).config }}"
+  when: "'lan_automation' in edge_same_ip_capture_components"
   no_log: true
 
 - name: Validate all captures and construct the immutable batch snapshot
@@ -168,7 +191,8 @@
           edge_same_ip_captured_records,
           edge_same_ip_captured_payloads,
           edge_same_ip_controller,
-          edge_same_ip_fabric_id
+          edge_same_ip_fabric_id,
+          edge_same_ip_captured_lan
         )
       }}
   no_log: true
@@ -196,3 +220,14 @@
 
 - name: Publish the validated snapshot before any old-device mutation
   ansible.builtin.include_tasks: persist.yml
+
+- name: Save the validated LAN configuration with replacement serials
+  ansible.builtin.copy:
+    dest: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
+    content: "{{ {'config': edge_same_ip_manifest.onboarding.config} | to_nice_yaml }}"
+    mode: '0600'
+    unsafe_writes: false
+  when:
+    - edge_same_ip_manifest.schema_version == 3
+    - edge_same_ip_plan.onboarding_method == 'lan_automation'
+  no_log: true

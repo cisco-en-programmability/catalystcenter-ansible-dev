@@ -82,6 +82,202 @@ def raw(items):
     return {"catalystcenter_response": {"response": items}}
 
 
+def generated_batch(method="lan_automation"):
+    value = batch()
+    value.pop("new_devices")
+    value["onboarding_method"] = method
+    for index, mapping in enumerate(value["device_mapping"]):
+        mapping["replacement_serial_number"] = "NEW-%d" % index
+    return value
+
+
+def generated_lan():
+    config = deepcopy(batch()["new_devices"]["lan_automation_config"])
+    config[0]["lan_automation"].pop("isis_domain_pwd")
+    for device, record in zip(config[0]["lan_automation"]["discovery_devices"], records()):
+        device["device_serial_number"] = "REPLACE_WITH_SERIAL_FOR_" + device[
+            "device_management_ip_address"
+        ].replace(".", "_")
+        device["device_host_name"] = record["hostname"]
+        device["device_site_name_hierarchy"] = SITE
+    return config
+
+
+class TestGeneratedOnboarding(TestCase):
+    def snapshot(self, value):
+        plan = filters.edge_same_ip_plan([value])[0]
+        return plan, filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1", generated_lan()
+        )
+
+    def test_both_methods_derive_ips_and_require_every_replacement_serial(self):
+        for method in ("lan_automation", "discovery"):
+            value = generated_batch(method)
+            plan = filters.edge_same_ip_plan([value])[0]
+            self.assertEqual(plan["ips"], IPS)
+            self.assertEqual(plan["serial_by_ip"], dict(zip(IPS, ("NEW-0", "NEW-1"))))
+            value["device_mapping"][0].pop("replacement_serial_number")
+            with self.subTest(method=method), self.assertRaisesRegex(
+                AnsibleFilterError, "serial number"
+            ):
+                filters.edge_same_ip_plan([value])
+
+    def test_generated_serials_are_substituted_by_ip_and_saved_without_password(self):
+        value = generated_batch()
+        value["new_devices"] = {"isis_domain_pwd": "runtime-secret"}
+        plan = filters.edge_same_ip_plan([value])[0]
+        generated = generated_lan()
+        generated[0]["lan_automation"]["discovery_devices"].reverse()
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1", generated
+        )
+        self.assertEqual(manifest["schema_version"], 3)
+        self.assertEqual(manifest["onboarding"]["method"], "lan_automation")
+        saved = manifest["onboarding"]["config"]
+        self.assertNotIn("REPLACE_WITH", str(saved))
+        self.assertNotIn("runtime-secret", str(manifest))
+        self.assertEqual(
+            {d["device_management_ip_address"]: d["device_serial_number"]
+             for d in saved[0]["lan_automation"]["discovery_devices"]},
+            plan["serial_by_ip"],
+        )
+        filters.edge_same_ip_manifest(manifest, plan, "controller")
+        restored = filters.edge_same_ip_lan_config(plan, manifest)
+        self.assertEqual(restored[0]["lan_automation"]["isis_domain_pwd"], "runtime-secret")
+        self.assertNotIn("isis_domain_pwd", saved[0]["lan_automation"])
+
+    def test_capture_rejects_incomplete_generated_targets_and_stored_secrets(self):
+        plan = filters.edge_same_ip_plan([generated_batch()])[0]
+        for kind in ("missing", "duplicate", "unexpected", "password"):
+            config = generated_lan()
+            lan = config[0]["lan_automation"]
+            if kind == "missing":
+                lan["discovery_devices"].pop()
+            elif kind == "duplicate":
+                lan["discovery_devices"].append(deepcopy(lan["discovery_devices"][0]))
+            elif kind == "unexpected":
+                lan["discovery_devices"][0]["device_management_ip_address"] = "192.0.2.99"
+            else:
+                lan["isis_domain_pwd"] = "unexpected-secret"
+            with self.subTest(kind=kind), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_snapshot(
+                    plan, records(), payloads(), "controller", "fabric-1", config
+                )
+
+    def test_saved_onboarding_is_protected_and_revalidated_on_resume(self):
+        plan, manifest = self.snapshot(generated_batch())
+        for field, value in (("method", "discovery"), ("config", [])):
+            changed = deepcopy(manifest)
+            changed["onboarding"][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(AnsibleFilterError, "checksum"):
+                filters.edge_same_ip_manifest(changed, plan, "controller")
+        changed = deepcopy(manifest)
+        changed["onboarding"]["config"][0]["lan_automation"]["discovery_devices"][0][
+            "device_serial_number"
+        ] = "WRONG"
+        changed["capture_checksum"] = filters._capture_checksum(changed)
+        with self.assertRaisesRegex(AnsibleFilterError, "saved onboarding serials"):
+            filters.edge_same_ip_manifest(changed, plan, "controller")
+
+    def test_discovery_inherits_credentials_by_type_and_replaces_lists(self):
+        value = generated_batch("discovery")
+        value["new_devices"] = {
+            "discovery": {
+                "protocol_order": "ssh",
+                "use_global_credentials": False,
+                "discovery_specific_credentials": {
+                    "cli_credentials_list": [{"username": "shared", "password": "shared-secret"}],
+                    "snmp_v2_read_credential": {"community": "shared-snmp"},
+                },
+            }
+        }
+        value["device_mapping"][1]["discovery"] = {
+            "discovery_specific_credentials": {
+                "cli_credentials_list": [{"username": "device", "password": "device-secret"}],
+            }
+        }
+        plan, manifest = self.snapshot(value)
+        jobs = filters.edge_same_ip_discovery_config(plan)
+        self.assertEqual([job["ip_address_list"] for job in jobs], [[IPS[0]], [IPS[1]]])
+        self.assertTrue(all(job["discovery_type"] == "SINGLE" for job in jobs))
+        self.assertNotEqual(jobs[0]["discovery_name"], jobs[1]["discovery_name"])
+        self.assertEqual(
+            jobs[1]["discovery_specific_credentials"]["cli_credentials_list"],
+            [{"username": "device", "password": "device-secret"}],
+        )
+        self.assertEqual(
+            jobs[1]["discovery_specific_credentials"]["snmp_v2_read_credential"],
+            {"community": "shared-snmp"},
+        )
+        self.assertNotIn("secret", str(manifest))
+        self.assertEqual(manifest["onboarding"], {"method": "discovery", "config": []})
+        self.assertTrue(filters.edge_same_ip_ready(raw(records(True)), plan, manifest))
+
+    def test_discovery_can_switch_a_device_to_global_credentials(self):
+        value = generated_batch("discovery")
+        value["new_devices"] = {
+            "discovery": {
+                "use_global_credentials": False,
+                "discovery_specific_credentials": {
+                    "cli_credentials_list": [{"username": "shared", "password": "secret"}]
+                },
+            }
+        }
+        value["device_mapping"][1]["discovery"] = {
+            "use_global_credentials": True,
+            "global_credentials": {
+                "cli_credentials_list": [{"username": "global", "description": "Global CLI"}]
+            },
+        }
+        plan = filters.edge_same_ip_plan([value])[0]
+        job = filters.edge_same_ip_discovery_config(plan)[1]
+        self.assertTrue(job["use_global_credentials"])
+        self.assertNotIn("discovery_specific_credentials", job)
+        self.assertEqual(
+            job["global_credentials"]["cli_credentials_list"][0]["description"], "Global CLI"
+        )
+
+    def test_runtime_credentials_can_rotate_without_invalidating_capture(self):
+        value = generated_batch("discovery")
+        value["new_devices"] = {
+            "discovery": {
+                "use_global_credentials": False,
+                "discovery_specific_credentials": {
+                    "cli_credentials_list": [{"username": "admin", "password": "before"}]
+                },
+            }
+        }
+        plan, manifest = self.snapshot(value)
+        value["new_devices"]["discovery"]["discovery_specific_credentials"]["cli_credentials_list"][
+            0
+        ]["password"] = "after"
+        rotated = filters.edge_same_ip_plan([value])[0]
+        self.assertEqual(rotated["fingerprint"], plan["fingerprint"])
+        filters.edge_same_ip_manifest(manifest, rotated, "controller")
+
+    def test_bad_discovery_options_fail_during_planning(self):
+        for discovery in (
+            {"retry": True},
+            {"use_global_credentials": False},
+            {"unknown": "value"},
+            {
+                "discovery_specific_credentials": {
+                    "cli_credentials_list": [{"username": "missing-password"}]
+                }
+            },
+        ):
+            value = generated_batch("discovery")
+            value["new_devices"] = {"discovery": discovery}
+            with self.subTest(discovery=discovery), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_plan([value])
+
+    def test_generated_onboarding_checkpoint_is_generic_and_keeps_legacy_indices(self):
+        plan, manifest = self.snapshot(generated_batch("discovery"))
+        manifest = filters.edge_same_ip_checkpoint(manifest, "onboarded", records(True))
+        self.assertEqual(manifest["stage_index"], 6)
+        filters.edge_same_ip_manifest(manifest, plan, "controller")
+
+
 class TestSameIpPlanner(TestCase):
     def test_bulk_generator_filters_preserve_same_ip_and_mappings(self):
         plan = filters.edge_same_ip_plan([batch()])[0]
@@ -216,7 +412,7 @@ class TestSameIpSnapshot(TestCase):
             filters.edge_same_ip_manifest(legacy, self.plan, "controller.example.test")
 
     def test_rejects_unknown_or_boolean_manifest_schema(self):
-        for value in (True, 0, 3, "2"):
+        for value in (True, 0, 4, "2"):
             manifest = deepcopy(self.manifest)
             manifest["schema_version"] = value
             with self.subTest(value=value), self.assertRaisesRegex(AnsibleFilterError, "schema version"):

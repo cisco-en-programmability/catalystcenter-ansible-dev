@@ -1,0 +1,24 @@
+---
+- name: Generate LAN automation replacement configuration
+  cisco.catalystcenter.lan_automation_playbook_config_generator:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: "{{ catalystcenter_debug }}"
+    catalystcenter_log: "{{ catalystcenter_log }}"
+    catalystcenter_log_level: "{{ catalystcenter_log_level }}"
+    catalystcenter_log_file_path: "{{ catalystcenter_log_file_path | default(omit) }}"
+    catalystcenter_log_append: "{{ catalystcenter_log_append | default(true) }}"
+    catalystcenter_api_task_timeout: "{{ catalystcenter_api_task_timeout | default(1200) }}"
+    catalystcenter_task_poll_interval: "{{ catalystcenter_task_poll_interval | default(2) }}"
+    validate_response_schema: "{{ validate_response_schema | default(true) }}"
+    state: "{{ lan_automation_config_generator_state }}"
+    config: "{{ lan_automation_config_generator_config }}"
+    file_path: "{{ lan_automation_config_generator_file_path if lan_automation_config_generator_file_path is not none else omit }}"
+    file_mode: "{{ lan_automation_config_generator_file_mode }}"
+    isis_domain_pwd: "{{ lan_automation_config_generator_isis_domain_pwd if lan_automation_config_generator_isis_domain_pwd is not none else omit }}"
+  register: lan_automation_config_generator_result
+  no_log: true
