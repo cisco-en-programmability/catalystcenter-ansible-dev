@@ -103,6 +103,65 @@ def _interface_pairs(value, label):
     return pairs
 
 
+def _golden_image_plan(plan, new, swim_enabled):
+    """Keep stable golden-image intent separate from runtime import secrets."""
+    golden = new.get("golden_image")
+    if "golden_image" not in new:
+        if swim_enabled and plan["onboarding_method"] == "lan_automation":
+            _fail("new_devices.golden_image is required when SWIM is enabled for LAN automation")
+        return plan
+    if plan["onboarding_method"] != "lan_automation":
+        _fail("new_devices.golden_image is supported only for LAN automation")
+    _mapping(golden, "golden_image", {"image_name", "device_image_family_name", "import_image_details"})
+    tagging = {
+        "image_name": _string(golden.get("image_name"), "golden image name"),
+        "device_image_family_name": _string(golden.get("device_image_family_name"), "device image family name"),
+        "site_name": plan["site"], "device_role": "ALL", "tagging": True,
+    }
+    config = {"tagging_details": deepcopy(tagging)}
+    if "import_image_details" in golden:
+        source = _mapping(golden["import_image_details"], "golden image import",
+                          {"type", "url_details", "cco_image_details"})
+        kind = source.get("type")
+        if kind not in ("remote", "CCO"):
+            _fail("golden image import type must be remote or CCO")
+        detail_key = "url_details" if kind == "remote" else "cco_image_details"
+        if set(source) != {"type", detail_key}:
+            _fail("golden image import must select exactly one source")
+        if kind == "remote":
+            details = _mapping(source[detail_key], "remote image import", {"payload"})
+            entries = _list(details.get("payload"), "remote image payload")
+            if len(entries) != 1:
+                _fail("remote image import requires exactly one payload entry")
+            entry = _mapping(entries[0], "remote image payload entry", {"source_url", "is_third_party"})
+            if not isinstance(entry.get("is_third_party", False), bool) or entry.get("is_third_party", False):
+                _fail("golden image import requires is_third_party=false")
+            names = entry.get("source_url")
+        else:
+            details = _mapping(source[detail_key], "CCO image import", {"image_name"})
+            names = details.get("image_name")
+        names = names if isinstance(names, list) else [names]
+        if len(names) != 1:
+            _fail("golden image import requires exactly one image source")
+        name = _string(names[0], "golden image source")
+        if kind == "remote":
+            if "?" in name or "#" in name or name.split("/")[-1] != tagging["image_name"]:
+                _fail("remote source filename must match golden image name without a query or fragment")
+            normalized = {"type": kind, "url_details": {"payload": [
+                {"source_url": [name], "is_third_party": False}]}}
+        else:
+            if name != tagging["image_name"]:
+                _fail("CCO source image name must match golden image name")
+            normalized = {"type": kind, "cco_image_details": {"image_name": [name]}}
+        config["import_image_details"] = normalized
+    plan["golden_image"] = tagging
+    plan["swim_config"] = [config]
+    # Existing plans retain their exact fingerprint when no image is declared.
+    # URLs and their credentials may rotate without changing the desired image.
+    plan["fingerprint"] = _hash({"fingerprint": plan["fingerprint"], "golden_image": tagging})
+    return plan
+
+
 def _legacy_plan(batches):
     """Validate every batch before any capture or network mutation."""
     plans, names, addresses, serials, seed_ports = [], [], [], [], []
@@ -430,8 +489,10 @@ def edge_same_ip_discovery_config(plan):
     return jobs
 
 
-def edge_same_ip_plan(batches):
+def edge_same_ip_plan(batches, swim_enabled=False):
     """Plan generated LAN automation or discovery from one IP/serial mapping."""
+    if not isinstance(swim_enabled, bool):
+        _fail("SWIM enabled control must be a boolean")
     plans = []
     for batch in _list(batches, "batches"):
         _mapping(
@@ -450,9 +511,11 @@ def edge_same_ip_plan(batches):
         if "lan_automation_config" in new or "device_ips" in new:
             # Preserve the original fingerprint and schema for existing users
             # and their already-published recovery snapshots.
-            plan = _legacy_plan([batch])[0]
+            legacy = deepcopy(batch)
+            legacy["new_devices"].pop("golden_image", None)
+            plan = _legacy_plan([legacy])[0]
             plan.update(legacy_input=True, onboarding_method="lan_automation")
-            plans.append(plan)
+            plans.append(_golden_image_plan(plan, new, swim_enabled))
             continue
         name = _string(batch.get("name"), "batch name")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
@@ -462,7 +525,8 @@ def edge_same_ip_plan(batches):
         if method not in ("lan_automation", "discovery"):
             _fail("onboarding_method must be lan_automation or discovery")
         _mapping(
-            new, "new_devices", {"isis_domain_pwd"} if method == "lan_automation" else {"discovery"}
+            new, "new_devices", {"isis_domain_pwd", "golden_image"} if method == "lan_automation"
+            else {"discovery", "golden_image"}
         )
         if "isis_domain_pwd" in new:
             _string(new["isis_domain_pwd"], "isis_domain_pwd")
@@ -583,13 +647,21 @@ def edge_same_ip_plan(batches):
             edge_same_ip_discovery_config(plan)
         elif "isis_domain_pwd" in new:
             plan["isis_domain_pwd"] = new["isis_domain_pwd"]
-        plans.append(plan)
+        plans.append(_golden_image_plan(plan, new, swim_enabled))
     _unique([p["name"].casefold() for p in plans], "case-insensitive batch names")
     _unique([ip for p in plans for ip in p["ips"]], "management IPs across batches")
     _unique(
         [s for p in plans for serial in p["serial_by_ip"].values() for s in serial.split(",")],
         "replacement serials across batches",
     )
+    claims = {}
+    for plan in plans:
+        if "golden_image" in plan:
+            golden = plan["golden_image"]
+            scope = (golden["site_name"].casefold(), golden["device_image_family_name"].casefold())
+            if scope in claims and claims[scope] != golden["image_name"]:
+                _fail("conflicting golden images for the same site and device image family across batches")
+            claims[scope] = golden["image_name"]
     return plans
 
 
@@ -874,9 +946,11 @@ def _capture_checksum(manifest):
     """Checksum immutable capture fields separately from resumable progress."""
     # Keep the original checksum algorithm for snapshots created before the
     # fabric-ID fix. Their saved hierarchy can still resolve the ID on resume.
-    fields = CAPTURE_FIELDS + ("fabric_id",) if manifest.get("schema_version") in (2, 3) else CAPTURE_FIELDS
-    if manifest.get("schema_version") == 3:
+    fields = CAPTURE_FIELDS + ("fabric_id",) if manifest.get("schema_version") in (2, 3, 4) else CAPTURE_FIELDS
+    if manifest.get("schema_version") in (3, 4):
         fields += ("onboarding",)
+    if manifest.get("schema_version") == 4:
+        fields += ("golden_image",)
     return _hash({field: manifest.get(field) for field in fields})
 
 
@@ -899,6 +973,9 @@ def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None, l
             "method": method,
             "config": edge_same_ip_capture_lan(lan_config, plan) if method == "lan_automation" else [],
         }
+    if "golden_image" in plan:
+        manifest["schema_version"] = 4
+        manifest["golden_image"] = deepcopy(plan["golden_image"])
     # Reject conflicting explicit LAN site placement while the original devices
     # still exist, rather than discovering the conflict after teardown.
     edge_same_ip_lan_config(plan, manifest)
@@ -910,14 +987,19 @@ def edge_same_ip_manifest(manifest, plan, controller):
     """Validate a persisted manifest against the current controller and input."""
     _mapping(manifest, "snapshot manifest")
     schema = manifest.get("schema_version")
-    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2, 3):
+    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2, 3, 4):
         _fail("saved manifest schema version is unsupported")
-    if schema in (2, 3):
+    if schema in (2, 3, 4):
         _string(manifest.get("fabric_id"), "saved fabric ID")
     elif "fabric_id" in manifest:
         _fail("legacy snapshots cannot contain an unprotected fabric ID")
     if manifest.get("capture_checksum") != _capture_checksum(manifest):
         _fail("saved immutable capture checksum mismatch")
+    if schema == 4:
+        if not plan.get("golden_image") or manifest.get("golden_image") != plan["golden_image"]:
+            _fail("saved golden image intent does not match this run")
+    elif "golden_image" in manifest or "golden_image" in plan:
+        _fail("golden image intent requires a new schema-4 capture; existing snapshots cannot change image intent")
     for key, expected in (("controller", controller), ("fingerprint", plan["fingerprint"]),
                           ("name", plan["name"]), ("site", plan["site"]), ("ips", plan["ips"]),
                           ("serial_by_ip", plan["serial_by_ip"])):
@@ -1029,7 +1111,7 @@ def edge_same_ip_ready(raw_result, plan, manifest, required_role=""):
 
 def edge_same_ip_lan_config(plan, manifest):
     """Fill captured hostnames without persisting LAN secrets in the manifest."""
-    if manifest.get("schema_version") == 3:
+    if manifest.get("schema_version") in (3, 4) and not plan.get("legacy_input", True):
         onboarding = _mapping(manifest.get("onboarding"), "saved onboarding", {"method", "config"})
         if set(onboarding) != {"method", "config"} or onboarding["method"] != plan["onboarding_method"]:
             _fail("saved onboarding method does not match this run")

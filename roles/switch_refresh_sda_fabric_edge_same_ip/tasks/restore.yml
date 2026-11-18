@@ -46,6 +46,19 @@
       no_log: true
       when: edge_same_ip_plan.onboarding_method == 'lan_automation'
 
+    - name: Import and golden-tag the replacement image before LAN Automation
+      cisco.catalystcenter.swim_workflow_manager:
+        catalystcenter_debug: false
+        catalystcenter_log: false
+        state: merged
+        config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_swim_config_verify }}"
+        config: "{{ edge_same_ip_plan.swim_config }}"
+      when:
+        - edge_same_ip_plan.onboarding_method == 'lan_automation'
+        - switch_refresh_sda_fabric_edge_same_ip_swim_enabled
+        - not edge_same_ip_new_preflight_ready
+      no_log: true
+
     - name: Run all replacement discovery mappings in one workflow invocation
       cisco.catalystcenter.lan_automation_workflow_manager:
         state: merged
