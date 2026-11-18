@@ -27,6 +27,8 @@ description:
     returned in the Ansible output.
   - Returns structured results for each requested information type, or an empty list if
     no devices match the filters after all retries.
+  - By default, success reports information retrieval even when device collection is incomplete.
+  - Supply C(collectionStatus), C(managementState), or both to require matching states before gathering completes.
   - This module is tagged as a facts/info module and is safe to use in check mode.
 
 version_added: "2.3.0"
@@ -170,6 +172,9 @@ options:
                 elements: str
           timeout:
             description:
+              - When C(collectionStatus) or C(managementState) is supplied, the readiness timeout in seconds, defaulting to 1200.
+              - Readiness checks poll every 10 seconds and fail with device IPs and mismatched fields on timeout.
+              - Without readiness fields, the existing lookup timeout defaults to 120 seconds.
               - Maximum time in seconds to wait for device information retrieval operations to complete.
               - Applied to each individual device lookup operation during the filtering process.
               - If device information retrieval fails within this timeout period, the operation will retry based on the 'retries' parameter.
@@ -177,7 +182,17 @@ options:
               - If timeout is greater than (retries * interval), the operation will continue retrying until the timeout period ends.
               - Total operation time is bounded by the timeout value regardless of retry configuration.
             type: int
-            default: 120
+          collectionStatus:
+            description:
+              - Optional expected collection status, such as C(Managed).
+              - Enables readiness polling for every selected device. Comparison ignores case and surrounding whitespace.
+              - Only supplied readiness fields are checked; omitted fields do not enable readiness validation.
+            type: str
+          managementState:
+            description:
+              - Optional expected management state, such as C(Managed).
+              - Enables readiness polling for every selected device. Comparison ignores case and surrounding whitespace.
+            type: str
           retries:
             description:
               - Number of retry attempts for device information retrieval operations when initial attempts fail.
@@ -976,7 +991,9 @@ class NetworkDevicesInfo(CatalystCenterBase):
                         "required": False,
                     },
                 },
-                "timeout": {"type": "int", "default": 120},
+                "timeout": {"type": "int"},
+                "collectionStatus": {"type": "str", "required": False},
+                "managementState": {"type": "str", "required": False},
                 "retries": {"type": "int", "default": 3},
                 "interval": {"type": "int", "default": 10},
                 "requested_info": {
@@ -1020,6 +1037,28 @@ class NetworkDevicesInfo(CatalystCenterBase):
             valid_config, invalid_params = validate_list_of_dicts(
                 self.config, config_spec
             )
+
+            if not invalid_params:
+                for original, normalized in zip(self.config, valid_config):
+                    for raw_device, device in zip(
+                        original.get("network_devices") or [],
+                        normalized.get("network_devices") or [],
+                    ):
+                        readiness_enabled = False
+                        for field in ("collectionStatus", "managementState"):
+                            if field in raw_device:
+                                value = raw_device[field]
+                                if not isinstance(value, str) or not value.strip():
+                                    invalid_params.append(
+                                        "'{0}' must be a non-empty string".format(field)
+                                    )
+                                readiness_enabled = True
+                        if device.get("timeout") is None:
+                            device["timeout"] = 1200 if readiness_enabled else 120
+                        if readiness_enabled and device["timeout"] <= 0:
+                            invalid_params.append(
+                                "'timeout' must be positive when readiness validation is enabled"
+                            )
 
             if invalid_params:
                 self.msg = "Network devices configuration validation failed with invalid Args: {0}".format(
@@ -1132,6 +1171,8 @@ class NetworkDevicesInfo(CatalystCenterBase):
             "interval",
             "requested_info",
             "output_file_info",
+            "collectionStatus",
+            "managementState",
         }
         allowed_output_file_info_keys = {
             "file_path",
@@ -1450,7 +1491,16 @@ class NetworkDevicesInfo(CatalystCenterBase):
                 "DEBUG",
             )
 
-            device_ids = self.filter_network_devices(filtered_config)
+            ready_device_info = None
+            if any(
+                device_cfg.get(field) is not None
+                for field in ("collectionStatus", "managementState")
+            ):
+                device_ids, ready_device_info = self.wait_for_device_readiness(
+                    device_cfg
+                )
+            else:
+                device_ids = self.filter_network_devices(filtered_config)
             self.log(
                 "Filtered network devices after applying all the provided filters: {0}".format(
                     device_ids
@@ -1476,7 +1526,11 @@ class NetworkDevicesInfo(CatalystCenterBase):
                     ),
                     "DEBUG",
                 )
-                device_info_result = self.get_device_info(device_ids)
+                device_info_result = (
+                    ready_device_info
+                    if ready_device_info is not None
+                    else self.get_device_info(device_ids)
+                )
                 self.total_response.append(device_info_result)
                 combined_data["device_info"] = device_info_result
 
@@ -1671,13 +1725,166 @@ class NetworkDevicesInfo(CatalystCenterBase):
             self.set_operation_result("success", False, self.msg, "INFO")
         return self
 
+    def wait_for_device_readiness(self, device_config):
+        """Poll selected devices under one deadline, returning the matching snapshot.
+
+        Existing lookup retries are reduced to one attempt per poll. Explicit IPs
+        and previously selected devices remain required even if a later lookup
+        returns only a subset. Other unresolved selectors are reported by their
+        identifier until their management IP becomes available.
+        """
+        expected = {
+            field: device_config[field]
+            for field in ("collectionStatus", "managementState")
+            if device_config.get(field) is not None
+        }
+        timeout = device_config.get("timeout", 1200)
+        deadline = time.monotonic() + timeout
+        lookup_config = dict(device_config)
+        for field in (
+            "collectionStatus",
+            "managementState",
+            "requested_info",
+            "output_file_info",
+        ):
+            lookup_config.pop(field, None)
+        lookup_config.update(timeout=0, retries=1, interval=0)
+
+        identifier_fields = {
+            "ip_address": "managementIpAddress",
+            "hostname": "hostname",
+            "serial_number": "serialNumber",
+            "mac_address": "macAddress",
+        }
+        selectors = [
+            (key, value)
+            for identifier in device_config.get("device_identifier") or []
+            for key, values in identifier.items()
+            if key in identifier_fields
+            for value in values or []
+        ]
+        required_ips = {value for key, value in selectors if key == "ip_address"}
+
+        failures = []
+        device_info = [{"device_info": []}]
+        while time.monotonic() < deadline:
+            previous_response = list(self.total_response)
+            device_ids = self.filter_network_devices(lookup_config) or {}
+            # Missing-target messages from intermediate polls are not final results.
+            self.total_response = previous_response
+            required_ips.update(device_ids)
+            device_info = (
+                self.get_device_info(device_ids)
+                if device_ids
+                else [{"device_info": []}]
+            )
+            records = {}
+            for entry in device_info[0]["device_info"]:
+                details = entry.get("device_details")
+                if (
+                    isinstance(details, list)
+                    and len(details) == 1
+                    and isinstance(details[0], dict)
+                    and details[0].get("managementIpAddress") == entry["device_ip"]
+                ):
+                    records[entry["device_ip"]] = details[0]
+
+            failures = []
+            for device_ip in sorted(required_ips):
+                record = records.get(device_ip, {})
+                failed_fields = {
+                    field: {"expected": value, "actual": record.get(field)}
+                    for field, value in expected.items()
+                    if str(record.get(field) or "").strip().casefold()
+                    != value.strip().casefold()
+                }
+                if failed_fields:
+                    failures.append(
+                        {"device_ip": device_ip, "failed_fields": failed_fields}
+                    )
+
+            for key, value in selectors:
+                if key == "ip_address":
+                    continue  # Explicit IPs are already checked above.
+                matched = False
+                for record in records.values():
+                    actual = str(record.get(identifier_fields[key]) or "")
+                    if key == "serial_number":
+                        matched = value.strip().casefold() in {
+                            member.strip().casefold() for member in actual.split(",")
+                        }
+                    elif key == "mac_address":
+                        normalized_actual = "".join(
+                            character
+                            for character in actual.casefold()
+                            if character.isalnum()
+                        )
+                        normalized_value = "".join(
+                            character
+                            for character in value.casefold()
+                            if character.isalnum()
+                        )
+                        matched = normalized_value == normalized_actual
+                    else:
+                        matched = value == actual
+                    if matched:
+                        break
+                if not matched:
+                    failures.append(
+                        {
+                            "device_ip": "unresolved",
+                            "identifier": {key: value},
+                            "failed_fields": {
+                                field: {"expected": wanted, "actual": None}
+                                for field, wanted in expected.items()
+                            },
+                        }
+                    )
+
+            if not required_ips and not failures:
+                failures.append(
+                    {
+                        "device_ip": "unresolved",
+                        "failed_fields": {
+                            field: {"expected": wanted, "actual": None}
+                            for field, wanted in expected.items()
+                        },
+                    }
+                )
+            if not failures:
+                return device_ids, device_info
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self.log(
+                "Waiting for readiness of {0} device/identifier entries; {1:.1f}s remaining".format(
+                    len(failures), remaining
+                ),
+                "INFO",
+            )
+            time.sleep(min(10, remaining))
+
+        self.msg = (
+            "Timed out after {0} seconds waiting for network device readiness. "
+            "Devices and failed readiness fields: {1}"
+        ).format(timeout, json.dumps(failures, sort_keys=True))
+        self.set_operation_result(
+            "failed",
+            False,
+            self.msg,
+            "ERROR",
+            additional_info={"readiness_failures": failures},
+        ).check_return_status()
+        return {}, device_info
+
     def get_device_id(self, filtered_config):
         """
         Retrieves device UUIDs from Cisco Catalyst Center based on device identifier Args.
 
         This method processes device identification criteria from the configuration and maps network
-        devices to their corresponding UUIDs. It supports multiple identification methods and only
-        considers devices that are managed and reachable in the Catalyst Center inventory.
+        devices to their corresponding UUIDs. It supports multiple identification methods
+        without imposing readiness conditions. Readiness is validated separately when requested.
         Logic Implementation:
         The method implements two distinct logical operations based on the structure of device_identifiers:
 
@@ -1702,7 +1909,7 @@ class NetworkDevicesInfo(CatalystCenterBase):
             filtered_config (dict): Configuration dictionary containing device identification Args.
 
         Returns:
-            dict or None: A dictionary mapping device IP addresses to their UUIDs for managed devices.
+            dict or None: A dictionary mapping matching inventory device IP addresses to their UUIDs.
                         Returns None if no device_identifier section is found in configuration.
         """
         self.log(

@@ -39,6 +39,39 @@ Gather facts about network devices from Cisco Catalyst Center (facts/info module
 
 None
 
+## Optional readiness validation
+
+Add `collectionStatus`, `managementState`, or both to a `network_devices` entry
+to wait for the specified device states. Values are non-empty strings, compared
+without regard to case or surrounding whitespace. Every selected device must
+satisfy every supplied readiness field. Information such as interfaces is
+gathered after readiness succeeds.
+
+```yaml
+network_devices_info_config:
+  - network_devices:
+      - device_identifier:
+          - ip_address:
+              - 204.1.2.5
+        collectionStatus: Managed
+        managementState: Managed
+        timeout: 1200
+        requested_info:
+          - device_info
+          - interface_info
+```
+
+Readiness polling uses a fixed 10-second interval. Its default timeout is 1200
+seconds, and `timeout` overrides it per entry. A timeout fails the playbook and
+reports each pending device IP, its failed readiness fields, and the expected and
+observed values. Identifiers that cannot yet resolve to an IP are also reported.
+Only the supplied readiness fields are validated; this mode does not validate
+other operational properties automatically.
+
+When neither readiness field is supplied, existing information-gathering behavior
+is unchanged, including the default lookup timeout of 120 seconds. Lookup
+`interval` and `retries` do not alter the readiness polling interval.
+
 ## Example Playbook
 
 ```yaml

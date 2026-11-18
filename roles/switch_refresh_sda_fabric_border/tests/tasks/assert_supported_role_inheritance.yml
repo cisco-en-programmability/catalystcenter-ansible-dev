@@ -1,0 +1,140 @@
+---
+- name: Build supported source role-set fixture
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_role_test_source: >-
+      {{
+        {
+          'device_ip': '198.51.100.10',
+          'device_roles': switch_refresh_sda_fabric_border_role_case.device_roles
+        } |
+        combine(
+          {
+            'borders_settings':
+              switch_refresh_sda_fabric_border_state_transform_old.borders_settings
+          }
+          if 'BORDER_NODE' in
+          switch_refresh_sda_fabric_border_role_case.device_roles
+          else {}
+        )
+      }}
+
+- name: Transform supported source role set
+  ansible.builtin.include_tasks: ../../tasks/build_replacement_configs.yml
+  vars:
+    switch_refresh_sda_fabric_border_transform_request:
+      fabric_name: Global/Test/Fabric
+      new:
+        management_ip: 192.0.2.10
+      interface_mappings: >-
+        {{
+          [
+            {
+              'source_interface_name': 'FortyGigabitEthernet1/1/1',
+              'destination_interface_name': 'HundredGigE1/0/1'
+            }
+          ]
+          if 'BORDER_NODE' in
+          switch_refresh_sda_fabric_border_role_case.device_roles
+          else []
+        }}
+      original_device_config: >-
+        {{ switch_refresh_sda_fabric_border_role_test_source }}
+
+- name: Verify supported source roles are inherited without mutation
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_transform_result
+        .original_device_config.device_roles ==
+        switch_refresh_sda_fabric_border_role_case.device_roles
+      - >-
+        switch_refresh_sda_fabric_border_transform_result
+        .base_new_device_config.device_roles ==
+        switch_refresh_sda_fabric_border_role_case.device_roles
+      - >-
+        switch_refresh_sda_fabric_border_transform_result
+        .expected_new_device_config.device_roles ==
+        switch_refresh_sda_fabric_border_role_case.device_roles
+      - >-
+        switch_refresh_sda_fabric_border_transform_result
+        .base_new_device_config.device_ip == '192.0.2.10'
+      - >-
+        'BORDER_NODE' in switch_refresh_sda_fabric_border_role_case.device_roles or
+        switch_refresh_sda_fabric_border_transform_result
+        .base_new_device_config.borders_settings is not defined
+      - >-
+        'BORDER_NODE' in switch_refresh_sda_fabric_border_role_case.device_roles or
+        switch_refresh_sda_fabric_border_transform_result
+        .expected_new_device_config.borders_settings is not defined
+      - >-
+        'BORDER_NODE' not in switch_refresh_sda_fabric_border_role_case.device_roles or
+        switch_refresh_sda_fabric_border_transform_result
+        .expected_new_device_config.borders_settings.layer2_handoff[0]
+        .interface_name == 'HundredGigE1/0/1'
+    fail_msg: >-
+      Supported role set {{ switch_refresh_sda_fabric_border_role_case.name }}
+      was not inherited unchanged by the replacement records.
+
+- name: Verify pure control-plane generated configuration
+  ansible.builtin.include_tasks: ../../tasks/verify_generated_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_verify_request:
+      expected_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_transform_result
+          .expected_new_device_config
+        }}
+      actual_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_transform_result
+          .expected_new_device_config
+        }}
+      context: pure control-plane role inheritance
+      require_empty_handoffs: true
+      fail_on_mismatch: true
+  when: >-
+    switch_refresh_sda_fabric_border_role_case.device_roles | sort ==
+    ['CONTROL_PLANE_NODE']
+
+- name: Require pure control-plane generated configuration match
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_verify_result.match | bool
+      - switch_refresh_sda_fabric_border_verify_result.handoffs_empty | bool
+  when: >-
+    switch_refresh_sda_fabric_border_role_case.device_roles | sort ==
+    ['CONTROL_PLANE_NODE']
+
+- name: Classify pure control-plane replacement configuration
+  ansible.builtin.include_tasks: ../../tasks/classify_replacement_config.yml
+  vars:
+    switch_refresh_sda_fabric_border_replacement_classification_request:
+      expected_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_transform_result
+          .expected_new_device_config
+        }}
+      actual_device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_transform_result
+          .base_new_device_config
+        }}
+  when: >-
+    switch_refresh_sda_fabric_border_role_case.device_roles | sort ==
+    ['CONTROL_PLANE_NODE']
+
+- name: Require pure control-plane replacement classification
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result
+        .base_matches | bool
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result
+        .exact_match | bool
+      - >-
+        switch_refresh_sda_fabric_border_replacement_classification_result
+        .state == 'empty'
+  when: >-
+    switch_refresh_sda_fabric_border_role_case.device_roles | sort ==
+    ['CONTROL_PLANE_NODE']
