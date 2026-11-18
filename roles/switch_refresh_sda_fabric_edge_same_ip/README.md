@@ -21,8 +21,9 @@ There is no separate replacement IP list in the new input format.
    `awaiting_ip_release` checkpoint.
 3. Complete the customer handoff: isolate/remove old hardware, resolve individual
    address allocations in Catalyst Center/IPAM, and prepare/connect replacements.
-4. Run `restore` with the same mappings and snapshot directory. Onboard all
-   replacements using the selected method, verify serial/IP/UUID and inventory
+4. Run `restore` with the same mappings and snapshot directory. For enabled LAN
+   automation batches, optionally import and golden-tag the replacement image
+   before launching onboarding. Onboard all replacements using the selected method, verify serial/IP/UUID and inventory
    readiness, restore inventory roles, provisioning, fabric membership, and
    mapped host ports. Independently verify the complete restored batch.
 
@@ -118,6 +119,78 @@ captured sessions in that batch and is not written to new snapshots. The status
 API cannot recover that password. Use separate batches with non-conflicting
 seed ports if different runtime passwords are needed.
 
+### Optional SWIM golden-image preparation
+
+Enable SWIM to prepare a golden image immediately before a required LAN
+Automation launch during `restore`. Declare the image before
+`capture_and_remove`, using the same image intent for both phases:
+
+```yaml
+switch_refresh_sda_fabric_edge_same_ip_swim_enabled: true
+switch_refresh_sda_fabric_edge_same_ip_swim_config_verify: true
+switch_refresh_sda_fabric_edge_same_ip_batches:
+  - name: building-lan-refresh
+    fabric_site_name_hierarchy: Global/Region/Building
+    onboarding_method: lan_automation
+    new_devices:
+      golden_image:
+        image_name: cat9k_iosxe.17.12.04.SPA.bin
+        device_image_family_name: Cisco Catalyst 9300 Switch
+    device_mapping:
+      - management_ip: "192.0.2.10"
+        replacement_serial_number: NEW-SERIAL-01
+```
+
+This form tags an image already in the Catalyst Center image repository. To
+import it first, add the following under `golden_image`:
+
+```yaml
+import_image_details:
+  type: remote
+  url_details:
+    payload:
+      - source_url: "{{ vault_switch_golden_image_url }}"
+        is_third_party: false
+```
+
+CCO import is also supported with `type: CCO` and
+`cco_image_details.image_name` as a string or single-item list. Imports accept
+exactly one first-party image. The source filename must match `image_name`;
+remote URLs cannot contain query strings or fragments. Local-file, scheduled,
+multi-image, and third-party imports are outside this role's contract.
+
+The role uses the existing `swim_workflow_manager`, derives the tagging site
+from `fabric_site_name_hierarchy`, and forces `device_role: ALL` and
+`tagging: true`. Every LAN Automation batch requires `golden_image` when SWIM
+is enabled. Discovery batches reject image declarations and skip SWIM even
+when the global control is enabled. With SWIM disabled, a retained image
+declaration is still validated and saved but is not executed. Conflicting
+images for the same site and device image family are rejected across all
+batches before any controller call or old-device removal.
+
+Image intent is saved in schema-4 snapshots. Image name, family, and tagging
+site cannot change between phases or retries. Import URLs remain runtime
+inputs and are never saved in snapshots; URLs and credentials may rotate while
+the requested image stays unchanged. Existing schema-1/schema-2/schema-3
+snapshots continue to resume without an image declaration. Adding an image
+declaration requires a fresh capture while the old devices still exist.
+
+SWIM does not execute during capture or teardown. A SWIM failure leaves the
+batch at `restore_started` and prevents LAN Automation from launching. Rerun
+`restore` to retry the prerequisite. SWIM is skipped once onboarding is
+checkpointed, on completed runs, or when all expected replacements are already
+ready and LAN Automation will be skipped. The role suppresses SWIM output and
+disables module debug/file logging, including when global logging is enabled.
+SWIM uses the role's `timeout` and `poll_interval`; its separate
+`swim_config_verify` control defaults to `true`.
+
+Importing during restore extends the maintenance outage; importing the image
+in advance allows the tag-only form. The golden assignment remains in Catalyst
+Center after refresh. This stage prepares the repository and golden tag;
+actual day-zero installation depends on Catalyst Center/platform LAN Automation
+image-upgrade support. The role does not independently verify an installed
+software version or perform device image distribution/activation.
+
 ### Discovery
 
 Discovery needs no historical LAN automation configuration. After phase 1, the
@@ -200,10 +273,13 @@ Each batch directory contains `inventory.yml`, `provision.yml`, `fabric.yml`,
 `cleanup.yml`, `restore.yml`, and `manifest.json`. LAN captures also produce
 `lan_automation.yml`. Directories are `0700`; saved files are `0600`.
 
-New-format inputs create schema-3 manifests. The immutable checksum binds the
+New-format inputs without an image declaration create schema-3 manifests.
+Image declarations create schema-4 manifests for either input format, adding
+the golden-image intent to the immutable checksum. The checksum binds the
 controller, batch input fingerprint, physical IP/serial mapping, fabric ID,
 original identities, all five workflow payloads, and onboarding method/config.
-Discovery credentials and IS-IS passwords are excluded from new persisted data.
+Discovery credentials, IS-IS passwords, and SWIM import URLs are excluded from
+new persisted data.
 A fabric recreated at the same hierarchy cannot silently replace the saved ID.
 Fabric sites/zones are resolved independently of old inventory, and old UUID
 membership checks include both `fabricId` and `networkDeviceId`.
@@ -241,6 +317,8 @@ fabric resolution and UUID checks do not require old inventory to exist.
 | `snapshot_dir` | Empty; required absolute path |
 | `batches` | Empty; required nonempty list |
 | `config_verify` | `true` |
+| `swim_enabled` | `false` |
+| `swim_config_verify` | `true` |
 | `timeout` | `1200` seconds |
 | `poll_interval` | `10` seconds |
 | `lan_automation_timeout` | `604800` seconds |
@@ -270,7 +348,7 @@ There is no interactive pause inside the role between phases.
 ## Scope
 
 Only supported Catalyst Center intent is captured. Custom CLI, deployed template
-parameters, tags, multicast-RP dependencies, software-image preparation, and
+parameters, device tags, multicast-RP dependencies, device image distribution/activation, and
 combined fabric roles require separate handling. Keep independent device backups
 for those features. Fabric-zone targets require complete support from every
 capture generator; unsupported or incomplete captures fail before removal.

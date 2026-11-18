@@ -43,6 +43,7 @@ MODULES = (
     "sda_host_port_onboarding_workflow_manager", "fabric_devices_info_workflow_manager",
     "lan_automation_workflow_manager",
     "lan_automation_playbook_config_generator", "discovery_workflow_manager",
+    "swim_workflow_manager",
 )
 
 
@@ -56,6 +57,8 @@ import yaml
 
 def _ips(args):
     config = args.get("config", [])
+    if config and isinstance(config, list) and "tagging_details" in config[0]:
+        return []
     if isinstance(config, dict):
         if "ip_address_list" in config:
             return config["ip_address_list"]
@@ -207,7 +210,13 @@ def execute(module, args):
             fail = (failure.get("module") == module and failure.get("state") == args.get("state")
                     and failure.get("remaining", 0) > 0)
             apply_ips = ips[:1] if fail else ips
-            if module == "lan_automation_workflow_manager":
+            if module == "swim_workflow_manager":
+                for entry in args["config"]:
+                    if set(entry) - {"import_image_details", "tagging_details"}:
+                        raise AssertionError("Unexpected device image operation")
+                    if not fail:
+                        state.setdefault("golden_images", []).append(deepcopy(entry["tagging_details"]))
+            elif module == "lan_automation_workflow_manager":
                 for group in args["config"]:
                     for device in group["lan_automation"]["discovery_devices"]:
                         ip = device["device_management_ip_address"]
@@ -893,3 +902,127 @@ def test_partial_discovery_can_resume_without_recapturing_old_devices(tmp_path):
         call["module"] == "lan_automation_playbook_config_generator"
         for call in case.state()["calls"][count:]
     )
+
+
+def _golden_image():
+    return {"image_name": "cat9k_iosxe.17.12.04.SPA.bin",
+            "device_image_family_name": "Cisco Catalyst 9300 Switch"}
+
+
+def test_swim_failure_retries_before_lan_with_rotated_credentials_and_no_teardown(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    golden = _golden_image()
+    golden["import_image_details"] = {"type": "remote", "url_details": {"payload": [
+        {"source_url": "https://user:swim-secret-before@images.example/" + golden["image_name"]}]}}
+    case.batch["new_devices"] = {"golden_image": golden}
+    controls = {PREFIX + "swim_enabled": True, PREFIX + "config_verify": False,
+                "catalystcenter_debug": True, "catalystcenter_log": True}
+    captured_result = case.run("capture_and_remove", extra=controls)
+    assert case.manifest()["schema_version"] == 4
+    assert not any(call["module"] == "swim_workflow_manager" for call in case.state()["calls"])
+    state = case.state()
+    state["failure"] = {"module": "swim_workflow_manager", "state": "merged", "remaining": 1}
+    case.save_state(state)
+    count = len(state["calls"])
+    failed = case.run("restore", success=False, extra=controls)
+    assert case.manifest()["stage"] == "restore_started"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations] == ["swim_workflow_manager"]
+    assert mutations[0]["args"]["config_verify"] is True
+    golden["import_image_details"]["url_details"]["payload"][0]["source_url"] = (
+        "https://user:swim-secret-after@mirror.example/" + golden["image_name"])
+    count = len(case.state()["calls"])
+    controls[PREFIX + "swim_config_verify"] = False
+    restored = case.run("restore", extra=controls)
+    assert case.manifest()["stage"] == "complete"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations[:2]] == ["swim_workflow_manager", "lan_automation_workflow_manager"]
+    assert all(call["args"].get("state") != "deleted" for call in mutations)
+    swim = mutations[0]["args"]
+    assert swim["config_verify"] is False
+    assert swim["catalystcenter_debug"] is False and swim["catalystcenter_log"] is False
+    assert swim["catalystcenter_host"] == "offline-controller.example.test"
+    assert swim["catalystcenter_api_task_timeout"] == 2
+    assert "swim-secret-after" in json.dumps(swim["config"])
+    assert swim["config"][0]["tagging_details"] == dict(_golden_image(), site_name=SITE, device_role="ALL", tagging=True)
+    for output in (captured_result, failed, restored):
+        assert "swim-secret-" not in output.stdout + output.stderr
+    assert all("swim-secret-" not in path.read_text() for path in case.snapshots.rglob("*") if path.is_file())
+    count = len(case.state()["calls"])
+    case.run("restore", extra=controls)
+    assert _mutations(case.state()["calls"][count:]) == []
+
+
+@pytest.mark.parametrize("source", ["tag_only", "CCO"])
+def test_swim_tag_only_and_cco_support_generated_and_legacy_batches(tmp_path, source):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch() if source == "tag_only" else _batch()
+    golden = _golden_image()
+    if source == "CCO":
+        golden["import_image_details"] = {"type": "CCO", "cco_image_details": {"image_name": golden["image_name"]}}
+    case.batch.setdefault("new_devices", {})["golden_image"] = golden
+    controls = {PREFIX + "swim_enabled": True}
+    case.run("capture_and_remove", extra=controls)
+    assert case.manifest()["schema_version"] == 4
+    count = len(case.state()["calls"])
+    case.run("restore", extra=controls)
+    calls = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in calls[:2]] == ["swim_workflow_manager", "lan_automation_workflow_manager"]
+    config = calls[0]["args"]["config"][0]
+    if source == "CCO":
+        assert config["import_image_details"]["cco_image_details"]["image_name"] == [golden["image_name"]]
+    else:
+        assert set(config) == {"tagging_details"}
+    assert case.manifest()["stage"] == "complete"
+
+
+@pytest.mark.parametrize("mode", ["disabled", "already_ready", "discovery"])
+def test_swim_skips_when_lan_image_preparation_is_not_required(tmp_path, mode):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery" if mode == "discovery" else "lan_automation")
+    if mode != "discovery":
+        case.batch["new_devices"] = {"golden_image": _golden_image()}
+    controls = {PREFIX + "swim_enabled": mode != "disabled"}
+    case.run("capture_and_remove", extra=controls)
+    if mode in ("already_ready", "discovery"):
+        _prepare_discovery_replacements(case)
+    if mode == "already_ready":
+        state = case.state()
+        state["devices"] = deepcopy(state["prepared_devices"])
+        case.save_state(state)
+        manifest = case.manifest()
+        manifest.update(stage="restore_started", stage_index=5)
+        case.manifest_path.write_text(json.dumps(manifest))
+    count = len(case.state()["calls"])
+    case.run("restore", extra=controls)
+    calls = case.state()["calls"][count:]
+    assert not any(call["module"] == "swim_workflow_manager" for call in calls)
+    if mode == "already_ready":
+        assert not any(call["module"] == "lan_automation_workflow_manager" for call in calls)
+    assert case.manifest()["stage"] == "complete"
+
+
+@pytest.mark.parametrize("invalid", ["missing_image", "discovery_image", "conflicting_images", "enabled_type", "verify_type"])
+def test_swim_invalid_input_fails_before_any_controller_call(tmp_path, invalid):
+    case = OfflineRole(tmp_path)
+    first = _generated_batch("discovery" if invalid == "discovery_image" else "lan_automation")
+    controls = {PREFIX + "swim_enabled": True}
+    if invalid != "missing_image":
+        first["new_devices"] = {"golden_image": _golden_image()}
+    batches = [first]
+    if invalid == "conflicting_images":
+        second = deepcopy(first)
+        first["device_mapping"] = first["device_mapping"][:1]
+        second["device_mapping"] = second["device_mapping"][1:]
+        second["name"] = "second-batch"
+        second["new_devices"]["golden_image"]["image_name"] = "other.bin"
+        batches.append(second)
+    elif invalid == "enabled_type":
+        controls[PREFIX + "swim_enabled"] = "true"
+    elif invalid == "verify_type":
+        controls[PREFIX + "swim_config_verify"] = "false"
+    controls[PREFIX + "batches"] = batches
+    case.run("capture_and_remove", success=False, extra=controls)
+    assert case.state()["calls"] == []
+    assert set(case.state()["devices"]) == set(IPS)

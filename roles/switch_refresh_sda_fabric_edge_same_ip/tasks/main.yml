@@ -12,6 +12,8 @@
       - switch_refresh_sda_fabric_edge_same_ip_snapshot_dir is match('^/.+')
       - switch_refresh_sda_fabric_edge_same_ip_snapshot_dir == (switch_refresh_sda_fabric_edge_same_ip_snapshot_dir | trim)
       - (switch_refresh_sda_fabric_edge_same_ip_config_verify | type_debug) == 'bool'
+      - (switch_refresh_sda_fabric_edge_same_ip_swim_enabled | type_debug) == 'bool'
+      - (switch_refresh_sda_fabric_edge_same_ip_swim_config_verify | type_debug) == 'bool'
       - switch_refresh_sda_fabric_edge_same_ip_timeout | int > 0
       - switch_refresh_sda_fabric_edge_same_ip_poll_interval | int > 0
       - switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int > 0
@@ -19,13 +21,14 @@
     fail_msg: >-
       Same-IP refresh requires one play host, Catalyst Center >= 2.3.7.9,
       capture_and_remove or restore phase, an explicit absolute persistent
-      snapshot directory, and positive polling controls. Check mode cannot
+      snapshot directory, boolean verification/SWIM controls, and positive polling controls. Check mode cannot
       capture or restore live controller state; use --syntax-check instead.
 
 - name: Build all same-IP refresh batch plans before controller changes
   ansible.builtin.set_fact:
     edge_same_ip_plans: >-
-      {{ switch_refresh_sda_fabric_edge_same_ip_batches | cisco.catalystcenter.edge_same_ip_plan }}
+      {{ switch_refresh_sda_fabric_edge_same_ip_batches |
+         cisco.catalystcenter.edge_same_ip_plan(switch_refresh_sda_fabric_edge_same_ip_swim_enabled) }}
     edge_same_ip_controller: "{{ catalystcenter_host | lower | trim }}"
     edge_same_ip_manifests: {}
     edge_same_ip_snapshot_root: "{{ switch_refresh_sda_fabric_edge_same_ip_snapshot_dir | regex_replace('/+$', '') }}"
@@ -153,3 +156,4 @@
     cisco.catalystcenter.lan_automation_workflow_manager: *edge_same_ip_workflow
     cisco.catalystcenter.lan_automation_playbook_config_generator: *edge_same_ip_workflow
     cisco.catalystcenter.discovery_workflow_manager: *edge_same_ip_workflow
+    cisco.catalystcenter.swim_workflow_manager: *edge_same_ip_workflow

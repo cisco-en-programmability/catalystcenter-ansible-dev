@@ -228,6 +228,7 @@
     mode: '0600'
     unsafe_writes: false
   when:
-    - edge_same_ip_manifest.schema_version == 3
+    - edge_same_ip_manifest.schema_version >= 3
+    - not edge_same_ip_plan.legacy_input
     - edge_same_ip_plan.onboarding_method == 'lan_automation'
   no_log: true

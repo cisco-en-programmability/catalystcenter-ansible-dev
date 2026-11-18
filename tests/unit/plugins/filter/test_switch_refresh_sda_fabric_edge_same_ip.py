@@ -278,6 +278,139 @@ class TestGeneratedOnboarding(TestCase):
         filters.edge_same_ip_manifest(manifest, plan, "controller")
 
 
+class TestSameIpGoldenImage(TestCase):
+    def golden(self):
+        return {"image_name": "cat9k_iosxe.17.12.04.SPA.bin",
+                "device_image_family_name": "Cisco Catalyst 9300 Switch"}
+
+    def value(self, legacy=False):
+        value = batch() if legacy else generated_batch()
+        value.setdefault("new_devices", {})["golden_image"] = self.golden()
+        return value
+
+    def snapshot(self, value, enabled=True):
+        plan = filters.edge_same_ip_plan([value], enabled)[0]
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1", generated_lan())
+        return plan, manifest
+
+    def test_tag_only_and_both_import_sources_work_for_both_input_formats(self):
+        for legacy in (False, True):
+            for kind in (None, "remote", "CCO"):
+                value = self.value(legacy)
+                golden = value["new_devices"]["golden_image"]
+                if kind == "remote":
+                    golden["import_image_details"] = {"type": kind, "url_details": {"payload": [
+                        {"source_url": "https://user:secret@images.example/" + golden["image_name"]}]}}
+                elif kind == "CCO":
+                    golden["import_image_details"] = {"type": kind, "cco_image_details": {
+                        "image_name": golden["image_name"]}}
+                with self.subTest(legacy=legacy, kind=kind):
+                    plan, manifest = self.snapshot(value)
+                    tagging = plan["swim_config"][0]["tagging_details"]
+                    self.assertEqual(tagging, dict(self.golden(), site_name=SITE, device_role="ALL", tagging=True))
+                    if kind:
+                        imported = plan["swim_config"][0]["import_image_details"]
+                        names = (imported["url_details"]["payload"][0]["source_url"] if kind == "remote"
+                                 else imported["cco_image_details"]["image_name"])
+                        self.assertIsInstance(names, list)
+                        self.assertEqual(len(names), 1)
+                    self.assertEqual(manifest["schema_version"], 4)
+                    self.assertEqual(manifest["golden_image"], tagging)
+                    self.assertNotIn("secret@", json.dumps(manifest))
+                    self.assertNotIn("import_image_details", manifest)
+                    filters.edge_same_ip_manifest(manifest, plan, "controller")
+                    self.assertEqual(len(filters.edge_same_ip_lan_config(plan, manifest)), 1)
+
+    def test_controls_require_an_image_only_for_enabled_lan_batches(self):
+        filters.edge_same_ip_plan([generated_batch()])
+        filters.edge_same_ip_plan([generated_batch("discovery")], True)
+        for value in (batch(), generated_batch()):
+            with self.assertRaisesRegex(AnsibleFilterError, "golden_image is required"):
+                filters.edge_same_ip_plan([value], True)
+        for enabled in ("true", 1, None):
+            with self.subTest(enabled=enabled), self.assertRaisesRegex(AnsibleFilterError, "boolean"):
+                filters.edge_same_ip_plan([generated_batch()], enabled)
+        value = generated_batch("discovery")
+        value["new_devices"] = {"golden_image": self.golden()}
+        with self.assertRaisesRegex(AnsibleFilterError, "only for LAN automation"):
+            filters.edge_same_ip_plan([value])
+
+    def test_rejects_unsafe_or_ambiguous_image_inputs_even_with_swim_disabled(self):
+        image = self.golden()["image_name"]
+        sources = [
+            {"type": "local"},
+            {"type": "remote", "url_details": {}, "cco_image_details": {}},
+            {"type": "remote", "url_details": {"payload": []}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": [image, image]}]}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": image, "is_third_party": True}]}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": image, "is_third_party": "false"}]}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": image + "?token=secret"}]}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": image + "#fragment"}]}},
+            {"type": "remote", "url_details": {"payload": [{"source_url": "other.bin"}]}},
+            {"type": "CCO", "cco_image_details": {"image_name": "other.bin"}},
+            {"type": "CCO", "cco_image_details": {"image_name": [image, image]}},
+        ]
+        invalid = [None, {}, dict(self.golden(), image_name=" "), dict(self.golden(), device_role="ACCESS")]
+        invalid.extend(dict(self.golden(), import_image_details=source) for source in sources)
+        for index, golden in enumerate(invalid):
+            value = self.value()
+            value["new_devices"]["golden_image"] = golden
+            with self.subTest(case=index), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_plan([value], False)
+
+    def test_cross_batch_image_conflicts_fail_before_capture(self):
+        first, second = self.value(), self.value()
+        second["name"] = "other"
+        for index, mapping in enumerate(second["device_mapping"]):
+            mapping.update(management_ip="192.0.2.%d" % (index + 20), replacement_serial_number="OTHER-%d" % index)
+        filters.edge_same_ip_plan([first, second], True)
+        second["new_devices"]["golden_image"]["image_name"] = "other.bin"
+        with self.assertRaisesRegex(AnsibleFilterError, "conflicting golden images"):
+            filters.edge_same_ip_plan([first, second], True)
+        second["new_devices"]["golden_image"]["device_image_family_name"] = "Another family"
+        filters.edge_same_ip_plan([first, second], True)
+
+    def test_import_credentials_can_rotate_but_image_intent_is_immutable(self):
+        for legacy in (False, True):
+            value = self.value(legacy)
+            image = value["new_devices"]["golden_image"]
+            image["import_image_details"] = {"type": "remote", "url_details": {"payload": [
+                {"source_url": "https://old:secret@images.example/" + image["image_name"]}]}}
+            plan, manifest = self.snapshot(value)
+            image["import_image_details"]["url_details"]["payload"][0]["source_url"] = (
+                "https://new:rotated@mirror.example/" + image["image_name"])
+            resumed = filters.edge_same_ip_plan([value], False)[0]
+            with self.subTest(legacy=legacy):
+                self.assertEqual(resumed["fingerprint"], plan["fingerprint"])
+                filters.edge_same_ip_manifest(manifest, resumed, "controller")
+                changed = deepcopy(manifest)
+                changed["golden_image"]["image_name"] = "other.bin"
+                with self.assertRaisesRegex(AnsibleFilterError, "checksum"):
+                    filters.edge_same_ip_manifest(changed, plan, "controller")
+                changed["capture_checksum"] = filters._capture_checksum(changed)
+                with self.assertRaisesRegex(AnsibleFilterError, "golden image intent"):
+                    filters.edge_same_ip_manifest(changed, plan, "controller")
+                image["device_image_family_name"] = "Another family"
+                with self.assertRaisesRegex(AnsibleFilterError, "golden image intent"):
+                    filters.edge_same_ip_manifest(manifest, filters.edge_same_ip_plan([value])[0], "controller")
+
+    def test_existing_snapshots_cannot_silently_gain_or_drop_image_intent(self):
+        for legacy in (False, True):
+            value = batch() if legacy else generated_batch()
+            plan, old = self.snapshot(value, enabled=False)
+            self.assertEqual(old["schema_version"], 2 if legacy else 3)
+            value.setdefault("new_devices", {})["golden_image"] = self.golden()
+            with self.assertRaisesRegex(AnsibleFilterError, "new schema-4 capture"):
+                filters.edge_same_ip_manifest(old, filters.edge_same_ip_plan([value])[0], "controller")
+            enriched, manifest = self.snapshot(value)
+            with self.assertRaisesRegex(AnsibleFilterError, "golden image intent"):
+                filters.edge_same_ip_manifest(manifest, plan, "controller")
+            advanced = filters.edge_same_ip_checkpoint(manifest, "onboarded", records(True))
+            self.assertEqual(advanced["stage_index"], 6)
+            filters.edge_same_ip_manifest(advanced, enriched, "controller")
+
+
 class TestSameIpPlanner(TestCase):
     def test_bulk_generator_filters_preserve_same_ip_and_mappings(self):
         plan = filters.edge_same_ip_plan([batch()])[0]
@@ -412,7 +545,7 @@ class TestSameIpSnapshot(TestCase):
             filters.edge_same_ip_manifest(legacy, self.plan, "controller.example.test")
 
     def test_rejects_unknown_or_boolean_manifest_schema(self):
-        for value in (True, 0, 4, "2"):
+        for value in (True, 0, 5, "2"):
             manifest = deepcopy(self.manifest)
             manifest["schema_version"] = value
             with self.subTest(value=value), self.assertRaisesRegex(AnsibleFilterError, "schema version"):

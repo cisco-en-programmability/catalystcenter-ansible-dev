@@ -13,6 +13,10 @@ catalystcenter_log: false
 switch_refresh_sda_fabric_edge_same_ip_snapshot_dir: >-
   /var/lib/catalystcenter/edge-refresh/change-123
 switch_refresh_sda_fabric_edge_same_ip_config_verify: true
+# Opt in before capture; requires golden_image on every LAN Automation batch.
+# Import/tag executes during restore immediately before a needed LAN launch.
+switch_refresh_sda_fabric_edge_same_ip_swim_enabled: false
+switch_refresh_sda_fabric_edge_same_ip_swim_config_verify: true
 switch_refresh_sda_fabric_edge_same_ip_timeout: 1200
 switch_refresh_sda_fabric_edge_same_ip_poll_interval: 10
 switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout: 604800
@@ -24,9 +28,20 @@ switch_refresh_sda_fabric_edge_same_ip_batches:
     fabric_site_name_hierarchy: Global/Region/Building
     onboarding_method: lan_automation
     allow_empty_host_port_config: false
-    # Optional; injected during restore, never saved in the snapshot.
+    # Optional runtime password and golden-image prerequisite:
     # new_devices:
+    #   # Password and import URLs are never saved in snapshots.
     #   isis_domain_pwd: "{{ vault_lan_automation_isis_domain_pwd }}"
+    #   golden_image:
+    #     image_name: cat9k_iosxe.17.12.04.SPA.bin
+    #     device_image_family_name: Cisco Catalyst 9300 Switch
+    #     # Omit import_image_details when the image is already in the repository.
+    #     import_image_details:
+    #       type: remote
+    #       url_details:
+    #         payload:
+    #           - source_url: "{{ vault_switch_golden_image_url }}"
+    #             is_third_party: false
     device_mapping:
       - management_ip: "192.0.2.10"
         replacement_serial_number: NEW-SERIAL-01
