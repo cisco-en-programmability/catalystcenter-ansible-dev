@@ -1,0 +1,46 @@
+---
+- name: Validate LAN Automation onboarding pool entry
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_la_pool is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_la_pool.keys() |
+        list | difference(['ip_pool_name', 'ip_pool_role']) | length == 0
+      - >-
+        switch_refresh_sda_fabric_distribution_la_pool.ip_pool_name |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_la_pool.ip_pool_role |
+        default('') in ['MAIN_POOL', 'PHYSICAL_LINK_POOL']
+    fail_msg: >-
+      Every LAN Automation ip_pools entry requires only ip_pool_name and an
+      ip_pool_role of MAIN_POOL or PHYSICAL_LINK_POOL.
+
+- name: Collect LAN Automation physical-link pool names
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_la_pool_names: >-
+      {{
+        switch_refresh_sda_fabric_distribution_la_pool_names +
+        [switch_refresh_sda_fabric_distribution_la_pool.ip_pool_name]
+      }}
+    switch_refresh_sda_fabric_distribution_la_main_pool_names: >-
+      {{
+        switch_refresh_sda_fabric_distribution_la_main_pool_names +
+        (
+          [switch_refresh_sda_fabric_distribution_la_pool.ip_pool_name]
+          if (switch_refresh_sda_fabric_distribution_la_pool.ip_pool_role == 'MAIN_POOL')
+          else []
+        )
+      }}
+    switch_refresh_sda_fabric_distribution_la_physical_pool_names: >-
+      {{
+        switch_refresh_sda_fabric_distribution_la_physical_pool_names +
+        (
+          [switch_refresh_sda_fabric_distribution_la_pool.ip_pool_name]
+          if (
+            switch_refresh_sda_fabric_distribution_la_pool.ip_pool_role ==
+            'PHYSICAL_LINK_POOL'
+          )
+          else []
+        )
+      }}

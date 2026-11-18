@@ -1,0 +1,65 @@
+---
+- name: Validate durable distribution hostname manifest document
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_manifest is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.keys() |
+        list | sort ==
+        [
+          'batch_name', 'catalystcenter_host', 'entries', 'fabric_site_name_hierarchy',
+          'input_fingerprint', 'role', 'schema_version', 'status'
+        ] | sort
+      - switch_refresh_sda_fabric_distribution_hostname_manifest.schema_version | int == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.role ==
+        'switch_refresh_sda_fabric_distribution'
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.catalystcenter_host |
+        string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.status in
+        ['pending', 'completed']
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length > 0
+      - switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length <= 100
+    fail_msg: Durable hostname manifest has an invalid document schema.
+
+- name: Validate durable distribution hostname manifest entries
+  ansible.builtin.include_tasks:
+    file: validate_hostname_manifest_entry.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip |
+      default('invalid-entry') }}
+
+- name: Validate durable distribution hostname manifest uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='old_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_management_ip') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='desired_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='submitted_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+    fail_msg: Durable hostname manifest identities and hostnames must be unique.

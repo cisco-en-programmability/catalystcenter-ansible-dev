@@ -1,0 +1,248 @@
+---
+- name: Initialize distribution refresh identity resolution
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_resolved_mappings: []
+    switch_refresh_sda_fabric_distribution_resolved_delete_config: []
+    switch_refresh_sda_fabric_distribution_peer_records: []
+    switch_refresh_sda_fabric_distribution_new_records: []
+    switch_refresh_sda_fabric_distribution_lookup_records: []
+    switch_refresh_sda_fabric_distribution_peer_validation_records: []
+    switch_refresh_sda_fabric_distribution_topology_expectations: []
+
+- name: Resolve and pin old distribution identities
+  ansible.builtin.include_tasks:
+    file: resolve_mapping.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_mapping
+    label: "{{ switch_refresh_sda_fabric_distribution_mapping.new.management_ip }}"
+
+- name: Resolve and pin peer identities
+  ansible.builtin.include_tasks:
+    file: resolve_ip_record.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_lookup_ip: >-
+      {{ switch_refresh_sda_fabric_distribution_peer_ip }}
+    switch_refresh_sda_fabric_distribution_lookup_kind: peer
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_plan.links |
+      map(attribute='peer_management_ip') | unique | list
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_peer_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_peer_ip }}"
+  register: switch_refresh_sda_fabric_distribution_peer_resolution_includes
+
+- name: Preserve resolved peer identities from include results
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_records: >-
+      {{ switch_refresh_sda_fabric_distribution_lookup_records }}
+  no_log: true
+
+- name: Query peer fabric membership and roles
+  ansible.builtin.include_role:
+    name: fabric_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  vars:
+    fabric_devices_info_state: gathered
+    fabric_devices_info_config_verify: false
+    fabric_devices_info_config:
+      - fabric_devices:
+          - fabric_site_hierarchy: >-
+              {{ switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy }}
+            device_identifier:
+              - ip_address: >-
+                  {{
+                    switch_refresh_sda_fabric_distribution_plan.links |
+                    map(attribute='peer_management_ip') | unique | list
+                  }}
+            timeout: "{{ switch_refresh_sda_fabric_distribution_device_lookup_timeout }}"
+            retries: "{{ switch_refresh_sda_fabric_distribution_device_lookup_retries }}"
+            interval: "{{ switch_refresh_sda_fabric_distribution_device_lookup_interval }}"
+            requested_info:
+              - fabric_info
+
+- name: Extract normalized peer fabric evidence
+  ansible.builtin.include_tasks:
+    file: extract_peer_fabric_result.yml
+    apply:
+      tags: [always]
+  loop: "{{ fabric_devices_info_result.response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_fabric_fragment
+    label: fabric-evidence
+
+- name: Evaluate exact peer fabric membership
+  ansible.builtin.include_tasks:
+    file: validate_peer_result.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_expected_peer_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.links |
+        map(attribute='peer_management_ip') | unique | list
+      }}
+    switch_refresh_sda_fabric_distribution_expected_peer_records: >-
+      {{ switch_refresh_sda_fabric_distribution_peer_records }}
+
+- name: Validate distribution IPv4 pool prerequisites
+  ansible.builtin.include_tasks:
+    file: validate_ip_pools.yml
+    apply:
+      tags: [always]
+  when: switch_refresh_sda_fabric_distribution_phase == 'prepare'
+
+- name: Build old distribution topology preflight expectations
+  ansible.builtin.include_tasks:
+    file: build_preflight_old_expectation.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_preflight_link
+    label: "{{ switch_refresh_sda_fabric_distribution_preflight_link.peer_management_ip }}"
+
+- name: Verify old distribution topology before mutation
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+
+- name: Save old distribution topology expectations
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_old_topology_expectations: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_expectations }}
+
+- name: Initialize replacement identity lookup
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_lookup_records: []
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Resolve replacement distribution identities for cleanup
+  ansible.builtin.include_tasks:
+    file: resolve_ip_record.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_lookup_ip: >-
+      {{ switch_refresh_sda_fabric_distribution_new_ip }}
+    switch_refresh_sda_fabric_distribution_lookup_kind: replacement
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.new_management_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_new_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_new_ip }}"
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Save resolved replacement distribution identities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_new_records: >-
+      {{ switch_refresh_sda_fabric_distribution_lookup_records }}
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Validate replacement distribution readiness for cleanup
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_new_records | length ==
+        switch_refresh_sda_fabric_distribution_plan.new_management_ips | length
+      - >-
+        switch_refresh_sda_fabric_distribution_new_record.inventory_role |
+        upper == 'DISTRIBUTION'
+      - >-
+        switch_refresh_sda_fabric_distribution_new_record.reachability_status |
+        upper == 'REACHABLE'
+      - >-
+        switch_refresh_sda_fabric_distribution_new_record.management_state |
+        upper == 'MANAGED'
+    fail_msg: >-
+      Every replacement must retain the pinned management IP, be reachable,
+      be managed, and have inventory role DISTRIBUTION before old-device cleanup.
+  loop: "{{ switch_refresh_sda_fabric_distribution_new_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_new_record
+    label: "{{ switch_refresh_sda_fabric_distribution_new_record.management_ip }}"
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Validate replacement distribution site before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Validate replacements are not SDA fabric devices before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_nonfabric.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_nonfabric_records: >-
+      {{ switch_refresh_sda_fabric_distribution_new_records }}
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Validate old distribution site before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_provision_validation_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_mappings |
+        map(attribute='old_management_ip') | list
+      }}
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Reset topology expectations for replacement cleanup barrier
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_expectations: []
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Build replacement topology cleanup expectations
+  ansible.builtin.include_tasks:
+    file: build_preflight_new_expectation.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_preflight_link
+    label: "{{ switch_refresh_sda_fabric_distribution_preflight_link.peer_management_ip }}"
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Verify replacement topology before old-device cleanup
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+  when: switch_refresh_sda_fabric_distribution_phase == 'cleanup_old'
+
+- name: Save fully resolved distribution refresh plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_resolved_plans: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_plans + [
+          switch_refresh_sda_fabric_distribution_plan |
+          combine({
+            'resolved_mappings': switch_refresh_sda_fabric_distribution_resolved_mappings,
+            'resolved_delete_config': switch_refresh_sda_fabric_distribution_resolved_delete_config,
+            'peer_records': switch_refresh_sda_fabric_distribution_peer_records,
+            'new_records': switch_refresh_sda_fabric_distribution_new_records,
+            'old_topology_expectations':
+              switch_refresh_sda_fabric_distribution_old_topology_expectations,
+            'new_topology_expectations':
+              switch_refresh_sda_fabric_distribution_topology_expectations
+              if (switch_refresh_sda_fabric_distribution_phase == 'cleanup_old')
+              else []
+          })
+        ]
+      }}
+  no_log: true

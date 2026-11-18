@@ -1,0 +1,21 @@
+---
+- name: Add old distribution immutable identity to cleanup guard
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_cleanup_identity_records: >-
+      {{
+        switch_refresh_sda_fabric_distribution_cleanup_identity_records + [
+          {
+            'management_ip':
+              switch_refresh_sda_fabric_distribution_cleanup_mapping.old_management_ip,
+            'device_id':
+              switch_refresh_sda_fabric_distribution_cleanup_mapping.old_device_id,
+            'serial_number':
+              switch_refresh_sda_fabric_distribution_cleanup_mapping.old_serial_number,
+            'mac_address':
+              switch_refresh_sda_fabric_distribution_cleanup_mapping.old_mac_address,
+            'management_state':
+              switch_refresh_sda_fabric_distribution_cleanup_mapping.old_management_state |
+              default('')
+          }
+        ]
+      }}

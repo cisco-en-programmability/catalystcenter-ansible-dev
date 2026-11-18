@@ -1,0 +1,35 @@
+---
+- name: Match resolved old distribution mapping for topology preflight
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_topology_mapping_matches: >-
+      {{
+        switch_refresh_sda_fabric_distribution_resolved_mappings |
+        selectattr(
+          'old_identity_key', 'equalto',
+          switch_refresh_sda_fabric_distribution_preflight_link.old_identity_key
+        ) | list
+      }}
+
+- name: Validate resolved old distribution topology mapping
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_topology_mapping_matches | length == 1
+    fail_msg: Unable to associate an exact resolved old device with a declared link.
+
+- name: Build active old distribution topology expectation
+  ansible.builtin.include_tasks:
+    file: build_topology_expectation.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_topology_link: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_ip: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_mapping_matches[0].old_management_ip }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_id: >-
+      {{ switch_refresh_sda_fabric_distribution_topology_mapping_matches[0].old_device_id }}
+    switch_refresh_sda_fabric_distribution_topology_distribution_interface: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link.old_link.distribution_interface_name }}
+    switch_refresh_sda_fabric_distribution_topology_peer_interface: >-
+      {{ switch_refresh_sda_fabric_distribution_preflight_link.old_link.peer_interface_name }}
+    switch_refresh_sda_fabric_distribution_topology_state: active

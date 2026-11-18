@@ -1,0 +1,201 @@
+---
+- name: Resolve exact distribution refresh site
+  cisco.catalystcenter.sites_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    nameHierarchy: "{{ switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_site_lookup
+  no_log: true
+
+- name: Validate exact distribution refresh site result
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_distribution_site_lookup.failed | default(false) | bool)
+      - switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response |
+        length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response[0].id |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response[0].nameHierarchy |
+        default(
+          switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response[0].groupNameHierarchy |
+          default('')
+        ) == switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy
+    fail_msg: >-
+      The batch fabric_site_name_hierarchy must resolve to exactly one complete
+      Catalyst Center site hierarchy.
+  no_log: true
+
+- name: Query IPv4 pools assigned to the distribution refresh site
+  cisco.catalystcenter.ipam_site_ip_address_pools_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    siteId: >-
+      {{ switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response[0].id }}
+    limit: 500
+  register: switch_refresh_sda_fabric_distribution_site_pool_lookup
+  no_log: true
+
+- name: Validate distribution site IPv4 pool lookup
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_site_pool_lookup.failed |
+        default(false) | bool)
+      - >-
+        (switch_refresh_sda_fabric_distribution_site_pool_lookup.catalystcenter_response |
+        default({})) is mapping
+      - >-
+        (((switch_refresh_sda_fabric_distribution_site_pool_lookup.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+    fail_msg: Unable to prove the IPv4 pools assigned to the batch site.
+  no_log: true
+
+- name: Validate distribution IPv4 link pools
+  ansible.builtin.include_tasks:
+    file: validate_pool_result.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_requested_pool_names: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.links |
+        map(attribute='new_link') |
+        map(attribute='ip_pool_name') |
+        unique |
+        list
+      }}
+    switch_refresh_sda_fabric_distribution_site_pool_records: >-
+      {{
+        (switch_refresh_sda_fabric_distribution_site_pool_lookup.catalystcenter_response |
+        default({})).response | default([])
+      }}
+    switch_refresh_sda_fabric_distribution_pool_site_id: >-
+      {{ switch_refresh_sda_fabric_distribution_site_lookup.catalystcenter_response.response[0].id }}
+
+- name: Resolve exact LAN Automation discovery site
+  cisco.catalystcenter.sites_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    nameHierarchy: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.new_devices.lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy
+      }}
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_la_site_lookup
+  when: switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Validate exact LAN Automation discovery site result
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_la_site_lookup.failed |
+        default(false) | bool)
+      - >-
+        (switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})) is mapping
+      - >-
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([]) | type_debug) == 'list'
+      - >-
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([])) | length == 1
+      - >-
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([]))[0].id |
+        default('') | string | trim | length > 0
+      - >-
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([]))[0].nameHierarchy |
+        default(
+          ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+          default({})).response | default([]))[0].groupNameHierarchy | default('')
+        ) ==
+        switch_refresh_sda_fabric_distribution_plan.new_devices.lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy
+    fail_msg: >-
+      The LAN Automation discovery site hierarchy must resolve to exactly one
+      Catalyst Center site before onboarding.
+  when: switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Query IPv4 pools assigned to the LAN Automation discovery site
+  cisco.catalystcenter.ipam_site_ip_address_pools_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    siteId: >-
+      {{
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([]))[0].id
+      }}
+    limit: 500
+  register: switch_refresh_sda_fabric_distribution_la_site_pool_lookup
+  when: switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Validate LAN Automation discovery-site IPv4 pool lookup
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_la_site_pool_lookup.failed |
+        default(false) | bool)
+      - >-
+        (switch_refresh_sda_fabric_distribution_la_site_pool_lookup.catalystcenter_response |
+        default({})) is mapping
+      - >-
+        (((switch_refresh_sda_fabric_distribution_la_site_pool_lookup.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+    fail_msg: >-
+      Unable to prove the IPv4 pools assigned to the LAN Automation discovery site.
+  when: switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Validate every LAN Automation onboarding IPv4 pool
+  ansible.builtin.include_tasks:
+    file: validate_pool_result.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_requested_pool_names: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.new_devices.lan_automation_config[0].lan_automation.ip_pools |
+        map(attribute='ip_pool_name') | unique | list
+      }}
+    switch_refresh_sda_fabric_distribution_site_pool_records: >-
+      {{
+        (switch_refresh_sda_fabric_distribution_la_site_pool_lookup.catalystcenter_response |
+        default({})).response | default([])
+      }}
+    switch_refresh_sda_fabric_distribution_pool_site_id: >-
+      {{
+        ((switch_refresh_sda_fabric_distribution_la_site_lookup.catalystcenter_response |
+        default({})).response | default([]))[0].id
+      }}
+  when: switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'

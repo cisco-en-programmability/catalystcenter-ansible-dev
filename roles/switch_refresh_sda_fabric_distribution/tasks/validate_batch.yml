@@ -1,0 +1,507 @@
+---
+# This file is intentionally read-only with respect to Catalyst Center. It
+# normalizes every payload later used by a mutating stage.
+- name: Validate distribution refresh batch structure
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_batch_input is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_input.keys() |
+        list |
+        difference([
+          'name', 'fabric_site_name_hierarchy', 'onboarding_method',
+          'new_devices', 'device_mapping'
+        ]) | length == 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_input.name |
+        default('') | type_debug) == 'str'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_input.name |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_input.name ==
+        (switch_refresh_sda_fabric_distribution_batch_input.name | trim)
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_input.fabric_site_name_hierarchy |
+        default('') | type_debug) == 'str'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_input.fabric_site_name_hierarchy |
+        default('') | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_input.fabric_site_name_hierarchy ==
+        (switch_refresh_sda_fabric_distribution_batch_input.fabric_site_name_hierarchy | trim)
+      - switch_refresh_sda_fabric_distribution_batch_input.new_devices is mapping
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_input.device_mapping |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_batch_input.device_mapping | length > 0
+      - switch_refresh_sda_fabric_distribution_batch_input.device_mapping | length <= 100
+    fail_msg: >-
+      Each batch requires a non-empty name, a complete
+      fabric_site_name_hierarchy, a new_devices mapping, and a non-empty
+      device_mapping list of at most 100 replacements. Unknown batch keys are rejected.
+
+- name: Initialize normalized distribution refresh batch
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_name: >-
+      {{ switch_refresh_sda_fabric_distribution_batch_input.name }}
+    switch_refresh_sda_fabric_distribution_batch_file_safe_name: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_input.name |
+        regex_replace('[^A-Za-z0-9_.-]', '_')
+      }}
+    switch_refresh_sda_fabric_distribution_batch_site: >-
+      {{ switch_refresh_sda_fabric_distribution_batch_input.fabric_site_name_hierarchy }}
+    switch_refresh_sda_fabric_distribution_batch_onboarding_method: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_input.onboarding_method |
+        default(switch_refresh_sda_fabric_distribution_onboarding_method)
+      }}
+    switch_refresh_sda_fabric_distribution_batch_new_devices: >-
+      {{ switch_refresh_sda_fabric_distribution_batch_input.new_devices }}
+    switch_refresh_sda_fabric_distribution_batch_device_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_input.new_devices.device_ips |
+        default([]) | map('string') | list
+      }}
+    switch_refresh_sda_fabric_distribution_batch_mappings: []
+    switch_refresh_sda_fabric_distribution_batch_links: []
+    switch_refresh_sda_fabric_distribution_batch_link_add_config: []
+    switch_refresh_sda_fabric_distribution_batch_link_delete_config: []
+    switch_refresh_sda_fabric_distribution_batch_old_identity_keys: []
+    switch_refresh_sda_fabric_distribution_batch_mapping_new_ips: []
+    switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys: []
+    switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys: []
+    switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys: []
+    switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys: []
+    switch_refresh_sda_fabric_distribution_batch_discovery_config: []
+    switch_refresh_sda_fabric_distribution_batch_provision_config: []
+  no_log: true
+
+- name: Validate distribution replacement input
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.keys() |
+        list |
+        difference([
+          'device_ips', 'discovery_config', 'lan_automation_config',
+          'discovery_name', 'protocol_order', 'discovery_retry',
+          'use_global_credentials'
+        ]) | length == 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_new_devices.device_ips |
+        default([]) | type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_batch_device_ips | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_device_ips | unique | length ==
+        switch_refresh_sda_fabric_distribution_batch_device_ips | length
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_onboarding_method in
+        ['discovery', 'lan_automation']
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_onboarding_method != 'discovery' or
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config
+        is not defined
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_onboarding_method != 'lan_automation' or
+        switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_config
+        is not defined
+    fail_msg: >-
+      new_devices.device_ips must be a non-empty unique list and
+      onboarding_method must be discovery or lan_automation. A batch cannot
+      supply configuration for the unselected onboarding method. Unknown
+      new_devices keys are rejected.
+
+- name: Validate replacement distribution IPv4 addresses
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_new_ip |
+        regex_search('^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$')
+        is not none
+      - >-
+        switch_refresh_sda_fabric_distribution_new_ip.split('.') |
+        map('int') | max <= 255
+    fail_msg: >-
+      new_devices.device_ips supports canonical IPv4 management addresses only.
+      Invalid value: {{ switch_refresh_sda_fabric_distribution_new_ip }}.
+  loop: "{{ switch_refresh_sda_fabric_distribution_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_new_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_new_ip }}"
+
+- name: Validate and normalize distribution device mappings
+  ansible.builtin.include_tasks:
+    file: validate_mapping.yml
+    apply:
+      tags:
+        - always
+  loop: "{{ switch_refresh_sda_fabric_distribution_batch_input.device_mapping }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_mapping_input
+    label: >-
+      {{
+        switch_refresh_sda_fabric_distribution_mapping_input.new.management_ip |
+        default('invalid-mapping')
+        if (
+          switch_refresh_sda_fabric_distribution_mapping_input is mapping and
+          switch_refresh_sda_fabric_distribution_mapping_input.new is defined and
+          switch_refresh_sda_fabric_distribution_mapping_input.new is mapping
+        )
+        else 'invalid-mapping'
+      }}
+
+- name: Validate distribution mapping coverage and endpoint uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_mapping_new_ips | sort ==
+        switch_refresh_sda_fabric_distribution_batch_device_ips | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_mapping_new_ips | unique | length ==
+        switch_refresh_sda_fabric_distribution_batch_mapping_new_ips | length
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_old_identity_keys | unique | length ==
+        switch_refresh_sda_fabric_distribution_batch_old_identity_keys | length
+      - >-
+        switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys |
+        unique | length ==
+        switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys | length
+      - >-
+        switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys |
+        unique | length ==
+        switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys | length
+      - >-
+        switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys |
+        unique | length ==
+        switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys | length
+      - >-
+        switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys |
+        unique | length ==
+        switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys | length
+      - >-
+        switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys |
+        intersect(switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys) |
+        length == 0
+    fail_msg: >-
+      device_mapping must cover every replacement exactly once, identify a
+      unique old device for each replacement, and use every old and new
+      physical interface endpoint at most once.
+
+- name: Validate LAN Automation onboarding configuration
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config |
+        default([]) | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0]
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].keys() |
+        list == ['lan_automation']
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.launch_and_wait |
+        default(false) | bool
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_management_ip_address |
+        default('') | string | trim | length > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_interface_names |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_interface_names |
+        default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.ip_pools |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.ip_pools |
+        default([]) | length > 0
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) | type_debug) == 'list'
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        default([]) | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_site ==
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy or
+        switch_refresh_sda_fabric_distribution_batch_site.startswith(
+          switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovered_device_site_name_hierarchy ~ '/'
+        )
+    fail_msg: >-
+      LAN Automation onboarding requires exactly one launch_and_wait entry with
+      discovery_devices and a complete discovery-site hierarchy equal to or an
+      ancestor of the batch site.
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Initialize LAN Automation onboarding pool validation
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_la_pool_names: []
+    switch_refresh_sda_fabric_distribution_la_main_pool_names: []
+    switch_refresh_sda_fabric_distribution_la_physical_pool_names: []
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation onboarding pools
+  ansible.builtin.include_tasks:
+    file: validate_la_pool_entry.yml
+    apply:
+      tags:
+        - always
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.ip_pools |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_la_pool
+    label: >-
+      {{ switch_refresh_sda_fabric_distribution_la_pool.ip_pool_name |
+      default('invalid-pool') }}
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation onboarding IPv4 seed addresses and interfaces
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_la_seed_ip |
+        regex_search('^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$')
+        is not none
+      - >-
+        switch_refresh_sda_fabric_distribution_la_seed_ip.split('.') |
+        map('int') | max <= 255
+    fail_msg: LAN Automation seed devices must use canonical IPv4 management addresses.
+  loop: >-
+    {{
+      [switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_management_ip_address] +
+      (
+        [switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.peer_device_management_ip_address]
+        if (
+          switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.peer_device_management_ip_address
+          is defined
+        )
+        else []
+      )
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_la_seed_ip
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation primary interface names
+  ansible.builtin.assert:
+    that:
+      - (switch_refresh_sda_fabric_distribution_la_primary_interface | type_debug) == 'str'
+      - switch_refresh_sda_fabric_distribution_la_primary_interface | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_la_primary_interface ==
+        (switch_refresh_sda_fabric_distribution_la_primary_interface | trim)
+    fail_msg: LAN Automation primary_device_interface_names must be non-empty full names.
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_interface_names |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_la_primary_interface
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation pool coverage for new links
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_la_main_pool_names | length == 1
+      - >-
+        switch_refresh_sda_fabric_distribution_la_pool_names | unique | length ==
+        switch_refresh_sda_fabric_distribution_la_pool_names | length
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.peer_device_management_ip_address
+        is not defined or
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.peer_device_management_ip_address !=
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.primary_device_management_ip_address
+      - >-
+        (switch_refresh_sda_fabric_distribution_batch_links |
+        map(attribute='new_link') | map(attribute='ip_pool_name') | unique | list) |
+        difference(switch_refresh_sda_fabric_distribution_la_physical_pool_names) |
+        length == 0
+    fail_msg: >-
+      LAN Automation onboarding requires a MAIN_POOL, unique pool names,
+      distinct primary and optional peer seed devices, and every new-link
+      ip_pool_name declared as a PHYSICAL_LINK_POOL.
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+
+- name: Validate LAN Automation discovery devices
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_la_device is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_la_device.device_serial_number |
+        default('') | string | trim | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_la_device.device_management_ip_address |
+        default('') | string in switch_refresh_sda_fabric_distribution_batch_device_ips
+      - >-
+        switch_refresh_sda_fabric_distribution_la_device.device_site_name_hierarchy
+        is not defined or
+        switch_refresh_sda_fabric_distribution_la_device.device_site_name_hierarchy ==
+        switch_refresh_sda_fabric_distribution_batch_site
+    fail_msg: >-
+      Every LAN Automation discovery device requires a serial number and a
+      management IP from new_devices.device_ips. An optional device site must
+      exactly match the batch site.
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+      default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_la_device
+    label: >-
+      {{
+        switch_refresh_sda_fabric_distribution_la_device.device_management_ip_address |
+        default('invalid-device')
+      }}
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Validate LAN Automation replacement coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        map(attribute='device_management_ip_address') | map('string') | list | sort ==
+        switch_refresh_sda_fabric_distribution_batch_device_ips | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_new_devices.lan_automation_config[0].lan_automation.discovery_devices |
+        map(attribute='device_serial_number') | map('upper') | unique | length ==
+        switch_refresh_sda_fabric_distribution_batch_device_ips | length
+    fail_msg: >-
+      LAN Automation discovery_devices must cover every replacement management
+      IP exactly once and use unique serial numbers.
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'lan_automation'
+  no_log: true
+
+- name: Use custom distribution Discovery configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_discovery_config: >-
+      {{ switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_config }}
+  when:
+    - switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_config is defined
+  no_log: true
+
+- name: Build bounded distribution Discovery configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_discovery_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_discovery_config + [
+          {
+            'discovery_name':
+              switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_name |
+              default(
+                'distribution-refresh-' ~
+                switch_refresh_sda_fabric_distribution_batch_file_safe_name ~ '-' ~
+                ((switch_refresh_sda_fabric_distribution_discovery_index | int + 1) | string)
+              ),
+            'discovery_type':
+              'SINGLE'
+              if (switch_refresh_sda_fabric_distribution_discovery_chunk | length == 1)
+              else 'MULTI RANGE',
+            'ip_address_list':
+              switch_refresh_sda_fabric_distribution_discovery_chunk | list,
+            'protocol_order':
+              switch_refresh_sda_fabric_distribution_batch_new_devices.protocol_order |
+              default('ssh'),
+            'retry':
+              switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_retry |
+              default(2),
+            'use_global_credentials':
+              switch_refresh_sda_fabric_distribution_batch_new_devices.use_global_credentials |
+              default(true)
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_distribution_batch_device_ips | batch(8) | list }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_discovery_chunk
+    index_var: switch_refresh_sda_fabric_distribution_discovery_index
+  when:
+    - switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_distribution_batch_new_devices.discovery_config is not defined
+
+- name: Validate distribution Discovery target coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_discovery_config |
+        map(attribute='ip_address_list') | flatten | map('string') | list | sort ==
+        switch_refresh_sda_fabric_distribution_batch_device_ips | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_batch_discovery_config |
+        map(attribute='discovery_name') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_batch_discovery_config | length
+    fail_msg: >-
+      Discovery configuration must cover exactly the replacement management
+      IPs and use unique discovery names.
+  when: switch_refresh_sda_fabric_distribution_batch_onboarding_method == 'discovery'
+  no_log: true
+
+- name: Build distribution provisioning configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_batch_provision_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_batch_provision_config + [
+          {
+            'site_name_hierarchy': switch_refresh_sda_fabric_distribution_batch_site,
+            'management_ip_address': switch_refresh_sda_fabric_distribution_provision_ip
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_distribution_batch_device_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_provision_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_provision_ip }}"
+
+- name: Save validated distribution refresh batch plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_validated_batch:
+      name: "{{ switch_refresh_sda_fabric_distribution_batch_name }}"
+      file_safe_name: "{{ switch_refresh_sda_fabric_distribution_batch_file_safe_name }}"
+      fabric_site_name_hierarchy: "{{ switch_refresh_sda_fabric_distribution_batch_site }}"
+      onboarding_method: "{{ switch_refresh_sda_fabric_distribution_batch_onboarding_method }}"
+      new_devices: "{{ switch_refresh_sda_fabric_distribution_batch_new_devices }}"
+      new_management_ips: "{{ switch_refresh_sda_fabric_distribution_batch_device_ips }}"
+      mappings: "{{ switch_refresh_sda_fabric_distribution_batch_mappings }}"
+      links: "{{ switch_refresh_sda_fabric_distribution_batch_links }}"
+      link_add_config: "{{ switch_refresh_sda_fabric_distribution_batch_link_add_config }}"
+      link_delete_config: "{{ switch_refresh_sda_fabric_distribution_batch_link_delete_config }}"
+      discovery_config: "{{ switch_refresh_sda_fabric_distribution_batch_discovery_config }}"
+      provision_config: "{{ switch_refresh_sda_fabric_distribution_batch_provision_config }}"
+      old_distribution_endpoint_keys: >-
+        {{ switch_refresh_sda_fabric_distribution_old_distribution_endpoint_keys }}
+      old_peer_endpoint_keys: >-
+        {{ switch_refresh_sda_fabric_distribution_old_peer_endpoint_keys }}
+      new_distribution_endpoint_keys: >-
+        {{ switch_refresh_sda_fabric_distribution_new_distribution_endpoint_keys }}
+      new_peer_endpoint_keys: >-
+        {{ switch_refresh_sda_fabric_distribution_new_peer_endpoint_keys }}
+  no_log: true
+
+- name: Add validated distribution refresh batch to the immutable plan
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_validated_plans: >-
+      {{
+        (switch_refresh_sda_fabric_distribution_validated_plans | default([])) +
+        [switch_refresh_sda_fabric_distribution_validated_batch]
+      }}
+  no_log: true

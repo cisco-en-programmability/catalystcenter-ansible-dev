@@ -1,0 +1,494 @@
+---
+- name: Validate active distribution hostname manifest
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_manifest is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.status in
+        ['pending', 'completed']
+      - >-
+        (switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        type_debug) == 'list'
+      - switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length > 0
+    fail_msg: Hostname transfer requires a valid pending or completed durable manifest.
+
+- name: Validate distribution hostname manifest entry schema
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_distribution_hostname_entry is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.keys() | list | sort ==
+        [
+          'desired_hostname', 'new_device_id', 'new_management_ip',
+          'new_serial_number', 'old_device_id', 'old_management_ip',
+          'old_serial_number', 'status', 'submitted_hostname'
+        ] | sort
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.submitted_hostname |
+        string | length > 0
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.submitted_hostname |
+        string | length <= 63
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_entry.status in
+        ['pending', 'completed']
+    fail_msg: >-
+      Every hostname manifest entry must have the exact immutable identity and
+      hostname schema, a non-empty submitted label of at most 63 characters,
+      and a valid status.
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip |
+      default('invalid-hostname-entry') }}
+
+- name: Validate distribution hostname manifest uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_management_ip') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='desired_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+
+- name: Verify old hostname owners are absent from inventory
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    managementIpAddress:
+      - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_management_ip }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup
+  until:
+    - >-
+      not (switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup.failed |
+      default(false) | bool)
+    - >-
+      (((switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup.catalystcenter_response |
+      default({})).response | default(none)) | type_debug) == 'list'
+    - >-
+      ((switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup.catalystcenter_response |
+      default({})).response | default([])) | length == 0
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_management_ip }}"
+  no_log: true
+
+- name: Validate old distribution hostname owners are absent
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_distribution_old_owner_result.failed | default(false) | bool)
+      - >-
+        (((switch_refresh_sda_fabric_distribution_old_owner_result.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+      - >-
+        ((switch_refresh_sda_fabric_distribution_old_owner_result.catalystcenter_response |
+        default({})).response | default([])) | length == 0
+    fail_msg: >-
+      Old hostname ownership has not been released in inventory; hostname
+      transfer failed closed.
+  loop: >-
+    {{ switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup.results | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_owner_result
+    label: old-hostname-owner
+
+- name: Verify old distribution UUID identities are absent from inventory
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    id: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_device_id }}"
+  register: switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup
+  until:
+    - >-
+      not (switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.failed |
+      default(false) | bool) or
+      (switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.status |
+      default(0) | int) == 404
+    - >-
+      (switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.status |
+      default(0) | int) == 404 or
+      (((switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.catalystcenter_response |
+      default({})).response | default(none, true)) is none) or
+      (
+        ((switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.catalystcenter_response |
+        default({})).response | default({})) is mapping and
+        ((switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.catalystcenter_response |
+        default({})).response | default({}) | length) == 0
+      ) or
+      (
+        (((switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.catalystcenter_response |
+        default({})).response | default([])) | type_debug) == 'list' and
+        ((switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.catalystcenter_response |
+        default({})).response | default([]) | reject('equalto', none) | list | length) == 0
+      )
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_device_id }}"
+  ignore_errors: true
+  no_log: true
+
+- name: Validate old distribution UUID identities are absent
+  ansible.builtin.assert:
+    that:
+      - >-
+        (switch_refresh_sda_fabric_distribution_old_uuid_result.status |
+        default(0) | int) == 404 or
+        (
+          not (switch_refresh_sda_fabric_distribution_old_uuid_result.failed |
+          default(false) | bool) and
+          (
+            (((switch_refresh_sda_fabric_distribution_old_uuid_result.catalystcenter_response |
+            default({})).response | default(none, true)) is none) or
+            (
+              ((switch_refresh_sda_fabric_distribution_old_uuid_result.catalystcenter_response |
+              default({})).response | default({})) is mapping and
+              ((switch_refresh_sda_fabric_distribution_old_uuid_result.catalystcenter_response |
+              default({})).response | default({}) | length) == 0
+            ) or
+            (
+              (((switch_refresh_sda_fabric_distribution_old_uuid_result.catalystcenter_response |
+              default({})).response | default([])) | type_debug) == 'list' and
+              ((switch_refresh_sda_fabric_distribution_old_uuid_result.catalystcenter_response |
+              default({})).response | default([]) | reject('equalto', none) | list |
+              length) == 0
+            )
+          )
+        )
+    fail_msg: >-
+      An old device UUID remains in inventory or its absence could not be
+      proven; hostname transfer failed closed.
+  loop: >-
+    {{ switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.results | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_uuid_result
+    label: old-uuid-owner
+
+- name: Verify old distribution serial identities are absent from inventory
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    serialNumber:
+      - "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_serial_number }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup
+  until:
+    - >-
+      not (switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup.failed |
+      default(false) | bool)
+    - >-
+      (((switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup.catalystcenter_response |
+      default({})).response | default(none)) | type_debug) == 'list'
+    - >-
+      ((switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup.catalystcenter_response |
+      default({})).response | default([])) | length == 0
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.old_serial_number }}"
+  no_log: true
+
+- name: Validate old distribution serial identities are absent
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (switch_refresh_sda_fabric_distribution_old_serial_result.failed |
+        default(false) | bool)
+      - >-
+        (((switch_refresh_sda_fabric_distribution_old_serial_result.catalystcenter_response |
+        default({})).response | default(none)) | type_debug) == 'list'
+      - >-
+        ((switch_refresh_sda_fabric_distribution_old_serial_result.catalystcenter_response |
+        default({})).response | default([])) | length == 0
+    fail_msg: >-
+      An old device serial identity remains in inventory; hostname transfer
+      failed closed.
+  loop: >-
+    {{ switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup.results | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_serial_result
+    label: old-serial-owner
+
+- name: Validate old distribution inventory absence lookup coverage
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_old_hostname_owner_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_old_hostname_uuid_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_old_hostname_serial_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length
+    fail_msg: >-
+      Absence was not checked for every old distribution IP, UUID, and serial
+      identity; hostname transfer failed closed.
+
+- name: Resolve live replacement hostname targets
+  cisco.catalystcenter.network_device_by_ip_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    ipAddress: "{{ switch_refresh_sda_fabric_distribution_hostname_target_entry.new_management_ip }}"
+  register: switch_refresh_sda_fabric_distribution_hostname_target_lookup
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_target_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_target_entry.new_management_ip }}"
+  no_log: true
+
+- name: Query desired distribution hostname ownership after old inventory removal
+  cisco.catalystcenter.network_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    hostname:
+      - "{{ switch_refresh_sda_fabric_distribution_hostname_target_entry.desired_hostname }}"
+    limit: 2
+  register: switch_refresh_sda_fabric_distribution_hostname_owner_lookup
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_target_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_target_entry.desired_hostname }}"
+  no_log: true
+
+- name: Validate live hostname targets and ownership
+  ansible.builtin.include_tasks:
+    file: validate_hostname_target.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_hostname_target_entry: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_target_lookup.results[
+          switch_refresh_sda_fabric_distribution_hostname_validation_index
+        ].switch_refresh_sda_fabric_distribution_hostname_target_entry
+      }}
+    switch_refresh_sda_fabric_distribution_hostname_target_result: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_target_lookup.results[
+          switch_refresh_sda_fabric_distribution_hostname_validation_index
+        ]
+      }}
+    switch_refresh_sda_fabric_distribution_hostname_owner_result: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_owner_lookup.results[
+          switch_refresh_sda_fabric_distribution_hostname_validation_index
+        ]
+      }}
+  loop: "{{ range(0, switch_refresh_sda_fabric_distribution_hostname_manifest.entries | length) | list }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_validation_index
+    label: hostname-target
+
+- name: Initialize live replacement records for hostname safety checks
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_replacement_records: []
+
+- name: Build live replacement records for hostname safety checks
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_replacement_records: >-
+      {{
+        (switch_refresh_sda_fabric_distribution_hostname_replacement_records | default([])) + [
+          {
+            'management_ip': switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip,
+            'device_id': switch_refresh_sda_fabric_distribution_hostname_entry.new_device_id
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip }}"
+
+- name: Validate hostname targets remain provisioned to the manifest site
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_provision_validation_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+        map(attribute='new_management_ip') | list
+      }}
+
+- name: Validate hostname targets remain outside SDA fabric-device enrollment
+  ansible.builtin.include_tasks:
+    file: validate_nonfabric.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_nonfabric_records: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_replacement_records }}
+
+- name: Initialize distribution hostname update device list
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_update_devices: []
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest.status != 'completed'
+
+- name: Add distribution hostname update device
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_update_devices: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_update_devices + [
+          {
+            'device_management_ip_address':
+              switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip,
+            'new_host_name':
+              switch_refresh_sda_fabric_distribution_hostname_entry.submitted_hostname
+          }
+        ]
+      }}
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip }}"
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest.status != 'completed'
+
+- name: Set distribution hostname update configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_update_config:
+      - lan_automated_device_update:
+          hostname_update_devices: >-
+            {{ switch_refresh_sda_fabric_distribution_hostname_update_devices }}
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest.status != 'completed'
+
+- name: Apply captured distribution hostnames
+  ansible.builtin.include_role:
+    name: lan_automation
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_state: merged
+    lan_automation_config_verify: true
+    lan_automation_catalystcenter_api_task_timeout: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_transfer_timeout }}
+    lan_automation_catalystcenter_task_poll_interval: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_transfer_poll_interval }}
+    lan_automation_config: >-
+      {{ switch_refresh_sda_fabric_distribution_hostname_update_config }}
+  when: switch_refresh_sda_fabric_distribution_hostname_manifest.status != 'completed'
+  no_log: true
+
+- name: Verify transferred distribution hostnames
+  cisco.catalystcenter.network_device_by_ip_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    ipAddress: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip }}"
+  register: switch_refresh_sda_fabric_distribution_hostname_verify
+  until:
+    - not (switch_refresh_sda_fabric_distribution_hostname_verify.failed | default(false) | bool)
+    - >-
+      ((switch_refresh_sda_fabric_distribution_hostname_verify.catalystcenter_response |
+      default({})).response | default({})).hostname |
+      default('') | lower ==
+      (switch_refresh_sda_fabric_distribution_hostname_entry.desired_hostname | lower)
+  retries: "{{ switch_refresh_sda_fabric_distribution_hostname_validation_retries | int }}"
+  delay: "{{ switch_refresh_sda_fabric_distribution_hostname_validation_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest.entries }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_hostname_entry
+    label: "{{ switch_refresh_sda_fabric_distribution_hostname_entry.new_management_ip }}"
+  no_log: true
+
+- name: Mark durable distribution hostname transfer complete
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_hostname_manifest: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_manifest |
+        combine({
+          'status': 'completed',
+          'entries':
+            switch_refresh_sda_fabric_distribution_hostname_manifest.entries |
+            map('combine', {'status': 'completed'}) | list
+        })
+      }}
+
+- name: Persist completed distribution hostname manifest
+  ansible.builtin.copy:
+    dest: "{{ switch_refresh_sda_fabric_distribution_hostname_manifest_file }}"
+    content: >-
+      {{ {'manifest': switch_refresh_sda_fabric_distribution_hostname_manifest} |
+      to_nice_yaml(indent=2) }}
+    mode: "0600"
+  no_log: true
