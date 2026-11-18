@@ -42,6 +42,7 @@ MODULES = (
     "provision_workflow_manager", "sda_fabric_devices_workflow_manager",
     "sda_host_port_onboarding_workflow_manager", "fabric_devices_info_workflow_manager",
     "lan_automation_workflow_manager",
+    "lan_automation_playbook_config_generator", "discovery_workflow_manager",
 )
 
 
@@ -56,6 +57,8 @@ import yaml
 def _ips(args):
     config = args.get("config", [])
     if isinstance(config, dict):
+        if "ip_address_list" in config:
+            return config["ip_address_list"]
         filters = config.get("component_specific_filters", {})
         if "global_filters" in config:
             return config["global_filters"]["devices"]
@@ -166,7 +169,23 @@ def execute(module, args):
         elif module.endswith("_playbook_config_generator"):
             ips = _ips(args)
             call["targets"] = ips
-            if module == "inventory_playbook_config_generator":
+            if module == "lan_automation_playbook_config_generator":
+                if state.get("missing_lan_history") or set(ips).intersection(state.get("missing_lan_history_for", [])):
+                    raise RuntimeError("No stopped LAN automation session found")
+                payload = [{"lan_automation": {
+                    "discovered_device_site_name_hierarchy": args["config"]["site_name_hierarchy"],
+                    "primary_device_management_ip_address": state.get("lan_seed", "198.51.100.10"),
+                    "primary_device_interface_names": ["GigabitEthernet1/0/1", "GigabitEthernet1/0/2"],
+                    "ip_pools": [{"ip_pool_name": "LAN_MAIN", "ip_pool_role": "MAIN_POOL"}],
+                    "discovery_devices": [{
+                        "device_management_ip_address": ip,
+                        "device_serial_number": "REPLACE_WITH_SERIAL_FOR_" + ip.replace(".", "_"),
+                        "device_host_name": state["devices"][ip]["hostname"],
+                        "device_site_name_hierarchy": state["provisioned"][ip],
+                    } for ip in ips],
+                    "launch_and_wait": True,
+                }}]
+            elif module == "inventory_playbook_config_generator":
                 payload = [{"ip_address_list": [ip], "role": state["devices"][ip]["role"]} for ip in ips]
             elif module == "provision_playbook_config_generator":
                 payload = [{"management_ip_address": ip, "site_name_hierarchy": state["provisioned"][ip],
@@ -202,6 +221,11 @@ def execute(module, args):
                                 "managementState": "Managed", "reachabilityStatus": "Reachable",
                                 "inventoryStatusDetail": "<status><general code='SUCCESS'/></status>",
                             }
+            elif module == "discovery_workflow_manager":
+                for ip in apply_ips:
+                    if ip not in state.get("prepared_devices", {}):
+                        raise RuntimeError("Replacement device was not prepared for discovery")
+                    state["devices"][ip] = deepcopy(state["prepared_devices"][ip])
             elif module == "inventory_workflow_manager":
                 for entry in args["config"]:
                     for ip in entry["ip_address_list"]:
@@ -286,6 +310,25 @@ def _batch():
     }
 
 
+def _generated_batch(method="lan_automation"):
+    value = _batch()
+    value.pop("new_devices")
+    value["onboarding_method"] = method
+    for mapping in value["device_mapping"]:
+        mapping["replacement_serial_number"] = "NEW-SERIAL-" + mapping["management_ip"].rsplit(".", 1)[1]
+    return value
+
+
+def _prepare_discovery_replacements(case, wrong_serial=False):
+    state = case.state()
+    state["prepared_devices"] = deepcopy(_initial_state()["devices"])
+    for ip, device in state["prepared_devices"].items():
+        suffix = ip.rsplit(".", 1)[1]
+        device.update(id="new-uuid-" + suffix, instanceUuid="new-uuid-" + suffix,
+                      serialNumber="WRONG" if wrong_serial else "NEW-SERIAL-" + suffix, role="UNKNOWN")
+    case.save_state(state)
+
+
 def _initial_state():
     devices, ports = {}, {}
     for ip in IPS:
@@ -321,6 +364,8 @@ class OfflineRole:
         collection = self.collection_root / "ansible_collections" / "cisco" / "catalystcenter"
         collection.mkdir(parents=True)
         shutil.copytree(ROOT / "roles" / ROLE, collection / "roles" / ROLE)
+        for child_role in ("lan_automation_config_generator", "discovery"):
+            shutil.copytree(ROOT / "roles" / child_role, collection / "roles" / child_role)
         (collection / "plugins" / "filter").mkdir(parents=True)
         shutil.copy(ROOT / "plugins" / "filter" / (ROLE + ".py"), collection / "plugins" / "filter")
         for kind in ("action", "modules", "module_utils"):
@@ -681,3 +726,170 @@ def test_legacy_scope_can_resolve_a_zone_without_old_inventory(captured, tmp_pat
     assert case.manifest()["stage"] == "awaiting_ip_release"
     assert any(call["module"] == "sda_fabric_zones_info" for call in case.state()["calls"])
     assert _mutations(case.state()["calls"]) == []
+
+
+def test_generated_lan_role_captures_once_and_restores_saved_serial_mappings(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    case.batch["new_devices"] = {"isis_domain_pwd": "runtime-isis-before"}
+    case.run("capture_and_remove")
+    snapshot = case.manifest()
+    assert snapshot["schema_version"] == 3
+    assert snapshot["stage"] == "awaiting_ip_release"
+    assert "runtime-isis" not in case.manifest_path.read_text()
+    lan = snapshot["onboarding"]["config"][0]["lan_automation"]
+    assert [d["device_serial_number"] for d in lan["discovery_devices"]] == [
+        "NEW-SERIAL-10",
+        "NEW-SERIAL-11",
+    ]
+    assert [d["device_site_name_hierarchy"] for d in lan["discovery_devices"]] == [
+        SITE + "/Floor1",
+        SITE + "/Floor2",
+    ]
+    capture_calls = [
+        call
+        for call in case.state()["calls"]
+        if call["module"] == "lan_automation_playbook_config_generator"
+    ]
+    assert len(capture_calls) == 1
+    assert capture_calls[0]["args"]["config"] == {
+        "ip_address_list": IPS,
+        "site_name_hierarchy": SITE,
+    }
+    assert not capture_calls[0]["args"].get("isis_domain_pwd")
+    count = len(case.state()["calls"])
+    case.batch["new_devices"]["isis_domain_pwd"] = "runtime-isis-after"
+    case.run("restore")
+    assert case.manifest()["stage"] == "complete"
+    calls = case.state()["calls"][count:]
+    assert not any(call["module"] == "lan_automation_playbook_config_generator" for call in calls)
+    launch = next(call for call in calls if call["module"] == "lan_automation_workflow_manager")
+    assert launch["args"]["config"][0]["lan_automation"]["isis_domain_pwd"] == "runtime-isis-after"
+    assert "runtime-isis" not in case.manifest_path.read_text()
+
+
+@pytest.mark.parametrize("credentials", ["global", "shared", "per_device"])
+def test_discovery_role_restores_prepared_devices_with_runtime_credentials(tmp_path, credentials):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery")
+    if credentials != "global":
+        case.batch["new_devices"] = {
+            "discovery": {
+                "use_global_credentials": False,
+                "discovery_specific_credentials": {
+                    "cli_credentials_list": [
+                        {"username": "shared-user", "password": "runtime-shared-secret"}
+                    ],
+                    "snmp_v2_read_credential": {"community": "runtime-snmp-secret"},
+                },
+            }
+        }
+    if credentials == "per_device":
+        case.batch["device_mapping"][1]["discovery"] = {
+            "discovery_specific_credentials": {
+                "cli_credentials_list": [
+                    {"username": "device-user", "password": "runtime-device-secret"}
+                ]
+            }
+        }
+    case.run("capture_and_remove")
+    assert case.manifest()["onboarding"] == {"method": "discovery", "config": []}
+    assert not any(
+        call["module"] == "lan_automation_playbook_config_generator"
+        for call in case.state()["calls"]
+    )
+    _prepare_discovery_replacements(case)
+    count = len(case.state()["calls"])
+    case.run("restore")
+    assert case.manifest()["stage"] == "complete"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations] == [
+        "discovery_workflow_manager",
+        "inventory_workflow_manager",
+        "provision_workflow_manager",
+        "sda_fabric_devices_workflow_manager",
+        "sda_host_port_onboarding_workflow_manager",
+    ]
+    jobs = mutations[0]["args"]["config"]
+    assert [job["ip_address_list"] for job in jobs] == [[ip] for ip in IPS]
+    if credentials == "global":
+        assert all(job["use_global_credentials"] for job in jobs)
+    elif credentials == "per_device":
+        assert (
+            jobs[0]["discovery_specific_credentials"]["cli_credentials_list"][0]["username"]
+            == "shared-user"
+        )
+        assert (
+            jobs[1]["discovery_specific_credentials"]["cli_credentials_list"][0]["username"]
+            == "device-user"
+        )
+        assert (
+            jobs[1]["discovery_specific_credentials"]["snmp_v2_read_credential"]["community"]
+            == "runtime-snmp-secret"
+        )
+    assert "runtime-" not in case.manifest_path.read_text()
+    count = len(case.state()["calls"])
+    case.run("restore")
+    assert _mutations(case.state()["calls"][count:]) == []
+
+
+def test_missing_lan_history_in_later_batch_prevents_every_removal(tmp_path):
+    case = OfflineRole(tmp_path)
+    first, second = _generated_batch(), _generated_batch()
+    first["device_mapping"] = first["device_mapping"][:1]
+    second["device_mapping"] = second["device_mapping"][1:]
+    second["name"] = "second-batch"
+    state = case.state()
+    state["missing_lan_history_for"] = [IPS[1]]
+    case.save_state(state)
+    case.run("capture_and_remove", success=False, extra={PREFIX + "batches": [first, second]})
+    assert set(case.state()["devices"]) == set(IPS)
+    assert _mutations(case.state()["calls"]) == []
+    assert case.manifest()["stage"] == "captured"
+
+
+def test_generated_seed_port_conflict_blocks_every_batch_removal(tmp_path):
+    case = OfflineRole(tmp_path)
+    first, second = _generated_batch(), _generated_batch()
+    first["device_mapping"] = first["device_mapping"][:1]
+    second["device_mapping"] = second["device_mapping"][1:]
+    second["name"] = "second-batch"
+    case.run("capture_and_remove", success=False, extra={PREFIX + "batches": [first, second]})
+    assert set(case.state()["devices"]) == set(IPS)
+    assert _mutations(case.state()["calls"]) == []
+    assert case.manifest()["stage"] == "captured"
+    second_manifest = json.loads((case.snapshots / "second-batch" / "manifest.json").read_text())
+    assert second_manifest["stage"] == "captured"
+    assert sum(call["module"] == "lan_automation_playbook_config_generator" for call in case.state()["calls"]) == 2
+
+
+def test_discovery_wrong_replacement_serial_blocks_provisioning(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery")
+    case.run("capture_and_remove")
+    _prepare_discovery_replacements(case, wrong_serial=True)
+    count = len(case.state()["calls"])
+    case.run("restore", success=False)
+    assert case.manifest()["stage"] == "restore_started"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations] == ["discovery_workflow_manager"]
+
+
+def test_partial_discovery_can_resume_without_recapturing_old_devices(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery")
+    case.run("capture_and_remove")
+    _prepare_discovery_replacements(case)
+    state = case.state()
+    state["failure"] = {"module": "discovery_workflow_manager", "state": "merged", "remaining": 1}
+    case.save_state(state)
+    case.run("restore", success=False)
+    assert case.manifest()["stage"] == "restore_started"
+    assert set(case.state()["devices"]) == {IPS[0]}
+    count = len(case.state()["calls"])
+    case.run("restore")
+    assert case.manifest()["stage"] == "complete"
+    assert not any(
+        call["module"] == "lan_automation_playbook_config_generator"
+        for call in case.state()["calls"][count:]
+    )

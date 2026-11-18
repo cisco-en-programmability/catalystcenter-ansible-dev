@@ -36,7 +36,7 @@
          cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest) }}
   no_log: true
 
-- name: LAN automate the complete replacement batch
+- name: Onboard the complete replacement batch
   when: edge_same_ip_restore_start_stage | int < 6
   block:
     - name: Build the complete LAN automation input with captured hostnames and sites
@@ -44,6 +44,7 @@
         edge_same_ip_lan_execution_config: >-
           {{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_lan_config(edge_same_ip_manifest) }}
       no_log: true
+      when: edge_same_ip_plan.onboarding_method == 'lan_automation'
 
     - name: Run all replacement discovery mappings in one workflow invocation
       cisco.catalystcenter.lan_automation_workflow_manager:
@@ -53,26 +54,46 @@
         catalystcenter_api_task_timeout: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int }}"
         catalystcenter_task_poll_interval: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int }}"
       when: >-
+        edge_same_ip_plan.onboarding_method == 'lan_automation' and
         not (edge_same_ip_inventory_lookup |
              cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest))
       no_log: true
 
+    - name: Discover the replacement devices through the discovery role
+      ansible.builtin.include_role:
+        name: cisco.catalystcenter.discovery
+        public: false
+        apply:
+          no_log: true
+      vars:
+        catalystcenter_debug: false
+        catalystcenter_log: false
+        discovery_state: merged
+        discovery_config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
+        discovery_config: "{{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_discovery_config }}"
+      when:
+        - edge_same_ip_plan.onboarding_method == 'discovery'
+        - not (edge_same_ip_inventory_lookup | cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest))
+
     - name: Wait for LAN automation configuration to finish
       ansible.builtin.include_tasks: wait_for_lan_automation.yml
+      when: edge_same_ip_plan.onboarding_method == 'lan_automation'
 
     - name: Wait for every replacement serial at its requested management IP
       ansible.builtin.include_tasks: wait_ready.yml
       vars:
         edge_same_ip_required_role: ""
 
-    - name: Save verified LAN automation completion and replacement UUIDs
+    - name: Save verified onboarding completion and replacement UUIDs
       ansible.builtin.set_fact:
         edge_same_ip_manifest: >-
           {{ edge_same_ip_manifest |
-             cisco.catalystcenter.edge_same_ip_checkpoint('lan_automated', edge_same_ip_live_records) }}
+             cisco.catalystcenter.edge_same_ip_checkpoint(
+               'lan_automated' if edge_same_ip_manifest.schema_version < 3 else 'onboarded',
+               edge_same_ip_live_records) }}
       no_log: true
 
-    - name: Persist LAN automation completion
+    - name: Persist replacement onboarding completion
       ansible.builtin.include_tasks: persist.yml
 
 - name: Ensure the complete replacement batch has inventory role ACCESS

@@ -1,0 +1,18 @@
+---
+- name: Capture LAN automation configuration through the generator role
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - credentials.yml
+  roles:
+    - role: cisco.catalystcenter.lan_automation_config_generator
+      vars:
+        lan_automation_config_generator_file_path: "{{ playbook_dir }}/output/replacement_lan_automation.yml"
+        lan_automation_config_generator_config:
+          site_name_hierarchy: Global/Region/Building
+          ip_address_list:
+            - "192.0.2.10"
+            - "192.0.2.11"
+        # Optional for standalone generation:
+        # lan_automation_config_generator_isis_domain_pwd: "{{ vault_lan_automation_isis_domain_pwd }}"

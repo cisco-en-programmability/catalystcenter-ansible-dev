@@ -103,7 +103,7 @@ def _interface_pairs(value, label):
     return pairs
 
 
-def edge_same_ip_plan(batches):
+def _legacy_plan(batches):
     """Validate every batch before any capture or network mutation."""
     plans, names, addresses, serials, seed_ports = [], [], [], [], []
     batch_keys = {"name", "fabric_site_name_hierarchy", "onboarding_method", "new_devices",
@@ -247,6 +247,423 @@ def edge_same_ip_plan(batches):
     if set(addresses).intersection(seed for seed, _port in seed_ports):
         _fail("a seed device cannot be an edge being refreshed")
     return plans
+
+
+def _discovery_settings(value):
+    """Validate runtime discovery options without storing credential values."""
+    value = deepcopy(
+        _mapping(
+            value,
+            "discovery settings",
+            {
+                "protocol_order",
+                "retry",
+                "use_global_credentials",
+                "global_credentials",
+                "discovery_specific_credentials",
+            },
+        )
+    )
+    if "protocol_order" in value and value["protocol_order"] not in (
+        "ssh",
+        "telnet",
+        "ssh, telnet",
+    ):
+        _fail("protocol_order must be ssh, telnet, or 'ssh, telnet'")
+    if "retry" in value and (
+        not isinstance(value["retry"], int)
+        or isinstance(value["retry"], bool)
+        or value["retry"] < 0
+    ):
+        _fail("discovery retry must be a non-negative integer")
+    if "use_global_credentials" in value and not isinstance(value["use_global_credentials"], bool):
+        _fail("use_global_credentials must be a boolean")
+    specific_keys = {
+        "cli_credentials_list",
+        "http_read_credential",
+        "http_write_credential",
+        "snmp_v2_read_credential",
+        "snmp_v2_write_credential",
+        "snmp_v3_credential",
+        "net_conf_port",
+    }
+    for kind in ("global_credentials", "discovery_specific_credentials"):
+        if kind not in value:
+            continue
+        credentials = _mapping(
+            value[kind],
+            kind,
+            (
+                specific_keys
+                if kind == "discovery_specific_credentials"
+                else {
+                    "cli_credentials_list",
+                    "http_read_credential_list",
+                    "http_write_credential_list",
+                    "snmp_v2_read_credential_list",
+                    "snmp_v2_write_credential_list",
+                    "snmp_v3_credential_list",
+                    "net_conf_port_list",
+                }
+            ),
+        )
+        for name, credential in credentials.items():
+            if name == "net_conf_port":
+                if (
+                    not isinstance(credential, (str, int))
+                    or isinstance(credential, bool)
+                    or not str(credential).isdigit()
+                    or not 1 <= int(credential) <= 65535
+                ):
+                    _fail("net_conf_port must be a valid port")
+                credentials[name] = str(credential)
+                continue
+            entries = _list(credential, name) if name.endswith("_list") else [credential]
+            for entry in entries:
+                _mapping(entry, name)
+                if kind == "global_credentials":
+                    allowed = {"description", "username"}
+                    required = {"description"}
+                    if not name.startswith(("snmp_v2_", "net_conf_")):
+                        required.add("username")
+                elif name == "cli_credentials_list":
+                    allowed, required = {
+                        "username",
+                        "password",
+                        "enable_password",
+                        "description",
+                    }, {"username", "password"}
+                elif name.startswith("http_"):
+                    allowed, required = {"username", "password", "port", "secure", "description"}, {
+                        "username",
+                        "password",
+                        "port",
+                    }
+                    if (
+                        not isinstance(entry.get("port"), int)
+                        or isinstance(entry["port"], bool)
+                        or not 1 <= entry["port"] <= 65535
+                    ):
+                        _fail("HTTP credential port must be a valid integer port")
+                    if "secure" in entry and not isinstance(entry["secure"], bool):
+                        _fail("HTTP credential secure must be a boolean")
+                elif name.startswith("snmp_v2_"):
+                    allowed, required = {"community", "description"}, {"community"}
+                else:
+                    allowed = {
+                        "username",
+                        "snmp_mode",
+                        "auth_type",
+                        "auth_password",
+                        "privacy_type",
+                        "privacy_password",
+                        "description",
+                    }
+                    required = {"username", "snmp_mode"}
+                    mode = entry.get("snmp_mode")
+                    if mode not in ("AUTHPRIV", "AUTHNOPRIV", "NOAUTHNOPRIV"):
+                        _fail("invalid SNMPv3 snmp_mode")
+                    if mode != "NOAUTHNOPRIV":
+                        required.update(("auth_type", "auth_password"))
+                        if entry.get("auth_type") not in ("SHA", "MD5"):
+                            _fail("invalid SNMPv3 auth_type")
+                        if (
+                            not isinstance(entry.get("auth_password"), str)
+                            or len(entry["auth_password"]) < 8
+                        ):
+                            _fail("SNMPv3 auth_password must contain at least eight characters")
+                    if mode == "AUTHPRIV":
+                        required.update(("privacy_type", "privacy_password"))
+                        if entry.get("privacy_type") not in ("AES128", "AES192", "AES256"):
+                            _fail("invalid SNMPv3 privacy_type")
+                        if (
+                            not isinstance(entry.get("privacy_password"), str)
+                            or len(entry["privacy_password"]) < 8
+                        ):
+                            _fail("SNMPv3 privacy_password must contain at least eight characters")
+                _mapping(entry, name, allowed)
+                for key in required | (set(entry) - {"port", "secure"}):
+                    if key != "port" and (not isinstance(entry.get(key), str) or not entry[key]):
+                        _fail(name + "." + key + " must be a non-empty string")
+    return value
+
+
+def edge_same_ip_discovery_config(plan):
+    """Build exact-IP discovery jobs; override whole credential types per device."""
+    jobs = []
+    for mapping in plan["mappings"]:
+        settings = deepcopy(plan.get("discovery", {}))
+        for key, value in mapping.get("discovery", {}).items():
+            if key in ("global_credentials", "discovery_specific_credentials"):
+                settings[key] = dict(settings.get(key, {}), **deepcopy(value))
+            else:
+                settings[key] = deepcopy(value)
+        settings.setdefault("protocol_order", "ssh")
+        settings.setdefault("retry", 2)
+        settings.setdefault(
+            "use_global_credentials", not bool(settings.get("discovery_specific_credentials"))
+        )
+        source = (
+            "global_credentials"
+            if settings["use_global_credentials"]
+            else "discovery_specific_credentials"
+        )
+        settings.pop(
+            (
+                "discovery_specific_credentials"
+                if settings["use_global_credentials"]
+                else "global_credentials"
+            ),
+            None,
+        )
+        if source == "discovery_specific_credentials" and not settings.get(source):
+            _fail("discovery requires device credentials when use_global_credentials is false")
+        ip = mapping["management_ip"]
+        jobs.append(
+            dict(
+                settings,
+                discovery_name="same-ip-" + plan["name"] + "-" + ip.replace(".", "-"),
+                discovery_type="SINGLE",
+                ip_address_list=[ip],
+            )
+        )
+    return jobs
+
+
+def edge_same_ip_plan(batches):
+    """Plan generated LAN automation or discovery from one IP/serial mapping."""
+    plans = []
+    for batch in _list(batches, "batches"):
+        _mapping(
+            batch,
+            "batch",
+            {
+                "name",
+                "fabric_site_name_hierarchy",
+                "onboarding_method",
+                "new_devices",
+                "device_mapping",
+                "allow_empty_host_port_config",
+            },
+        )
+        new = _mapping(batch.get("new_devices", {}), "new_devices")
+        if "lan_automation_config" in new or "device_ips" in new:
+            # Preserve the original fingerprint and schema for existing users
+            # and their already-published recovery snapshots.
+            plan = _legacy_plan([batch])[0]
+            plan.update(legacy_input=True, onboarding_method="lan_automation")
+            plans.append(plan)
+            continue
+        name = _string(batch.get("name"), "batch name")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name):
+            _fail("batch name must be a safe filename")
+        site = _hierarchy(batch.get("fabric_site_name_hierarchy"))
+        method = batch.get("onboarding_method", "lan_automation")
+        if method not in ("lan_automation", "discovery"):
+            _fail("onboarding_method must be lan_automation or discovery")
+        _mapping(
+            new, "new_devices", {"isis_domain_pwd"} if method == "lan_automation" else {"discovery"}
+        )
+        if "isis_domain_pwd" in new:
+            _string(new["isis_domain_pwd"], "isis_domain_pwd")
+        allow_empty = batch.get("allow_empty_host_port_config", False)
+        if not isinstance(allow_empty, bool):
+            _fail("allow_empty_host_port_config must be a boolean")
+        mappings = []
+        for item in _list(batch.get("device_mapping"), "device_mapping"):
+            _mapping(
+                item,
+                "device_mapping entry",
+                {"management_ip", "replacement_serial_number", "interface_migration", "discovery"},
+            )
+            migration = _mapping(
+                item.get("interface_migration", {}),
+                "interface_migration",
+                {"only_mapped", "port_assignments", "port_channels"},
+            )
+            only_mapped = migration.get("only_mapped", False)
+            if not isinstance(only_mapped, bool):
+                _fail("interface_migration.only_mapped must be a boolean")
+            assignments = _interface_pairs(
+                migration.get("port_assignments", []), "port_assignments"
+            )
+            channels = _interface_pairs(migration.get("port_channels", []), "port_channels")
+            _unique(
+                [p["destination"].casefold() for p in assignments + channels],
+                "assignment/channel destination interfaces",
+            )
+            if only_mapped and not assignments and not channels:
+                _fail("only_mapped requires at least one interface mapping")
+            mapping = {
+                "management_ip": _ip(item.get("management_ip")),
+                "replacement_serial_number": _serial(item.get("replacement_serial_number")),
+                "interface_migration": {
+                    "only_mapped": only_mapped,
+                    "port_assignments": assignments,
+                    "port_channels": channels,
+                },
+            }
+            if "discovery" in item:
+                if method != "discovery":
+                    _fail("per-device discovery settings require discovery onboarding")
+                mapping["discovery"] = _discovery_settings(item["discovery"])
+            mappings.append(mapping)
+        ips = [m["management_ip"] for m in mappings]
+        _unique(ips, "batch management IPs")
+        if len(ips) > 500:
+            _fail("a batch supports at most 500 management IPs")
+        serial_by_ip = {m["management_ip"]: m["replacement_serial_number"] for m in mappings}
+        cleanup = {
+            "component_specific_filters": {"components_list": ["port_assignments", "port_channels"]}
+        }
+        restore = {"component_specific_filters": {}}
+        for component in ("port_assignments", "port_channels"):
+            cleanup["component_specific_filters"][component] = [
+                {"fabric_site_name_hierarchy": site, "device_ips": ips}
+            ]
+            restore["component_specific_filters"][component] = [
+                {
+                    "fabric_site_name_hierarchy": site,
+                    "source_device_ip": m["management_ip"],
+                    "destination_device_ip": m["management_ip"],
+                    "only_mapped_interfaces": m["interface_migration"]["only_mapped"],
+                    "interface_mappings": [
+                        {
+                            "source_interface_name": p["source"],
+                            "destination_interface_name": p["destination"],
+                        }
+                        for p in m["interface_migration"][component]
+                    ],
+                }
+                for m in mappings
+            ]
+        # Runtime credentials may rotate between phases; the physical identity,
+        # target scope, method, and migration intent remain immutable.
+        fingerprint = _hash(
+            {
+                "name": name,
+                "site": site,
+                "method": method,
+                "allow_empty": allow_empty,
+                "mappings": [{k: v for k, v in m.items() if k != "discovery"} for m in mappings],
+            }
+        )
+        plan = {
+            "name": name,
+            "site": site,
+            "ips": ips,
+            "serial_by_ip": serial_by_ip,
+            "mappings": mappings,
+            "onboarding_method": method,
+            "legacy_input": False,
+            "fingerprint": fingerprint,
+            "allow_empty_host_port_config": allow_empty,
+            "generator_configs": {
+                "inventory": {
+                    "global_filters": {"devices": ips, "device_identifier": "ip_address"}
+                },
+                "provision": {
+                    "component_specific_filters": {
+                        "components_list": ["wired"],
+                        "wired": [{"management_ip_address": ips}],
+                    }
+                },
+                "fabric": {
+                    "component_specific_filters": {
+                        "components_list": ["fabric_devices"],
+                        "fabric_devices": [{"fabric_name": site, "device_ip": ip} for ip in ips],
+                    }
+                },
+                "cleanup": cleanup,
+                "restore": restore,
+            },
+        }
+        if method == "discovery":
+            plan["discovery"] = _discovery_settings(new.get("discovery", {}))
+            edge_same_ip_discovery_config(plan)
+        elif "isis_domain_pwd" in new:
+            plan["isis_domain_pwd"] = new["isis_domain_pwd"]
+        plans.append(plan)
+    _unique([p["name"].casefold() for p in plans], "case-insensitive batch names")
+    _unique([ip for p in plans for ip in p["ips"]], "management IPs across batches")
+    _unique(
+        [s for p in plans for serial in p["serial_by_ip"].values() for s in serial.split(",")],
+        "replacement serials across batches",
+    )
+    return plans
+
+
+def edge_same_ip_capture_lan(config, plan):
+    """Substitute serials by IP and validate all generated session settings."""
+    result = deepcopy(_list(config, "generated LAN automation config"))
+    covered = []
+    for operation in result:
+        _mapping(operation, "generated LAN operation", {"lan_automation"})
+        lan = _mapping(operation.get("lan_automation"), "generated LAN session")
+        if "isis_domain_pwd" in lan:
+            _fail("generated LAN capture must not contain IS-IS secrets")
+        devices = _list(lan.get("discovery_devices"), "generated discovery_devices")
+        for device in devices:
+            _mapping(device, "generated discovery device")
+            ip = _ip(device.get("device_management_ip_address"))
+            if ip not in plan["serial_by_ip"]:
+                _fail("generated LAN config contains an unexpected management IP")
+            device["device_serial_number"] = plan["serial_by_ip"][ip]
+            covered.append(ip)
+        subset = [m for m in plan["mappings"] if m["management_ip"] in covered[-len(devices) :]]
+        _legacy_plan(
+            [
+                {
+                    "name": plan["name"],
+                    "fabric_site_name_hierarchy": lan.get("discovered_device_site_name_hierarchy"),
+                    "new_devices": {
+                        "device_ips": [d["device_management_ip_address"] for d in devices],
+                        "lan_automation_config": [operation],
+                    },
+                    "device_mapping": [
+                        {
+                            "management_ip": m["management_ip"],
+                            "interface_migration": m["interface_migration"],
+                        }
+                        for m in subset
+                    ],
+                }
+            ]
+        )
+    if sorted(covered) != sorted(plan["ips"]):
+        _fail("generated LAN config must cover exactly every replacement management IP once")
+    return result
+
+
+def edge_same_ip_onboarding_preflight(plans, manifests):
+    """Validate all generated seed claims before any batch is removed."""
+    addresses = {ip for p in plans for ip in p["ips"]}
+    claims = {}
+    old_serials = []
+    new_serials = {
+        s for p in plans for serial in p["serial_by_ip"].values() for s in serial.split(",")
+    }
+    for plan in plans:
+        manifest = manifests[plan["name"]]
+        old_serials.extend(
+            s for d in manifest["old_devices"] for s in d["serial_number"].split(",")
+        )
+        if plan["onboarding_method"] != "lan_automation":
+            continue
+        for operation in edge_same_ip_lan_config(plan, manifest):
+            lan = operation["lan_automation"]
+            seed = lan["primary_device_management_ip_address"]
+            if addresses.intersection({seed, lan.get("peer_device_management_ip_address")}):
+                _fail("a seed device cannot be an edge being refreshed")
+            for port in lan["primary_device_interface_names"]:
+                key = (seed, port.casefold())
+                if key in claims and claims[key] != plan["name"]:
+                    _fail("seed ports across batches must be unique")
+                claims[key] = plan["name"]
+    _unique(old_serials, "original device serials across batches")
+    if set(old_serials) & new_serials:
+        _fail("replacement serials must differ from every old device across batches")
+    return True
 
 
 def edge_same_ip_devices(raw_module_result):
@@ -457,11 +874,13 @@ def _capture_checksum(manifest):
     """Checksum immutable capture fields separately from resumable progress."""
     # Keep the original checksum algorithm for snapshots created before the
     # fabric-ID fix. Their saved hierarchy can still resolve the ID on resume.
-    fields = CAPTURE_FIELDS + ("fabric_id",) if manifest.get("schema_version") == 2 else CAPTURE_FIELDS
+    fields = CAPTURE_FIELDS + ("fabric_id",) if manifest.get("schema_version") in (2, 3) else CAPTURE_FIELDS
+    if manifest.get("schema_version") == 3:
+        fields += ("onboarding",)
     return _hash({field: manifest.get(field) for field in fields})
 
 
-def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None):
+def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None, lan_config=None):
     """Freeze original identities and both original and mapped workflow payloads."""
     fabric_id = _string(fabric_id, "fabric ID")
     identities = _identities(records, plan["ips"])
@@ -473,6 +892,13 @@ def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None):
                 "old_devices": identities, "payloads": payloads,
                 "hashes": {name: _hash(payloads[name]) for name in PAYLOAD_NAMES},
                 "stage": "captured", "stage_index": 0, "replacement_devices": []}
+    if not plan.get("legacy_input", True):
+        method = plan["onboarding_method"]
+        manifest["schema_version"] = 3
+        manifest["onboarding"] = {
+            "method": method,
+            "config": edge_same_ip_capture_lan(lan_config, plan) if method == "lan_automation" else [],
+        }
     # Reject conflicting explicit LAN site placement while the original devices
     # still exist, rather than discovering the conflict after teardown.
     edge_same_ip_lan_config(plan, manifest)
@@ -484,9 +910,9 @@ def edge_same_ip_manifest(manifest, plan, controller):
     """Validate a persisted manifest against the current controller and input."""
     _mapping(manifest, "snapshot manifest")
     schema = manifest.get("schema_version")
-    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2):
+    if not isinstance(schema, int) or isinstance(schema, bool) or schema not in (1, 2, 3):
         _fail("saved manifest schema version is unsupported")
-    if schema == 2:
+    if schema in (2, 3):
         _string(manifest.get("fabric_id"), "saved fabric ID")
     elif "fabric_id" in manifest:
         _fail("legacy snapshots cannot contain an unprotected fabric ID")
@@ -497,9 +923,9 @@ def edge_same_ip_manifest(manifest, plan, controller):
                           ("serial_by_ip", plan["serial_by_ip"])):
         if manifest.get(key) != expected:
             _fail("saved manifest " + key + " does not match this run")
-    if (manifest.get("stage") not in STAGES or not isinstance(manifest.get("stage_index"), int)
+    if (manifest.get("stage") not in STAGES + ("onboarded",) or not isinstance(manifest.get("stage_index"), int)
             or isinstance(manifest.get("stage_index"), bool)
-            or manifest.get("stage_index") != STAGES.index(manifest["stage"])):
+            or manifest.get("stage_index") != _stage_index(manifest["stage"])):
         _fail("saved manifest stage is invalid")
     originals = _identities(manifest.get("old_devices"), plan["ips"])
     _validate_original_identities(originals, plan)
@@ -516,21 +942,25 @@ def edge_same_ip_manifest(manifest, plan, controller):
     return deepcopy(manifest)
 
 
+def _stage_index(stage):
+    return STAGES.index("lan_automated" if stage == "onboarded" else stage)
+
+
 def edge_same_ip_checkpoint(manifest, stage, replacements=None):
     """Advance a durable checkpoint without allowing backward transitions."""
-    if stage not in STAGES:
+    if stage not in STAGES + ("onboarded",):
         _fail("unknown checkpoint stage")
-    if manifest.get("stage") not in STAGES or STAGES.index(stage) < STAGES.index(manifest["stage"]):
+    if manifest.get("stage") not in STAGES + ("onboarded",) or _stage_index(stage) < _stage_index(manifest["stage"]):
         _fail("a saved checkpoint cannot move backwards")
     result = deepcopy(manifest)
     if replacements is not None and replacements:
         identities = _identities(replacements, manifest["ips"])
         edge_same_ip_identity_guard(identities, manifest, "new")
         result["replacement_devices"] = identities
-    if STAGES.index(stage) >= STAGES.index("inventory_ready") and len(result.get("replacement_devices", [])) != len(manifest["ips"]):
+    if _stage_index(stage) >= STAGES.index("inventory_ready") and len(result.get("replacement_devices", [])) != len(manifest["ips"]):
         _fail("replacement identities must be saved before marking inventory ready")
     result["stage"] = stage
-    result["stage_index"] = STAGES.index(stage)
+    result["stage_index"] = _stage_index(stage)
     return result
 
 
@@ -562,11 +992,12 @@ def edge_same_ip_ready(raw_result, plan, manifest, required_role=""):
     seen, ready = [], True
     originals = {item["management_ip"]: item for item in manifest["old_devices"]}
     saved = {item["management_ip"]: item for item in manifest.get("replacement_devices", [])}
-    desired_hostnames = {
+    desired_hostnames = {ip: identity["hostname"].split(".")[0].casefold() for ip, identity in originals.items()}
+    desired_hostnames.update({
         device["device_management_ip_address"]: device["device_host_name"].split(".")[0].casefold()
         for operation in edge_same_ip_lan_config(plan, manifest)
         for device in operation["lan_automation"]["discovery_devices"]
-    }
+    })
     for record in records:
         ip = record.get("managementIpAddress")
         if ip not in plan["ips"] or ip in seen:
@@ -598,7 +1029,19 @@ def edge_same_ip_ready(raw_result, plan, manifest, required_role=""):
 
 def edge_same_ip_lan_config(plan, manifest):
     """Fill captured hostnames without persisting LAN secrets in the manifest."""
-    config = deepcopy(plan["lan_config"])
+    if manifest.get("schema_version") == 3:
+        onboarding = _mapping(manifest.get("onboarding"), "saved onboarding", {"method", "config"})
+        if set(onboarding) != {"method", "config"} or onboarding["method"] != plan["onboarding_method"]:
+            _fail("saved onboarding method does not match this run")
+        if onboarding["method"] == "discovery":
+            if onboarding["config"] != []:
+                _fail("discovery snapshots must not contain stored onboarding credentials or LAN config")
+            return []
+        config = edge_same_ip_capture_lan(onboarding["config"], plan)
+        if config != onboarding["config"]:
+            _fail("saved onboarding serials do not match the replacement mapping")
+    else:
+        config = deepcopy(plan["lan_config"])
     originals = {item["management_ip"]: item for item in manifest["old_devices"]}
     sites = {entry["management_ip_address"]: entry["site_name_hierarchy"]
              for entry in manifest["payloads"]["provision"]}
@@ -609,6 +1052,8 @@ def edge_same_ip_lan_config(plan, manifest):
             if "device_site_name_hierarchy" in device and device["device_site_name_hierarchy"] != sites[ip]:
                 _fail("discovery device site conflicts with its captured provisioning site")
             device["device_site_name_hierarchy"] = sites[ip]
+        if "isis_domain_pwd" in plan:
+            operation["lan_automation"]["isis_domain_pwd"] = plan["isis_domain_pwd"]
     return config
 
 
@@ -740,4 +1185,5 @@ class FilterModule:
             "edge_same_ip_ready", "edge_same_ip_lan_config", "edge_same_ip_subset", "edge_same_ip_ports_match",
             "edge_same_ip_fabric",
             "edge_same_ip_site_id", "edge_same_ip_fabric_id", "edge_same_ip_old_fabric",
+            "edge_same_ip_capture_lan", "edge_same_ip_discovery_config", "edge_same_ip_onboarding_preflight",
         )}
