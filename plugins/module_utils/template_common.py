@@ -3440,7 +3440,8 @@ class TemplateCommon(NetworkProfileFunctions):
                     "DEBUG",
                 )
                 match = re.search(
-                    r"Template\s+Deployment\s+Id:\s+([a-f0-9\-]+)",
+                    # Catalyst Center emits the misspelling "Deployemnt"; accept both.
+                    r"Template\s+Deploy(?:ment|emnt)\s+Id:\s+([a-f0-9\-]+)",
                     progress,
                     re.IGNORECASE,
                 )
