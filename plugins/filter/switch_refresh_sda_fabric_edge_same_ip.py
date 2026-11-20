@@ -816,35 +816,46 @@ def _identities(records, ips, complete=True):
     return identities
 
 
-def _host_payload(config, plan, label):
-    entries = _list(config, label, nonempty=not plan.get("allow_empty_host_port_config", False))
-    seen = []
-    normalized = []
-    for entry in entries:
+def _normalize_host_ports(config, label):
+    """Combine component-specific exports without hiding duplicate interfaces."""
+    grouped = {}
+    for entry in _list(config, label, nonempty=False):
         _mapping(entry, label + " entry", {"ip_address", "fabric_site_name_hierarchy", "port_assignments", "port_channels"})
         ip = _ip(entry.get("ip_address"))
-        if ip not in plan["ips"] or entry.get("fabric_site_name_hierarchy") != plan["site"]:
-            _fail(label + " includes an unexpected device or fabric hierarchy")
-        seen.append(ip)
+        site = _hierarchy(entry.get("fabric_site_name_hierarchy"), label + " fabric hierarchy")
+        combined = grouped.setdefault((ip, site), {"ip_address": ip, "fabric_site_name_hierarchy": site})
+        for component in ("port_assignments", "port_channels"):
+            if component in entry:
+                combined.setdefault(component, []).extend(
+                    deepcopy(_list(entry[component], label + " " + component, nonempty=False)))
+    for entry in grouped.values():
         assignment_names, channel_names = [], []
-        for assignment in _list(entry.get("port_assignments", []), label + " port assignments", nonempty=False):
+        for assignment in entry.get("port_assignments", []):
             _mapping(assignment, label + " port assignment")
             assignment_names.append(_string(assignment.get("interface_name"), "assignment interface").casefold())
-        for channel in _list(entry.get("port_channels", []), label + " port channels", nonempty=False):
+        for channel in entry.get("port_channels", []):
             _mapping(channel, label + " port channel")
             channel_names.extend(_string(interface, "channel member interface").casefold() for interface in
                                  _list(channel.get("interface_names"), "channel member interfaces"))
-        _unique(assignment_names, label + " assignment interfaces")
-        _unique(channel_names, label + " channel member interfaces")
         # An original Catalyst Center export may represent the same member in
         # both components; the migration generator decides destination validity.
-        if not assignment_names and not channel_names and not plan.get("allow_empty_host_port_config", False):
+        _unique(assignment_names, label + " assignment interfaces")
+        _unique(channel_names, label + " channel member interfaces")
+    return list(grouped.values())
+
+
+def _host_payload(config, plan, label):
+    entries = _normalize_host_ports(
+        _list(config, label, nonempty=not plan.get("allow_empty_host_port_config", False)), label)
+    for entry in entries:
+        if entry["ip_address"] not in plan["ips"] or entry["fabric_site_name_hierarchy"] != plan["site"]:
+            _fail(label + " includes an unexpected device or fabric hierarchy")
+        if not entry.get("port_assignments") and not entry.get("port_channels") and not plan.get("allow_empty_host_port_config", False):
             _fail(label + " contains no host ports for a requested device")
-        normalized.append(deepcopy(entry))
-    _unique(seen, label + " management IPs")
+    seen = {entry["ip_address"] for entry in entries}
     if not plan.get("allow_empty_host_port_config", False) and set(seen) != set(plan["ips"]):
         _fail(label + " must cover every requested device")
-    return normalized
+    return entries
 
 
 def _validate_payloads(plan, payloads):
@@ -1170,11 +1181,8 @@ def edge_same_ip_subset(config, ips, kind="host"):
 
 def _ports_by_device(config):
     output = {}
-    for entry in _list(config, "host-port payload", nonempty=False):
-        _mapping(entry, "host-port entry")
-        key = (entry.get("ip_address"), entry.get("fabric_site_name_hierarchy"))
-        if key in output:
-            _fail("host-port payload has duplicate device entries")
+    for entry in _normalize_host_ports(config, "host-port payload"):
+        key = (entry["ip_address"], entry["fabric_site_name_hierarchy"])
         assignments, channels = {}, {}
         for assignment in entry.get("port_assignments", []):
             name = assignment.get("interface_name", "").casefold()

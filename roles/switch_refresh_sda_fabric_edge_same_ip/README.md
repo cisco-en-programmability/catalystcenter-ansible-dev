@@ -88,6 +88,12 @@ Duplicate or conflicting destinations and nonexistent source interfaces are
 rejected. Original cleanup configuration is always captured separately and
 removes the complete original port configuration.
 
+Generator exports may contain separate assignment and port-channel entries for
+the same device. The role groups them by management IP and fabric hierarchy
+before capture validation and live port verification. Snapshot payloads contain
+one combined entry per device; duplicate interfaces and conflicting
+configuration remain errors.
+
 `allow_empty_host_port_config: true` permits verified empty host-port captures.
 It never permits missing inventory, provisioning, fabric, or LAN automation data.
 
