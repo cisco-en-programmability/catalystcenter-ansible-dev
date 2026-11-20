@@ -78,6 +78,16 @@ def payloads():
     }
 
 
+def component_entries(config):
+    """Match the onboarding generator's separate list for each component."""
+    return [
+        {"ip_address": entry["ip_address"], "fabric_site_name_hierarchy": entry["fabric_site_name_hierarchy"],
+         component: deepcopy(entry[component])}
+        for component in ("port_assignments", "port_channels")
+        for entry in config if component in entry
+    ]
+
+
 def raw(items):
     return {"catalystcenter_response": {"response": items}}
 
@@ -497,6 +507,115 @@ class TestSameIpPlanner(TestCase):
         value["device_mapping"][0]["interface_migration"] = {"only_mapped": True}
         with self.assertRaisesRegex(AnsibleFilterError, "at least one"):
             filters.edge_same_ip_plan([value])
+
+
+class TestSameIpHostPortComponents(TestCase):
+    def setUp(self):
+        self.plan = filters.edge_same_ip_plan([generated_batch("discovery")])[0]
+
+    def snapshot(self, configs):
+        return filters.edge_same_ip_snapshot(self.plan, records(), configs, "controller", "fabric-1")
+
+    def test_snapshot_consolidates_original_and_mapped_component_entries(self):
+        expected = self.snapshot(payloads())
+        for components in (("cleanup",), ("restore",), ("cleanup", "restore")):
+            configs = payloads()
+            for component in components:
+                configs[component] = component_entries(configs[component])
+            original = deepcopy(configs)
+            with self.subTest(components=components):
+                actual = self.snapshot(configs)
+                # Canonical payloads, hashes, and checksum match existing captures.
+                self.assertEqual(actual, expected)
+                self.assertEqual(configs, original)
+                filters.edge_same_ip_manifest(actual, self.plan, "controller")
+
+    def test_verification_accepts_split_combined_and_reordered_components(self):
+        combined = payloads()["restore"]
+        split = component_entries(combined)
+        split.reverse()
+        split[0]["port_channels"][0]["interface_names"].reverse()
+        for expected, actual in ((combined, split), (split, combined), (split, split)):
+            with self.subTest(expected_split=expected is split, actual_split=actual is split):
+                self.assertTrue(filters.edge_same_ip_ports_match(expected, actual))
+        assignment = next(entry for entry in split if "port_assignments" in entry)
+        assignment["port_assignments"][0]["data_vlan_name"] = "wrong-vlan"
+        self.assertFalse(filters.edge_same_ip_ports_match(combined, split))
+
+    def test_duplicate_or_conflicting_interfaces_across_entries_are_rejected(self):
+        for component in ("port_assignments", "port_channels"):
+            for conflicting in (False, True):
+                for payload in ("cleanup", "restore"):
+                    configs = payloads()
+                    configs[payload] = component_entries(configs[payload])
+                    duplicate = deepcopy(next(entry for entry in configs[payload] if component in entry))
+                    item = duplicate[component][0]
+                    if component == "port_assignments":
+                        item["interface_name"] = item["interface_name"].lower()
+                        if conflicting:
+                            item["data_vlan_name"] = "conflicting-vlan"
+                    elif conflicting:
+                        item["interface_names"] = [item["interface_names"][0].lower(), "GigabitEthernet1/0/49"]
+                    configs[payload].append(duplicate)
+                    with self.subTest(component=component, conflicting=conflicting, payload=payload):
+                        with self.assertRaisesRegex(AnsibleFilterError, "interfaces must be unique"):
+                            self.snapshot(configs)
+                        with self.assertRaisesRegex(AnsibleFilterError, "interfaces must be unique"):
+                            filters.edge_same_ip_ports_match(configs[payload], configs[payload])
+
+    def test_separate_disjoint_assignments_and_channels_are_all_preserved(self):
+        configs = payloads()
+        for component in ("cleanup", "restore"):
+            configs[component] = component_entries(configs[component])
+            extra_entries = []
+            for entry in configs[component]:
+                extra = deepcopy(entry)
+                if "port_assignments" in extra:
+                    extra["port_assignments"][0]["interface_name"] = "GigabitEthernet1/0/6"
+                else:
+                    extra["port_channels"][0]["interface_names"] = ["GigabitEthernet1/0/45", "GigabitEthernet1/0/46"]
+                extra_entries.append(extra)
+            configs[component].extend(extra_entries)
+        captured = self.snapshot(configs)
+        for component in ("cleanup", "restore"):
+            self.assertEqual(len(captured["payloads"][component]), len(IPS))
+            for entry in captured["payloads"][component]:
+                self.assertEqual(len(entry["port_assignments"]), 2)
+                self.assertEqual(len(entry["port_channels"]), 2)
+
+    def test_source_interfaces_shared_between_components_remain_supported(self):
+        configs = payloads()
+        for component in ("cleanup", "restore"):
+            configs[component][0]["port_channels"][0]["interface_names"].append("GigabitEthernet1/0/5")
+            configs[component] = component_entries(configs[component])
+        manifest = self.snapshot(configs)
+        self.assertIn("GigabitEthernet1/0/5", manifest["payloads"]["cleanup"][0]["port_channels"][0]["interface_names"])
+
+    def test_grouping_does_not_hide_wrong_devices_sites_or_missing_devices(self):
+        for invalid in ("ip", "site", "missing"):
+            configs = payloads()
+            configs["cleanup"] = component_entries(configs["cleanup"])
+            if invalid == "ip":
+                configs["cleanup"][-1]["ip_address"] = "192.0.2.99"
+            elif invalid == "site":
+                configs["cleanup"][-1]["fabric_site_name_hierarchy"] = SITE + "/Other"
+            else:
+                configs["cleanup"] = [entry for entry in configs["cleanup"] if entry["ip_address"] != IPS[1]]
+            with self.subTest(invalid=invalid), self.assertRaises(AnsibleFilterError):
+                self.snapshot(configs)
+        split = component_entries(payloads()["restore"])
+        split[-1]["fabric_site_name_hierarchy"] = SITE + "/Other"
+        self.assertFalse(filters.edge_same_ip_ports_match(payloads()["restore"], split))
+
+    def test_malformed_component_rows_are_rejected(self):
+        for invalid in (None, {}, "port", [None]):
+            configs = payloads()
+            configs["cleanup"] = component_entries(configs["cleanup"])
+            configs["cleanup"][0]["port_assignments"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(AnsibleFilterError):
+                self.snapshot(configs)
+            with self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_ports_match([], configs["cleanup"])
 
 
 class TestSameIpSnapshot(TestCase):

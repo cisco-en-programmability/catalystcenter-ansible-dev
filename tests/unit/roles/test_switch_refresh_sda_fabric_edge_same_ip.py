@@ -200,7 +200,17 @@ def execute(module, args):
             elif module == "sda_host_port_migration_playbook_config_generator":
                 payload = _mapped(args["config"], state["ports"])
             else:
-                payload = [deepcopy(state["ports"][ip]) for ip in ips if state["ports"].get(ip)]
+                # The real onboarding generator concatenates component exports;
+                # it does not combine assignments and channels for the same IP.
+                payload = [
+                    {"ip_address": ip, "fabric_site_name_hierarchy": state["ports"][ip]["fabric_site_name_hierarchy"],
+                     component: deepcopy(state["ports"][ip][component])}
+                    for component in ("port_assignments", "port_channels")
+                    for ip in ips if state["ports"].get(ip, {}).get(component)
+                ]
+                duplicate = state.get("duplicate_host_component")
+                if duplicate:
+                    payload.append(deepcopy(next(entry for entry in payload if duplicate in entry)))
             Path(args["file_path"]).write_text(yaml.safe_dump({"config": payload}, sort_keys=False))
             result.update(changed=True, status="success")
         else:
@@ -486,6 +496,11 @@ def test_capture_passes_complete_batch_and_preserves_original_and_mapped_ports(c
     assert len(manifest["old_devices"]) == 2
     assert manifest["schema_version"] == 2
     assert manifest["fabric_id"] == "fabric-1"
+    exported = yaml.safe_load((captured.snapshots / "two-edges" / "cleanup.yml").read_text())["config"]
+    assert len(exported) == 2 * len(IPS)
+    assert all(sum(entry["ip_address"] == ip for entry in exported) == 2 for ip in IPS)
+    assert len(manifest["payloads"]["cleanup"]) == len(IPS)
+    assert all(entry.get("port_assignments") and entry.get("port_channels") for entry in manifest["payloads"]["cleanup"])
     assert manifest["payloads"]["cleanup"][0]["port_assignments"][0]["interface_name"] == "GigabitEthernet1/0/5"
     assert manifest["payloads"]["restore"][0]["port_assignments"][0]["interface_name"] == "GigabitEthernet1/0/10"
     assert manifest["payloads"]["restore"][0]["port_channels"][0]["interface_names"] == [
@@ -508,6 +523,19 @@ def test_capture_passes_complete_batch_and_preserves_original_and_mapped_ports(c
     first_mutation = calls.index(mutations[0])
     assert any(call["module"] == "sda_fabric_devices_info" for call in calls[:first_mutation])
     assert captured.manifest_path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("component", ["port_assignments", "port_channels"])
+def test_duplicate_component_interfaces_fail_capture_before_teardown(tmp_path, component):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery")
+    state = case.state()
+    state["duplicate_host_component"] = component
+    case.save_state(state)
+    case.run("capture_and_remove", success=False)
+    assert set(case.state()["devices"]) == set(IPS)
+    assert _mutations(case.state()["calls"]) == []
+    assert not case.manifest_path.exists()
 
 
 def test_restore_bulk_stages_from_snapshot_and_refuse_teardown_afterwards(captured, tmp_path):
