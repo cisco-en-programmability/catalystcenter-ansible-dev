@@ -2654,6 +2654,16 @@
         "deploymentId": "aabbccdd-0013-eeee-ffff-aabbccddeeff"
     },
 
+    "get_task_details_case_16": {
+        "response": {"progress": "Deployment of  Template: tmpl-parent-001.ApplicableTargets: [dev-001]Template Deployemnt Id: aabbccdd-0016-eeee-ffff-aabbccddeeff", "data": "tmpl-parent-001"}
+    },
+
+    "get_deployment_status_failure_case_16": {
+        "status": "FAILURE",
+        "deploymentId": "aabbccdd-0016-eeee-ffff-aabbccddeeff",
+        "devices": [{"detailedStatusMessage": "Invalid input detected at interface GigabitEthernet9/0/99"}]
+    },
+
     "deploy_composite_no_member_info_case_14": [
         {
             "deploy_template": {
