@@ -1,0 +1,24 @@
+---
+- name: Verify the exact batch fabric membership postcondition
+  cisco.catalystcenter.fabric_devices_info_workflow_manager:
+    state: gathered
+    config:
+      - fabric_devices:
+          - fabric_site_hierarchy: "{{ edge_same_ip_plan.site }}"
+            device_identifier:
+              - ip_address: "{{ edge_same_ip_fabric_ips | default(edge_same_ip_plan.ips) }}"
+            requested_info:
+              - fabric_info
+            timeout: "{{ switch_refresh_sda_fabric_edge_same_ip_timeout | int }}"
+            retries: "{{ edge_same_ip_poll_retries | int }}"
+            interval: "{{ edge_same_ip_poll_delay | int }}"
+  register: edge_same_ip_fabric_lookup
+  until: >-
+    edge_same_ip_fabric_lookup |
+    cisco.catalystcenter.edge_same_ip_fabric(
+      edge_same_ip_plan,
+      edge_same_ip_fabric_ips | default(edge_same_ip_plan.ips),
+      edge_same_ip_fabric_expected | default('present'))
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  no_log: true

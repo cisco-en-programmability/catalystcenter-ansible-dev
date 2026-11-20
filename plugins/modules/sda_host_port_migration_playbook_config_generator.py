@@ -25,6 +25,9 @@ description:
   C(sda_host_port_onboarding_workflow_manager) by reading port assignments and
   port channels from a source device and targeting a destination device.
 - Supports 1:1 interface migration by default.
+- Supports identical source and destination IPs for device replacement. Generate
+  the payload while the source device is available and apply it after the
+  replacement device is ready at that IP.
 - Supports partial interface remap with C(interface_mappings). Source interfaces
   listed in mappings are remapped only when they exist in the source device's
   extracted port assignments or port channel member interfaces. Unmapped
@@ -618,7 +621,7 @@ class SdaHostPortMigrationPlaybookConfigGenerator(CatalystCenterBase, BrownField
             - Requires migration_entries to be a non-empty list.
             - Requires fabric_site_name_hierarchy, source_device_ip, and
               destination_device_ip to be non-empty strings.
-            - Rejects entries where source and destination IPs are identical.
+            - Allows identical source and destination IPs for device replacement.
             - Validates interface_mappings as a list of dictionaries with
               source_interface_name and destination_interface_name.
             - Validates only_mapped_interfaces as a boolean and defaults it to
@@ -670,14 +673,6 @@ class SdaHostPortMigrationPlaybookConfigGenerator(CatalystCenterBase, BrownField
                             component_name, index, key
                         )
                     )
-
-            if source_device_ip and destination_device_ip and source_device_ip == destination_device_ip:
-                validation_errors.append(
-                    "component '{0}' entry {1}: source_device_ip and "
-                    "destination_device_ip must be different".format(
-                        component_name, index
-                    )
-                )
 
             if not isinstance(interface_mappings, list):
                 validation_errors.append(

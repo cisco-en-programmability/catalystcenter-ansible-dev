@@ -1,0 +1,20 @@
+---
+- name: Wait for every expected replacement identity and inventory record
+  cisco.catalystcenter.network_device_info:
+    managementIpAddress: "{{ edge_same_ip_plan.ips }}"
+    limit: 500
+  register: edge_same_ip_ready_lookup
+  until: >-
+    edge_same_ip_ready_lookup |
+    cisco.catalystcenter.edge_same_ip_ready(
+      edge_same_ip_plan, edge_same_ip_manifest,
+      edge_same_ip_required_role | default(''))
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  no_log: true
+
+- name: Save the verified replacement inventory records
+  ansible.builtin.set_fact:
+    edge_same_ip_live_records: >-
+      {{ edge_same_ip_ready_lookup | cisco.catalystcenter.edge_same_ip_devices }}
+  no_log: true
