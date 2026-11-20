@@ -1,0 +1,75 @@
+---
+- name: Deploy a non-fabric switch refresh
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - "vars/credentials.yml"
+  vars:
+    # The deploy config written by the generator, after you have filled in the blanks.
+    # Point this at your generated file; the generator's default name is
+    # '<source_device_ip>_refresh_playbook_config.yml'.
+    refresh_config_file: "switch_refresh_non_fabric_playbook_config.yml"
+    generated_refresh: "{{ lookup('file', refresh_config_file) | from_yaml }}"
+  tasks:
+    - name: Apply the switch refresh onto the replacement switch
+      cisco.catalystcenter.switch_refresh_non_fabric_workflow_manager:
+        catalystcenter_host: "{{ catalystcenter_host }}"
+        catalystcenter_username: "{{ catalystcenter_username }}"
+        catalystcenter_password: "{{ catalystcenter_password }}"
+        catalystcenter_verify: "{{ catalystcenter_verify }}"
+        catalystcenter_port: "{{ catalystcenter_port }}"
+        catalystcenter_version: "{{ catalystcenter_version }}"
+        catalystcenter_debug: "{{ catalystcenter_debug }}"
+        catalystcenter_log: true
+        catalystcenter_log_level: DEBUG
+        catalystcenter_log_append: true
+        catalystcenter_log_file_path: "{{ catalystcenter_log_file_path }}"
+        config_verify: true
+        state: merged
+        # The 'config:' block produced by the generator, loaded from the file above.
+        config: "{{ generated_refresh.config }}"
+      register: refresh_result
+
+    - name: Show the switch refresh result
+      ansible.builtin.debug:
+        var: refresh_result
+
+# ---------------------------------------------------------------------------
+# Alternative: pass the config inline instead of loading the generated file.
+# This shows the structure the generator produces - one recreated template plus
+# a deploy entry targeting the replacement switch by serial number. Copy the
+# task below into 'tasks:' above (and remove the file-based task) to use it.
+# ---------------------------------------------------------------------------
+#    - name: Apply an inline switch refresh config
+#      cisco.catalystcenter.switch_refresh_non_fabric_workflow_manager:
+#        catalystcenter_host: "{{ catalystcenter_host }}"
+#        catalystcenter_username: "{{ catalystcenter_username }}"
+#        catalystcenter_password: "{{ catalystcenter_password }}"
+#        catalystcenter_verify: "{{ catalystcenter_verify }}"
+#        catalystcenter_port: "{{ catalystcenter_port }}"
+#        catalystcenter_version: "{{ catalystcenter_version }}"
+#        catalystcenter_log: true
+#        catalystcenter_log_level: DEBUG
+#        catalystcenter_log_append: true
+#        state: merged
+#        config:
+#          # Serial number of the replacement (destination) switch, applied to every
+#          # template deployed below.
+#          destination_device_serial_number: FJC2334ABCD
+#          templates:
+#            - configuration_templates:
+#                project_name: switch_refresh_non_fabric_project
+#                template_name: Access_Switch_refresh
+#                language: VELOCITY
+#                device_types:
+#                  - product_family: Switches and Hubs
+#                template_content: |
+#                  interface Loopback970
+#                   description refreshed by switch refresh
+#              deploy_template:
+#                project_name: switch_refresh_non_fabric_project
+#                template_name: Access_Switch_refresh
+#                template_parameters:
+#                  - param_name: vlan_id
+#                    param_value: "100"
