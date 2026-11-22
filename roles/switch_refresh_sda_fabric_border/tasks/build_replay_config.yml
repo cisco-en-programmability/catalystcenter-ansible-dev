@@ -1,0 +1,68 @@
+---
+# Keep the manifest's expected record intact, including source pool metadata.
+# The manager must receive explicit peer addresses without a pool selector.
+- name: Validate replacement replay configuration request
+  ansible.builtin.assert:
+    that:
+      - switch_refresh_sda_fabric_border_replay_request.device_config is mapping
+
+- name: Initialize replacement replay configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replay_device: >-
+      {{ switch_refresh_sda_fabric_border_replay_request.device_config }}
+    switch_refresh_sda_fabric_border_replay_ip_handoffs: []
+  no_log: true
+
+- name: Validate replacement replay addresses
+  ansible.builtin.include_tasks: validate_ip_transit_handoffs.yml
+  vars:
+    switch_refresh_sda_fabric_border_ip_handoff_validation_request:
+      handoffs: >-
+        {{
+          (switch_refresh_sda_fabric_border_replay_device.borders_settings |
+          default({})).layer3_handoff_ip_transit | default([])
+        }}
+      context: replacement handoff creation
+
+- name: Remove allocation pool selectors only from outgoing IP-transit handoffs
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replay_ip_handoffs: >-
+      {{
+        switch_refresh_sda_fabric_border_replay_ip_handoffs + [
+          switch_refresh_sda_fabric_border_replay_handoff |
+          dict2items |
+          rejectattr('key', 'equalto', 'external_connectivity_ip_pool_name') |
+          list | items2dict
+        ]
+      }}
+  loop: >-
+    {{
+      (switch_refresh_sda_fabric_border_replay_device.borders_settings |
+      default({})).layer3_handoff_ip_transit | default([])
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_border_replay_handoff
+    label: explicit-address-ip-transit
+  no_log: true
+
+- name: Publish address-preserving replacement replay configuration
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_border_replay_result:
+      device_config: >-
+        {{
+          switch_refresh_sda_fabric_border_replay_device |
+          combine(
+            {
+              'borders_settings':
+                switch_refresh_sda_fabric_border_replay_device.borders_settings |
+                combine({'layer3_handoff_ip_transit':
+                  switch_refresh_sda_fabric_border_replay_ip_handoffs})
+            }
+          )
+          if (
+            (switch_refresh_sda_fabric_border_replay_device.borders_settings |
+            default({})).layer3_handoff_ip_transit is defined
+          )
+          else switch_refresh_sda_fabric_border_replay_device
+        }}
+  no_log: true

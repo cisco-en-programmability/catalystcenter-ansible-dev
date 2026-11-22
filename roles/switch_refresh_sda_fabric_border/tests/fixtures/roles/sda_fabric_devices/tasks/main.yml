@@ -1,0 +1,24 @@
+---
+# Offline controller double installed only by run_border_capabilities.py.
+- name: Record capability-only API intent
+  ansible.builtin.set_fact:
+    capability_test_payloads: "{{ capability_test_payloads + [sda_fabric_devices_config] }}"
+
+- name: Require verified capabilities before simulated handoff application
+  ansible.builtin.assert:
+    that:
+      - sda_fabric_devices_state == 'merged'
+      - capability_test_live.borders_settings.border_types | sort == ['LAYER_2', 'LAYER_3']
+  when: sda_fabric_devices_config[0].fabric_devices.device_config[0].borders_settings.layer2_handoff is defined
+
+- name: Simulate unsupported platform or image rejection
+  ansible.builtin.assert:
+    that: not (capability_test_reject | default(false) | bool)
+    fail_msg: Simulated controller capability rejection.
+
+- name: Simulate accepted capability enablement
+  ansible.builtin.set_fact:
+    capability_test_live: >-
+      {{ capability_test_live | combine({'borders_settings': capability_test_live.borders_settings |
+      combine(sda_fabric_devices_config[0].fabric_devices.device_config[0].borders_settings)}) }}
+  when: not (capability_test_stale | default(false) | bool)

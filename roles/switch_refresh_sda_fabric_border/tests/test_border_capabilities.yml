@@ -1,0 +1,179 @@
+---
+# Run through run_border_capabilities.py to install the isolated controller doubles.
+- name: Validate mixed L2 and L3 preparation and manifest capability recovery offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    catalystcenter_host: test-controller.example.test
+    capability_test_source:
+      device_ip: 204.1.2.2
+      device_roles: [BORDER_NODE]
+      borders_settings:
+        border_types: [LAYER_3, LAYER_2]
+        layer3_settings:
+          local_autonomous_system_number: "65001"
+        layer2_handoff:
+          - interface_name: GigabitEthernet1/0/10
+            internal_vlan_id: 1101
+            external_vlan_id: 1101
+        layer3_handoff_ip_transit:
+          - interface_name: GigabitEthernet1/0/11
+            transit_network_name: IP-TRANSIT
+            virtual_network_name: SJ_VN
+            vlan_id: 450
+            local_ip_address: 204.1.100.17/30
+            remote_ip_address: 204.1.100.18/30
+    capability_test_payloads: []
+    capability_test_reject: false
+    capability_test_stale: false
+    capability_test_supported_platform:
+      platformId: C9300-48P
+      softwareVersion: 17.12.4
+      deviceSupportLevel: Supported
+
+  tasks:
+    - name: Create capability test workspace
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: border-capabilities-
+      register: capability_test_workspace
+
+    - name: Exercise capability workflow
+      block:
+        - name: Build mixed BN2 replacement intent
+          ansible.builtin.include_tasks: ../tasks/build_replacement_configs.yml
+          vars:
+            switch_refresh_sda_fabric_border_transform_request:
+              fabric_name: Global/USA/San Jose/BLDG23
+              new: {management_ip: 204.1.2.11}
+              original_device_config: "{{ capability_test_source }}"
+              interface_mappings:
+                - source_interface_name: GigabitEthernet1/0/10
+                  destination_interface_name: GigabitEthernet2/0/10
+                - source_interface_name: GigabitEthernet1/0/11
+                  destination_interface_name: GigabitEthernet2/0/11
+
+        - name: Preserve mixed replacement intent and simulate legacy L3-only replacement
+          ansible.builtin.set_fact:
+            capability_test_base: "{{ switch_refresh_sda_fabric_border_transform_result.base_new_device_config }}"
+            capability_test_expected: "{{ switch_refresh_sda_fabric_border_transform_result.expected_new_device_config }}"
+            capability_test_live: >-
+              {{ switch_refresh_sda_fabric_border_transform_result.base_new_device_config |
+                combine({'borders_settings': {
+                  'border_types': ['LAYER_3'],
+                  'layer3_settings': capability_test_source.borders_settings.layer3_settings
+                }}) }}
+
+        - name: Require both types in prepare base and mapped cutover handoffs
+          ansible.builtin.assert:
+            that:
+              - capability_test_base.borders_settings.border_types == ['LAYER_2', 'LAYER_3']
+              - capability_test_base.borders_settings.layer2_handoff is not defined
+              - capability_test_base.borders_settings.layer3_handoff_ip_transit is not defined
+              - capability_test_expected.borders_settings.border_types == ['LAYER_2', 'LAYER_3']
+              - capability_test_expected.borders_settings.layer2_handoff[0].interface_name == 'GigabitEthernet2/0/10'
+              - capability_test_expected.borders_settings.layer3_handoff_ip_transit[0].interface_name == 'GigabitEthernet2/0/11'
+              - capability_test_expected.borders_settings.layer3_handoff_ip_transit[0].local_ip_address == '204.1.100.17/30'
+
+        - name: Verify missing L2 is classified as divergence
+          ansible.builtin.include_tasks: ../tasks/classify_replacement_config.yml
+          vars:
+            switch_refresh_sda_fabric_border_replacement_classification_request:
+              expected_device_config: "{{ capability_test_expected }}"
+              actual_device_config: "{{ capability_test_live }}"
+
+        - name: Assert missing capability blocks classification
+          ansible.builtin.assert:
+            that: switch_refresh_sda_fabric_border_replacement_classification_result.state == 'divergent'
+
+        - name: Check fresh cutover cannot repair an unprepared replacement
+          block:
+            - name: Require prepared capabilities
+              ansible.builtin.include_tasks: ../tasks/ensure_replacement_capabilities.yml
+              vars:
+                switch_refresh_sda_fabric_border_capability_request:
+                  original_device_config: "{{ capability_test_source }}"
+                  expected_device_config: "{{ capability_test_expected }}"
+                  actual_device_config: "{{ capability_test_live }}"
+                  allow_enable: false
+            - name: Fail if fresh cutover accepted missing L2
+              ansible.builtin.fail:
+                msg: Fresh cutover unexpectedly accepted missing L2.
+          rescue:
+            - name: Confirm failure occurred before capability API or deletion
+              ansible.builtin.assert:
+                that:
+                  - ansible_failed_task.name == 'Require prepared capabilities or manifest-backed capability repair'
+                  - capability_test_payloads | length == 0
+
+        - name: Simulate old_deleted legacy manifest without explicit types
+          ansible.builtin.set_fact:
+            capability_test_legacy_source: >-
+              {{ capability_test_source | combine({'borders_settings': capability_test_source.borders_settings |
+              dict2items | rejectattr('key', 'equalto', 'border_types') | items2dict}) }}
+            capability_test_legacy_expected: >-
+              {{ capability_test_expected | combine({'borders_settings': capability_test_expected.borders_settings |
+              dict2items | rejectattr('key', 'equalto', 'border_types') | items2dict}) }}
+
+        - name: Preserve immutable legacy payload fingerprint
+          ansible.builtin.set_fact:
+            capability_test_fingerprint: "{{ capability_test_legacy_source | to_json(sort_keys=true) | hash('sha256') }}"
+
+        - name: Recover capabilities from protected legacy capture
+          ansible.builtin.include_tasks: ../tasks/ensure_replacement_capabilities.yml
+          vars:
+            switch_refresh_sda_fabric_border_capability_request:
+              original_device_config: "{{ capability_test_legacy_source }}"
+              expected_device_config: "{{ capability_test_legacy_expected }}"
+              actual_device_config: "{{ capability_test_live }}"
+              fabric_name: Global/USA/San Jose/BLDG23
+              capture_file: "{{ capability_test_workspace.path }}/recovered.yml"
+              allow_enable: true
+
+        - name: Prove capability repair used no handoffs and preserved the legacy fingerprint
+          ansible.builtin.assert:
+            that:
+              - capability_test_payloads | length == 1
+              - >-
+                capability_test_payloads[0][0].fabric_devices.device_config[0].borders_settings ==
+                {'border_types': ['LAYER_2', 'LAYER_3']}
+              - >-
+                switch_refresh_sda_fabric_border_capability_result.device_config.borders_settings.border_types ==
+                ['LAYER_2', 'LAYER_3']
+              - capability_test_legacy_source.borders_settings.border_types is not defined
+              - capability_test_legacy_expected.borders_settings.border_types is not defined
+              - capability_test_legacy_source | to_json(sort_keys=true) | hash('sha256') == capability_test_fingerprint
+
+        - name: Verify unsupported and stale controller results stop recovery
+          ansible.builtin.include_tasks: tasks/assert_capability_recovery_rejected.yml
+          loop:
+            - {name: unsupported platform, reject: true, stale: false, task: Simulate unsupported platform or image rejection}
+            - {name: accepted but missing L2, reject: false, stale: true, task: Require live replacement capability match}
+          loop_control:
+            loop_var: capability_test_failure
+            label: "{{ capability_test_failure.name }}"
+
+        - name: Require usable platform and image inventory
+          ansible.builtin.include_tasks: ../tasks/validate_replacement_platform.yml
+          vars:
+            switch_refresh_sda_fabric_border_platform_request:
+              device_details: "{{ capability_test_supported_platform }}"
+              context: supported platform fixture
+
+        - name: Reject unavailable or unsupported platform inventory
+          ansible.builtin.include_tasks: tasks/assert_capability_platform_rejected.yml
+          loop:
+            - {platformId: ''}
+            - {softwareVersion: ''}
+            - {deviceSupportLevel: Unsupported}
+            - {deviceSupportLevel: Unknown}
+          loop_control:
+            loop_var: capability_test_platform_changes
+
+        - name: Exercise complete old-deleted cutover recovery with a legacy manifest
+          ansible.builtin.include_tasks: tasks/recover_legacy_capability_cutover.yml
+      always:
+        - name: Remove capability test workspace
+          ansible.builtin.file:
+            path: "{{ capability_test_workspace.path }}"
+            state: absent
