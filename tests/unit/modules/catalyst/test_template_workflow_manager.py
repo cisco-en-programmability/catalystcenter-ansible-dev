@@ -234,6 +234,18 @@ class TestCatalystCenterTemplateWorkflow(TestCatalystModule):
                 self.test_data.get("get_task_details_case_13"),
                 self.test_data.get("get_deployment_status_case_13"),
             ]
+        elif "test_deploy_failure_with_misspelled_deployment_id_case_16" in self._testMethodName:
+            self.run_catalystcenter_exec.side_effect = [
+                self.test_data.get("get_projects_details_case_13"),
+                self.test_data.get("get_templates_details_case_13"),
+                self.test_data.get("get_device_by_ip_case_13"),
+                self.test_data.get("get_template_versions_parent_case_13"),
+                self.test_data.get("get_member_template_details_case_13"),
+                self.test_data.get("get_template_versions_member_case_13"),
+                self.test_data.get("deploy_template_task_case_13"),
+                self.test_data.get("get_task_details_case_16"),
+                self.test_data.get("get_deployment_status_failure_case_16"),
+            ]
         elif "test_deploy_composite_no_member_info_case_14" in self._testMethodName:
             self.run_catalystcenter_exec.side_effect = [
                 self.test_data.get("get_projects_details_case_13"),
@@ -643,6 +655,22 @@ class TestCatalystCenterTemplateWorkflow(TestCatalystModule):
         )
         result = self.execute_module(changed=True, failed=False)
         self.assertIn("deployed successfully", result.get("msg"))
+
+    def test_deploy_failure_with_misspelled_deployment_id_case_16(self):
+        set_module_args(
+            dict(
+                catalystcenter_host="1.1.1.1",
+                catalystcenter_username="dummy",
+                catalystcenter_password="dummy",
+                catalystcenter_version="2.3.7.9",
+                catalystcenter_log=True,
+                state="merged",
+                config_verify=False,
+                config=self.playbook_config_deploy_composite_template_case_13,
+            )
+        )
+        result = self.execute_module(changed=False, failed=True)
+        self.assertIn("GigabitEthernet9/0/99", result.get("msg"))
 
     def test_deploy_composite_no_member_info_case_14(self):
         set_module_args(

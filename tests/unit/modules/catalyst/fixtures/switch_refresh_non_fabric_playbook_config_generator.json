@@ -1,0 +1,357 @@
+{
+    "config_happy_no_templates": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_happy_with_template": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_device_not_found": {
+        "source_device_ip": "10.0.0.99",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_interface_mapping_source_not_found": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": [
+            {
+                "source_interface_name": "GigabitEthernet9/9/9",
+                "destination_interface_name": "GigabitEthernet1/0/1"
+            }
+        ]
+    },
+    "config_duplicate_interface_mapping": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": [
+            {
+                "source_interface_name": "GigabitEthernet1/0/1",
+                "destination_interface_name": "GigabitEthernet2/0/1"
+            },
+            {
+                "source_interface_name": "GigabitEthernet1/0/1",
+                "destination_interface_name": "GigabitEthernet3/0/1"
+            }
+        ]
+    },
+    "config_duplicate_interface_destination": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": [
+            {
+                "source_interface_name": "GigabitEthernet1/0/1",
+                "destination_interface_name": "GigabitEthernet9/0/9"
+            },
+            {
+                "source_interface_name": "GigabitEthernet1/0/2",
+                "destination_interface_name": "GigabitEthernet9/0/9"
+            }
+        ]
+    },
+    "config_interface_collision": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": [
+            {
+                "source_interface_name": "Loopback811",
+                "destination_interface_name": "Loopback812"
+            }
+        ]
+    },
+    "config_duplicate_configs": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_interface_conflict_no_migration": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_refresh_suffix": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_missing_source_device_ip": {
+        "destination_device_serial_number": "FJC2334ABCD"
+    },
+    "config_missing_serial": {
+        "source_device_ip": "204.1.2.3"
+    },
+    "config_empty": {},
+    "config_excluded_template": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "exclude_templates": [
+            {
+                "template_name": "Corporate NTP"
+            }
+        ]
+    },
+    "config_include_by_reference": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "include_templates": [
+            {
+                "project_name": "Onboarding Configuration",
+                "template_name": "Corporate NTP"
+            }
+        ]
+    },
+    "config_interface_mappings_not_list": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": "GigabitEthernet1/0/1"
+    },
+    "config_interface_mapping_missing_destination": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "interface_migration": true,
+        "interface_mappings": [
+            {
+                "source_interface_name": "GigabitEthernet1/0/1"
+            }
+        ]
+    },
+    "config_exclude_templates_not_list": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "exclude_templates": "Corporate NTP"
+    },
+    "config_include_templates_missing_project": {
+        "source_device_ip": "204.1.2.3",
+        "destination_device_serial_number": "FJC2334ABCD",
+        "include_templates": [
+            {
+                "template_name": "Corporate NTP"
+            }
+        ]
+    },
+    "get_device_list": {
+        "response": [
+            {
+                "id": "dev-uuid-0001",
+                "instanceUuid": "dev-uuid-0001",
+                "hostname": "switch-01.example.com",
+                "family": "Switches and Hubs",
+                "type": "Cisco Catalyst 9300 Switch",
+                "platformId": "C9300-48U",
+                "softwareVersion": "17.9.1",
+                "softwareType": "IOS-XE",
+                "managementIpAddress": "204.1.2.3"
+            }
+        ]
+    },
+    "get_device_list_empty": {
+        "response": []
+    },
+    "get_interface_info_missing_source": {
+        "response": [
+            {
+                "portName": "GigabitEthernet1/0/1"
+            },
+            {
+                "portName": "GigabitEthernet1/0/2"
+            }
+        ]
+    },
+    "get_templates_details_catalog": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-0001",
+                "name": "Corporate NTP",
+                "projectName": "Onboarding Configuration"
+            }
+        ]
+    },
+    "get_deployed_empty": {
+        "response": []
+    },
+    "get_deployed_one": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-0001",
+                "templateName": "Corporate NTP",
+                "projectName": null,
+                "realizedTemplateConfig": "ntp server 10.0.0.1\n",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_deployed_failure": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-0001",
+                "templateName": "Corporate NTP",
+                "projectName": null,
+                "realizedTemplateConfig": "ntp server 10.0.0.1\n",
+                "status": "FAILURE",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_deployed_no_realized": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-0001",
+                "templateName": "Corporate NTP",
+                "projectName": null,
+                "realizedTemplateConfig": "",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_template_details_included": {
+        "response": {
+            "id": "tmpl-uuid-0001",
+            "name": "Corporate NTP",
+            "projectName": "Onboarding Configuration",
+            "language": "VELOCITY",
+            "deviceTypes": [],
+            "templateParams": [
+                {
+                    "parameterName": "vlan_id",
+                    "required": true,
+                    "dataType": "STRING"
+                }
+            ],
+            "templateContent": "vlan {{ vlan_id }}\n"
+        }
+    },
+    "get_interface_info_collision": {
+        "response": [
+            {
+                "portName": "Loopback811"
+            },
+            {
+                "portName": "Loopback812"
+            }
+        ]
+    },
+    "get_templates_details_catalog_two": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-A",
+                "name": "Loopback A",
+                "projectName": "Switch Templates"
+            },
+            {
+                "templateId": "tmpl-uuid-B",
+                "name": "Loopback B",
+                "projectName": "Switch Templates"
+            }
+        ]
+    },
+    "get_templates_details_catalog_refresh": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-R",
+                "name": "Loopback_refresh",
+                "projectName": "Switch Templates"
+            }
+        ]
+    },
+    "get_deployed_two_collision": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-A",
+                "templateName": "Loopback A",
+                "projectName": null,
+                "realizedTemplateConfig": "interface Loopback811\n description VIA-A\n ip address 10.81.1.1 255.255.255.255\n",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            },
+            {
+                "templateId": "tmpl-uuid-B",
+                "templateName": "Loopback B",
+                "projectName": null,
+                "realizedTemplateConfig": "interface Loopback812\n description VIA-B\n ip address 10.81.2.1 255.255.255.255\n",
+                "status": "SUCCESS",
+                "endTime": 1700000001000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_deployed_two_identical": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-A",
+                "templateName": "NTP A",
+                "projectName": null,
+                "realizedTemplateConfig": "ntp server 10.0.0.1\n",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            },
+            {
+                "templateId": "tmpl-uuid-B",
+                "templateName": "NTP B",
+                "projectName": null,
+                "realizedTemplateConfig": "ntp server 10.0.0.1\n",
+                "status": "SUCCESS",
+                "endTime": 1700000001000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_deployed_two_conflict": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-A",
+                "templateName": "Loopback A",
+                "projectName": null,
+                "realizedTemplateConfig": "interface Loopback811\n description VIA-A\n ip address 10.81.1.1 255.255.255.255\n",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            },
+            {
+                "templateId": "tmpl-uuid-B",
+                "templateName": "Loopback B",
+                "projectName": null,
+                "realizedTemplateConfig": "interface Loopback811\n description VIA-B\n ip address 10.81.1.9 255.255.255.255\n",
+                "status": "SUCCESS",
+                "endTime": 1700000001000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_deployed_one_refresh": {
+        "response": [
+            {
+                "templateId": "tmpl-uuid-R",
+                "templateName": "Loopback_refresh",
+                "projectName": null,
+                "realizedTemplateConfig": "interface Loopback0\n ip address 10.0.0.1 255.255.255.255\n",
+                "status": "SUCCESS",
+                "endTime": 1700000000000,
+                "paramNameVsValue": {}
+            }
+        ]
+    },
+    "get_template_details_wrong_family": {
+        "response": {
+            "id": "tmpl-uuid-0001",
+            "name": "Corporate NTP",
+            "projectName": "Onboarding Configuration",
+            "language": "VELOCITY",
+            "deviceTypes": [
+                {
+                    "productFamily": "Routers"
+                }
+            ],
+            "templateParams": [],
+            "templateContent": "ntp server 10.0.0.1\n"
+        }
+    }
+}
