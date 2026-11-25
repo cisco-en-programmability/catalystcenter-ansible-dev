@@ -1,0 +1,22 @@
+---
+# The SDK requires fabricId even when the query includes networkDeviceId.
+# Use captured UUIDs rather than resolving deleted devices through inventory.
+- name: Verify captured old UUID fabric memberships ({{ edge_same_ip_old_fabric_expected }})
+  cisco.catalystcenter.sda_fabric_devices_info:
+    fabricId: "{{ edge_same_ip_fabric_id }}"
+    networkDeviceId: "{{ edge_same_ip_old_identity.uuid }}"
+    limit: 500
+  register: edge_same_ip_old_fabric_lookup
+  until: >-
+    edge_same_ip_old_fabric_lookup |
+    cisco.catalystcenter.edge_same_ip_old_fabric(
+      edge_same_ip_fabric_id,
+      edge_same_ip_old_identity.uuid,
+      edge_same_ip_old_fabric_expected)
+  retries: "{{ edge_same_ip_poll_retries | int }}"
+  delay: "{{ edge_same_ip_poll_delay | int }}"
+  loop: "{{ edge_same_ip_manifest.old_devices }}"
+  loop_control:
+    loop_var: edge_same_ip_old_identity
+    label: "{{ edge_same_ip_old_identity.management_ip }}"
+  no_log: true

@@ -1,0 +1,54 @@
+---
+# Sites and fabrics survive edge inventory deletion. Resolve them directly so
+# schema-1 snapshots can recover without rediscovering the removed devices.
+- name: Resolve the exact saved fabric hierarchy to a network hierarchy site
+  cisco.catalystcenter.sites_info:
+    nameHierarchy: "{{ edge_same_ip_plan.site }}"
+    limit: 500
+  register: edge_same_ip_site_lookup
+  no_log: true
+
+- name: Require an unambiguous network hierarchy site ID
+  ansible.builtin.set_fact:
+    edge_same_ip_site_id: >-
+      {{ edge_same_ip_site_lookup | cisco.catalystcenter.edge_same_ip_site_id(edge_same_ip_plan) }}
+  no_log: true
+
+- name: Resolve the fabric site associated with the network hierarchy site
+  cisco.catalystcenter.sda_fabric_sites_info:
+    siteId: "{{ edge_same_ip_site_id }}"
+    limit: 500
+  register: edge_same_ip_fabric_site_lookup
+  no_log: true
+
+- name: Read the fabric site ID from the structured response
+  ansible.builtin.set_fact:
+    edge_same_ip_fabric_id: >-
+      {{ edge_same_ip_fabric_site_lookup |
+         cisco.catalystcenter.edge_same_ip_fabric_id(edge_same_ip_site_id, true) }}
+  no_log: true
+
+- name: Resolve a fabric zone when the hierarchy is not a fabric site
+  when: edge_same_ip_fabric_id | length == 0
+  block:
+    - name: Query the zone associated with the network hierarchy site
+      cisco.catalystcenter.sda_fabric_zones_info:
+        siteId: "{{ edge_same_ip_site_id }}"
+        limit: 500
+      register: edge_same_ip_fabric_zone_lookup
+      no_log: true
+
+    - name: Require an unambiguous fabric zone ID
+      ansible.builtin.set_fact:
+        edge_same_ip_fabric_id: >-
+          {{ edge_same_ip_fabric_zone_lookup |
+             cisco.catalystcenter.edge_same_ip_fabric_id(edge_same_ip_site_id) }}
+      no_log: true
+
+- name: Require the live fabric to match a captured fabric identity
+  ansible.builtin.assert:
+    that:
+      - edge_same_ip_manifest.fabric_id is not defined or edge_same_ip_manifest.fabric_id == edge_same_ip_fabric_id
+    fail_msg: >-
+      The fabric ID resolved from the saved hierarchy differs from the captured
+      fabric ID. No workflow changes were made; verify the fabric identity.

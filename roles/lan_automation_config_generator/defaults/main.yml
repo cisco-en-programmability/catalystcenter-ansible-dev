@@ -1,0 +1,16 @@
+---
+catalystcenter_host: ""
+catalystcenter_username: ""
+catalystcenter_password: ""
+catalystcenter_verify: true
+catalystcenter_port: 443
+catalystcenter_version: "2.3.7.9"
+catalystcenter_debug: false
+catalystcenter_log: false
+catalystcenter_log_level: WARNING
+
+lan_automation_config_generator_state: gathered
+lan_automation_config_generator_config: null
+lan_automation_config_generator_file_path: null
+lan_automation_config_generator_file_mode: overwrite
+lan_automation_config_generator_isis_domain_pwd: null

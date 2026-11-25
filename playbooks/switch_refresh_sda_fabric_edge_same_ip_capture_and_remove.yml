@@ -1,0 +1,11 @@
+---
+- name: Capture and remove old SDA edge switch batches for management IP reuse
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars/switch_refresh_sda_fabric_edge_same_ip_usecase.yml
+  vars:
+    switch_refresh_sda_fabric_edge_same_ip_phase: capture_and_remove
+  roles:
+    - role: cisco.catalystcenter.switch_refresh_sda_fabric_edge_same_ip
