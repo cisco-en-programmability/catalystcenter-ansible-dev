@@ -1,0 +1,414 @@
+---
+- name: Validate distribution hostname transfer contracts offline
+  hosts: plan_test
+  gather_facts: false
+
+  tasks:
+    - name: Initialize hostname transfer entry fixture
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_hostname_entries: []
+        switch_refresh_sda_fabric_distribution_plan:
+          new_records:
+            - management_ip: "192.0.2.20"
+              device_id: new-distribution-uuid
+              serial_number: NEW-DIST-20
+        switch_refresh_sda_fabric_distribution_hostname_mapping:
+          old_management_ip: "198.51.100.20"
+          old_device_id: old-distribution-uuid
+          old_serial_number: OLD-DIST-20
+          old_hostname: OLD-DISTRIBUTION.example.test
+          new:
+            management_ip: "192.0.2.20"
+
+    - name: Build hostname transfer entry from pinned identities
+      ansible.builtin.include_tasks: ../tasks/build_hostname_entry.yml
+
+    - name: Verify exact durable hostname transfer entry
+      ansible.builtin.assert:
+        that:
+          - switch_refresh_sda_fabric_distribution_hostname_entries | length == 1
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_entries[0] ==
+            {
+              'old_management_ip': '198.51.100.20',
+              'old_device_id': 'old-distribution-uuid',
+              'old_serial_number': 'OLD-DIST-20',
+              'new_management_ip': '192.0.2.20',
+              'new_device_id': 'new-distribution-uuid',
+              'new_serial_number': 'NEW-DIST-20',
+              'desired_hostname': 'OLD-DISTRIBUTION.example.test',
+              'submitted_hostname': 'OLD-DISTRIBUTION',
+              'status': 'pending'
+            }
+
+    - name: Reject an empty captured old hostname
+      block:
+        - name: Build entry without a captured old hostname
+          ansible.builtin.include_tasks: ../tasks/build_hostname_entry.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_hostname_mapping:
+              old_management_ip: "198.51.100.21"
+              old_device_id: another-old-distribution-uuid
+              old_serial_number: OLD-DIST-21
+              old_hostname: ""
+              new:
+                management_ip: "192.0.2.20"
+
+        - name: Fail when an empty old hostname was accepted
+          ansible.builtin.fail:
+            msg: Hostname transfer unexpectedly accepted an empty old hostname.
+      rescue:
+        - name: Confirm empty old hostname was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate hostname transfer identity match'
+
+    - name: Validate a pinned live hostname target
+      ansible.builtin.include_tasks: ../tasks/validate_hostname_target.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_hostname_target_entry:
+          old_management_ip: "198.51.100.20"
+          old_device_id: old-distribution-uuid
+          old_serial_number: OLD-DIST-20
+          new_management_ip: "192.0.2.20"
+          new_device_id: new-distribution-uuid
+          new_serial_number: NEW-DIST-20
+          desired_hostname: OLD-DISTRIBUTION.example.test
+          submitted_hostname: OLD-DISTRIBUTION
+          status: pending
+        switch_refresh_sda_fabric_distribution_hostname_target_result:
+          failed: false
+          catalystcenter_response:
+            response:
+              managementIpAddress: "192.0.2.20"
+              id: new-distribution-uuid
+              serialNumber: NEW-DIST-20
+              role: DISTRIBUTION
+              reachabilityStatus: Reachable
+              managementState: Managed
+        switch_refresh_sda_fabric_distribution_hostname_owner_result:
+          failed: false
+          catalystcenter_response:
+            response: []
+
+    - name: Reject a hostname target with changed immutable identity
+      block:
+        - name: Validate mismatched live hostname target
+          ansible.builtin.include_tasks: ../tasks/validate_hostname_target.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_hostname_target_entry:
+              old_management_ip: "198.51.100.20"
+              old_device_id: old-distribution-uuid
+              old_serial_number: OLD-DIST-20
+              new_management_ip: "192.0.2.20"
+              new_device_id: new-distribution-uuid
+              new_serial_number: NEW-DIST-20
+              desired_hostname: OLD-DISTRIBUTION.example.test
+              submitted_hostname: OLD-DISTRIBUTION
+              status: pending
+            switch_refresh_sda_fabric_distribution_hostname_target_result:
+              failed: false
+              catalystcenter_response:
+                response:
+                  managementIpAddress: "192.0.2.20"
+                  id: unexpected-device-uuid
+                  serialNumber: NEW-DIST-20
+                  role: DISTRIBUTION
+                  reachabilityStatus: Reachable
+                  managementState: Managed
+            switch_refresh_sda_fabric_distribution_hostname_owner_result:
+              failed: false
+              catalystcenter_response:
+                response: []
+
+        - name: Fail when a changed hostname target identity was accepted
+          ansible.builtin.fail:
+            msg: Hostname transfer accepted a replacement with a changed UUID.
+      rescue:
+        - name: Confirm changed hostname target identity was rejected
+          ansible.builtin.assert:
+            that:
+              - >-
+                ansible_failed_task.name ==
+                'Validate live replacement hostname target identity'
+
+    - name: Load hostname transfer orchestration contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_hostname_capture_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/capture_hostname_manifest.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_apply_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/apply_hostname_manifest.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_resume_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/resume_hostname_transfer.yml'
+            ) |
+            from_yaml
+          }}
+
+    - name: Derive hostname transfer orchestration contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_hostname_capture_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_capture_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_apply_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_apply_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_resume_names: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_resume_tasks |
+            map(attribute='name') |
+            list
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_manifest_builder: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_capture_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Build pending distribution hostname transfer manifest'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_identity_guard: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_capture_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Validate existing distribution hostname manifest identity'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_pending_copy: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_capture_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Persist new pending distribution hostname manifest before cleanup'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_apply_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_apply_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Apply captured distribution hostnames'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_old_uuid_lookup_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_apply_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Verify old distribution UUID identities are absent from inventory'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_hostname_resume_guard: >-
+          {{
+            switch_refresh_sda_fabric_distribution_hostname_resume_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Validate durable distribution hostname recovery manifest'
+            ) |
+            first
+          }}
+
+    - name: Verify hostname capture is durable before cleanup
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Query captured old hostname ownership before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Build pending distribution hostname transfer manifest'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Validate existing distribution hostname manifest identity'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Persist new pending distribution hostname manifest before cleanup'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Persist new pending distribution hostname manifest before cleanup'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_capture_names.index(
+              'Validate active distribution hostname manifest before cleanup'
+            )
+
+    - name: Verify pending hostname manifest contract
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_manifest_builder[
+              'ansible.builtin.set_fact'
+            ].switch_refresh_sda_fabric_distribution_expected_hostname_manifest.schema_version == 1
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_manifest_builder[
+              'ansible.builtin.set_fact'
+            ].switch_refresh_sda_fabric_distribution_expected_hostname_manifest.role ==
+            'switch_refresh_sda_fabric_distribution'
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_manifest_builder[
+              'ansible.builtin.set_fact'
+            ].switch_refresh_sda_fabric_distribution_expected_hostname_manifest.status ==
+            'pending'
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_manifest_builder[
+              'ansible.builtin.set_fact'
+            ].switch_refresh_sda_fabric_distribution_expected_hostname_manifest.catalystcenter_host
+            is defined
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_pending_copy[
+              'ansible.builtin.copy'
+            ].mode == '0600'
+
+    - name: Verify existing hostname manifest immutable identity guard
+      ansible.builtin.assert:
+        that:
+          - >-
+            'catalystcenter_host' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_identity_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )
+          - >-
+            'input_fingerprint' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_identity_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )
+          - >-
+            'new_device_id' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_identity_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )
+          - >-
+            'old_device_id' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_identity_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )
+
+    - name: Verify hostname apply safety ordering and dispatch
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Validate live hostname targets and ownership'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Apply captured distribution hostnames'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Validate old distribution hostname owners are absent'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Apply captured distribution hostnames'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Validate old distribution UUID identities are absent'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Apply captured distribution hostnames'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Apply captured distribution hostnames'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Verify transferred distribution hostnames'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Verify transferred distribution hostnames'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_apply_names.index(
+              'Persist completed distribution hostname manifest'
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_task[
+              'ansible.builtin.include_role'
+            ].name == 'lan_automation'
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_apply_task.vars.lan_automation_config_verify
+            is sameas true
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_old_uuid_lookup_task.ignore_errors
+            is sameas true
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_old_uuid_lookup_task.failed_when
+            is not defined
+          - >-
+            '404' in
+            (switch_refresh_sda_fabric_distribution_hostname_old_uuid_lookup_task.until |
+            join(' '))
+
+    - name: Verify hostname recovery identity validation precedes apply
+      ansible.builtin.assert:
+        that:
+          - >-
+            switch_refresh_sda_fabric_distribution_hostname_resume_names.index(
+              'Validate durable distribution hostname recovery manifest'
+            ) <
+            switch_refresh_sda_fabric_distribution_hostname_resume_names.index(
+              'Save preflighted distribution hostname recovery manifest'
+            )
+          - >-
+            'catalystcenter_host' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_resume_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )
+          - >-
+            'input_fingerprint' in
+            (
+              switch_refresh_sda_fabric_distribution_hostname_resume_guard[
+                'ansible.builtin.assert'
+              ].that |
+              join(' ')
+            )

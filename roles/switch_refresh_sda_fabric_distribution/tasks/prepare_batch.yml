@@ -1,0 +1,243 @@
+---
+- name: Discover replacement distribution devices
+  ansible.builtin.include_role:
+    name: discovery
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    discovery_state: merged
+    discovery_config_verify: >-
+      {{ switch_refresh_sda_fabric_distribution_discovery_config_verify }}
+    discovery_config: "{{ switch_refresh_sda_fabric_distribution_plan.discovery_config }}"
+  when:
+    - switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'discovery'
+    - switch_refresh_sda_fabric_distribution_discovery_enabled | bool
+  no_log: true
+
+- name: Onboard replacement distribution devices with LAN Automation
+  ansible.builtin.include_role:
+    name: lan_automation
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_state: merged
+    lan_automation_config_verify: true
+    lan_automation_catalystcenter_api_task_timeout: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_timeout }}
+    lan_automation_catalystcenter_task_poll_interval: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_poll_interval }}
+    lan_automation_config: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_devices.lan_automation_config }}
+  when:
+    - switch_refresh_sda_fabric_distribution_plan.onboarding_method == 'lan_automation'
+    - switch_refresh_sda_fabric_distribution_lan_automation_enabled | bool
+  no_log: true
+
+- name: Wait for onboarded replacement distribution inventory records
+  ansible.builtin.include_tasks:
+    file: wait_inventory.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_inventory_expected_role: ""
+
+- name: Assign protected distribution inventory role to onboarded replacements
+  cisco.catalystcenter.network_device_update_role:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    id: >-
+      {{
+        (switch_refresh_sda_fabric_distribution_onboarded_record.catalystcenter_response |
+        default({})).response.id
+      }}
+    role: DISTRIBUTION
+    roleSource: MANUAL
+  register: switch_refresh_sda_fabric_distribution_inventory_role_update
+  changed_when: true
+  failed_when: >-
+    switch_refresh_sda_fabric_distribution_inventory_role_update.failed |
+    default(false) | bool or
+    switch_refresh_sda_fabric_distribution_inventory_role_update.catalystcenter_response
+    is not mapping or
+    (switch_refresh_sda_fabric_distribution_inventory_role_update.catalystcenter_response |
+    default({})).response is not mapping or
+    ((switch_refresh_sda_fabric_distribution_inventory_role_update.catalystcenter_response |
+    default({})).response | default({})).taskId |
+    default('') | string | trim | length == 0
+  loop: >-
+    {{ switch_refresh_sda_fabric_distribution_inventory_readiness.results | default([]) }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_onboarded_record
+    label: >-
+      {{
+        ((switch_refresh_sda_fabric_distribution_onboarded_record.catalystcenter_response |
+        default({})).response | default({})).managementIpAddress |
+        default('invalid-device')
+      }}
+  when:
+    - switch_refresh_sda_fabric_distribution_inventory_enabled | bool
+    - >-
+      ((switch_refresh_sda_fabric_distribution_onboarded_record.catalystcenter_response |
+      default({})).response | default({})).role |
+      default('') | upper != 'DISTRIBUTION'
+  no_log: true
+
+- name: Wait for submitted distribution inventory role updates
+  ansible.builtin.include_tasks:
+    file: wait_inventory_role_update.yml
+    apply:
+      tags: [always]
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_inventory_role_update.results |
+      default([]) |
+      selectattr('catalystcenter_response', 'defined') |
+      map(attribute='catalystcenter_response.response.taskId') |
+      list
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_inventory_role_task_id
+    label: "{{ switch_refresh_sda_fabric_distribution_inventory_role_task_id }}"
+
+- name: Verify replacement distribution inventory role and readiness
+  ansible.builtin.include_tasks:
+    file: wait_inventory.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_inventory_expected_role: DISTRIBUTION
+
+- name: Provision replacement distribution devices to the fabric site
+  ansible.builtin.include_role:
+    name: provision
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+  vars:
+    provision_state: merged
+    provision_config_verify: >-
+      {{ switch_refresh_sda_fabric_distribution_provision_config_verify }}
+    provision_config: "{{ switch_refresh_sda_fabric_distribution_plan.provision_config }}"
+  when: switch_refresh_sda_fabric_distribution_provision_enabled | bool
+
+- name: Verify replacement distribution provisioning
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+
+- name: Resolve prepared replacement distribution identities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_lookup_records: []
+
+- name: Pin prepared replacement distribution identities
+  ansible.builtin.include_tasks:
+    file: resolve_ip_record.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_lookup_ip: >-
+      {{ switch_refresh_sda_fabric_distribution_new_ip }}
+    switch_refresh_sda_fabric_distribution_lookup_kind: replacement
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.new_management_ips }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_new_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_new_ip }}"
+
+- name: Save prepared replacement distribution identities
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_new_records: >-
+      {{ switch_refresh_sda_fabric_distribution_lookup_records }}
+
+- name: Validate prepared replacement distribution state
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_new_record.inventory_role |
+        upper == 'DISTRIBUTION'
+      - >-
+        switch_refresh_sda_fabric_distribution_new_record.reachability_status |
+        upper == 'REACHABLE'
+    fail_msg: >-
+      Every prepared replacement must be reachable with inventory role DISTRIBUTION.
+  loop: "{{ switch_refresh_sda_fabric_distribution_new_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_new_record
+    label: "{{ switch_refresh_sda_fabric_distribution_new_record.management_ip }}"
+
+- name: Verify replacements have no SDA fabric-device enrollment
+  ansible.builtin.include_tasks:
+    file: validate_nonfabric.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_nonfabric_records: >-
+      {{ switch_refresh_sda_fabric_distribution_new_records }}
+
+- name: Add replacement distribution links
+  ansible.builtin.include_role:
+    name: lan_automation
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_prepare
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_state: merged
+    lan_automation_config_verify: true
+    lan_automation_catalystcenter_api_task_timeout: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_timeout }}
+    lan_automation_catalystcenter_task_poll_interval: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_poll_interval }}
+    lan_automation_config: "{{ switch_refresh_sda_fabric_distribution_plan.link_add_config }}"
+  no_log: true
+
+- name: Build replacement distribution topology postconditions
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.peer_records }}
+    switch_refresh_sda_fabric_distribution_topology_expectations: []
+
+- name: Build active replacement link expectations
+  ansible.builtin.include_tasks:
+    file: build_preflight_new_expectation.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.links }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_preflight_link
+    label: "{{ switch_refresh_sda_fabric_distribution_preflight_link.peer_management_ip }}"
+
+- name: Verify replacement distribution links are exactly active
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+
+- name: Record prepared distribution refresh batch
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_prepare_results: >-
+      {{
+        switch_refresh_sda_fabric_distribution_prepare_results + [
+          {
+            'name': switch_refresh_sda_fabric_distribution_plan.name,
+            'new_management_ips':
+              switch_refresh_sda_fabric_distribution_plan.new_management_ips,
+            'status': 'prepared'
+          }
+        ]
+      }}

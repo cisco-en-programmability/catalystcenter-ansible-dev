@@ -1,0 +1,57 @@
+---
+- name: Re-resolve pinned distribution refresh identity
+  cisco.catalystcenter.network_device_by_ip_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    ipAddress: "{{ switch_refresh_sda_fabric_distribution_expected_record.management_ip }}"
+  register: switch_refresh_sda_fabric_distribution_revalidation_lookup
+  no_log: true
+
+- name: Validate immutable distribution refresh identity
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_distribution_revalidation_lookup.failed | default(false) | bool)
+      - switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.managementIpAddress |
+        default('') == switch_refresh_sda_fabric_distribution_expected_record.management_ip
+      - >-
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.id |
+        default(
+          switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.instanceUuid |
+          default('')
+        ) == switch_refresh_sda_fabric_distribution_expected_record.device_id
+      - >-
+        switch_refresh_sda_fabric_distribution_expected_record.serial_number |
+        default('') | length == 0 or
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.serialNumber |
+        default('') == switch_refresh_sda_fabric_distribution_expected_record.serial_number
+      - >-
+        switch_refresh_sda_fabric_distribution_expected_record.mac_address |
+        default('') | length == 0 or
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.macAddress |
+        default('') | lower ==
+        (switch_refresh_sda_fabric_distribution_expected_record.mac_address | lower)
+      - >-
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.reachabilityStatus |
+        default('') | upper == 'REACHABLE'
+      - >-
+        switch_refresh_sda_fabric_distribution_expected_record.management_state |
+        default('') | length == 0 or
+        switch_refresh_sda_fabric_distribution_revalidation_lookup.catalystcenter_response.response.managementState |
+        default('') | upper ==
+        (switch_refresh_sda_fabric_distribution_expected_record.management_state | upper)
+    fail_msg: >-
+      Device {{ switch_refresh_sda_fabric_distribution_expected_record.management_ip }}
+      no longer matches its pinned UUID, serial, MAC, or live reachability
+      state. Cleanup failed closed before mutation.
+  no_log: true

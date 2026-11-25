@@ -1,0 +1,72 @@
+---
+- name: Resolve distribution refresh device by management IP
+  cisco.catalystcenter.network_device_by_ip_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    ipAddress: "{{ switch_refresh_sda_fabric_distribution_lookup_ip }}"
+  register: switch_refresh_sda_fabric_distribution_ip_lookup
+  no_log: true
+
+- name: Validate resolved distribution refresh device record
+  ansible.builtin.assert:
+    that:
+      - not (switch_refresh_sda_fabric_distribution_ip_lookup.failed | default(false) | bool)
+      - switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response
+        is mapping
+      - >-
+        switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.managementIpAddress |
+        default('') == switch_refresh_sda_fabric_distribution_lookup_ip
+      - >-
+        switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.id |
+        default(
+          switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.instanceUuid |
+          default('')
+        ) | string | trim | length > 0
+    fail_msg: >-
+      {{ switch_refresh_sda_fabric_distribution_lookup_kind }} device
+      {{ switch_refresh_sda_fabric_distribution_lookup_ip }} did not resolve to
+      one exact inventory identity.
+  no_log: true
+
+- name: Save resolved distribution refresh device record
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_lookup_records: >-
+      {{
+        switch_refresh_sda_fabric_distribution_lookup_records + [
+          {
+            'management_ip': switch_refresh_sda_fabric_distribution_lookup_ip,
+            'device_id':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.id |
+              default(
+                switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.instanceUuid
+              ),
+            'serial_number':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.serialNumber |
+              default(''),
+            'mac_address':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.macAddress |
+              default(''),
+            'hostname':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.hostname |
+              default(''),
+            'inventory_role':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.role |
+              default(''),
+            'reachability_status':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.reachabilityStatus |
+              default(''),
+            'management_state':
+              switch_refresh_sda_fabric_distribution_ip_lookup.catalystcenter_response.response.managementState |
+              default('')
+          }
+        ]
+      }}
+  no_log: true

@@ -1,0 +1,39 @@
+---
+- name: Derive global distribution hostname transfer entries
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_all_hostname_entries: >-
+      {{
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests |
+        map(attribute='manifest') | map(attribute='entries') | flatten | list
+      }}
+
+- name: Validate global distribution hostname transfer uniqueness
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests | length ==
+        switch_refresh_sda_fabric_distribution_validated_plans | length
+      - >-
+        switch_refresh_sda_fabric_distribution_hostname_preflight_manifests |
+        map(attribute='name') | map('lower') | sort | list ==
+        switch_refresh_sda_fabric_distribution_validated_plans |
+        map(attribute='name') | map('lower') | sort | list
+      - >-
+        switch_refresh_sda_fabric_distribution_all_hostname_entries |
+        map(attribute='desired_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_hostname_entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_all_hostname_entries |
+        map(attribute='submitted_hostname') | map('lower') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_hostname_entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_all_hostname_entries |
+        map(attribute='old_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_hostname_entries | length
+      - >-
+        switch_refresh_sda_fabric_distribution_all_hostname_entries |
+        map(attribute='new_device_id') | unique | length ==
+        switch_refresh_sda_fabric_distribution_all_hostname_entries | length
+    fail_msg: >-
+      The complete hostname transfer plan must contain globally unique old
+      UUIDs, replacement UUIDs, desired hostnames, and submitted hostname labels.

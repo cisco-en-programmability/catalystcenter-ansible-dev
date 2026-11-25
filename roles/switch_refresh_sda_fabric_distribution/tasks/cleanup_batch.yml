@@ -1,0 +1,235 @@
+---
+- name: Initialize immutable distribution cleanup guard
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_cleanup_identity_records: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.peer_records +
+        switch_refresh_sda_fabric_distribution_plan.new_records
+      }}
+    switch_refresh_sda_fabric_distribution_peer_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.peer_records }}
+    switch_refresh_sda_fabric_distribution_new_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_records }}
+
+- name: Add old distribution identities to cleanup guard
+  ansible.builtin.include_tasks:
+    file: build_old_revalidation_record.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_plan.resolved_mappings }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_cleanup_mapping
+    label: "{{ switch_refresh_sda_fabric_distribution_cleanup_mapping.old_management_ip }}"
+
+- name: Revalidate old replacement and peer immutable identities
+  ansible.builtin.include_tasks:
+    file: revalidate_identity.yml
+    apply:
+      tags: [always]
+  loop: "{{ switch_refresh_sda_fabric_distribution_cleanup_identity_records }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_expected_record
+    label: "{{ switch_refresh_sda_fabric_distribution_expected_record.management_ip }}"
+
+- name: Revalidate replacements have no SDA fabric-device enrollment
+  ansible.builtin.include_tasks:
+    file: validate_nonfabric.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_nonfabric_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_records }}
+
+- name: Revalidate replacement provisioning immediately before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+
+- name: Revalidate old distribution provisioning immediately before cleanup
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_provision_validation_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.resolved_mappings |
+        map(attribute='old_management_ip') | list
+      }}
+
+- name: Revalidate peer fabric roles immediately before cleanup
+  ansible.builtin.include_tasks:
+    file: revalidate_peers.yml
+    apply:
+      tags: [always]
+
+- name: Revalidate old and new exact topology immediately before cleanup
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_topology_expectations: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.old_topology_expectations +
+        switch_refresh_sda_fabric_distribution_plan.new_topology_expectations
+      }}
+
+- name: Load globally preflighted distribution hostname manifest
+  ansible.builtin.include_tasks:
+    file: load_preflight_hostname.yml
+    apply:
+      tags: [always]
+  when: switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool
+
+- name: Delete old distribution links
+  ansible.builtin.include_role:
+    name: lan_automation
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+      no_log: true
+  vars:
+    catalystcenter_debug: false
+    catalystcenter_log: false
+    lan_automation_state: merged
+    lan_automation_config_verify: true
+    lan_automation_catalystcenter_api_task_timeout: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_timeout }}
+    lan_automation_catalystcenter_task_poll_interval: >-
+      {{ switch_refresh_sda_fabric_distribution_lan_automation_task_poll_interval }}
+    lan_automation_config: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.resolved_delete_config }}
+  no_log: true
+
+- name: Verify replacement links remain exactly active after old-link deletion
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_topology_expectations: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_topology_expectations }}
+
+- name: Build old distribution unprovision and inventory payloads
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_unprovision_config: []
+    switch_refresh_sda_fabric_distribution_inventory_delete_config:
+      - ip_address_list: >-
+          {{
+            switch_refresh_sda_fabric_distribution_plan.resolved_mappings |
+            map(attribute='old_management_ip') | list
+          }}
+        clean_config: false
+
+- name: Add old distribution devices to unprovision payload
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_unprovision_config: >-
+      {{
+        switch_refresh_sda_fabric_distribution_unprovision_config + [
+          {'management_ip_address': switch_refresh_sda_fabric_distribution_old_ip}
+        ]
+      }}
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_plan.resolved_mappings |
+      map(attribute='old_management_ip') | list
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_old_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_old_ip }}"
+
+- name: Unprovision old distribution devices
+  ansible.builtin.include_role:
+    name: provision
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  vars:
+    provision_state: deleted
+    provision_config_verify: true
+    provision_config: "{{ switch_refresh_sda_fabric_distribution_unprovision_config }}"
+  when: switch_refresh_sda_fabric_distribution_cleanup_unprovision_enabled | bool
+
+- name: Remove old distribution devices from inventory
+  ansible.builtin.include_role:
+    name: inventory
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+      no_log: true
+  vars:
+    inventory_state: deleted
+    inventory_config_verify: true
+    inventory_config: "{{ switch_refresh_sda_fabric_distribution_inventory_delete_config }}"
+  when: switch_refresh_sda_fabric_distribution_cleanup_inventory_enabled | bool
+  no_log: true
+
+- name: Transfer captured distribution hostnames
+  ansible.builtin.include_tasks:
+    file: apply_hostname_manifest.yml
+    apply:
+      tags: [always]
+  when: switch_refresh_sda_fabric_distribution_hostname_transfer_enabled | bool
+
+- name: Revalidate surviving device identities after cleanup
+  ansible.builtin.include_tasks:
+    file: revalidate_identity.yml
+    apply:
+      tags: [always]
+  loop: >-
+    {{
+      switch_refresh_sda_fabric_distribution_plan.peer_records +
+      switch_refresh_sda_fabric_distribution_plan.new_records
+    }}
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_expected_record
+    label: "{{ switch_refresh_sda_fabric_distribution_expected_record.management_ip }}"
+
+- name: Revalidate replacement provisioning after cleanup
+  ansible.builtin.include_tasks:
+    file: validate_provisioning.yml
+    apply:
+      tags: [always]
+
+- name: Revalidate replacement fabric-device exclusion after cleanup
+  ansible.builtin.include_tasks:
+    file: validate_nonfabric.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_nonfabric_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_records }}
+
+- name: Revalidate peer fabric roles after cleanup
+  ansible.builtin.include_tasks:
+    file: revalidate_peers.yml
+    apply:
+      tags: [always]
+
+- name: Verify replacement links remain exactly active after cleanup
+  ansible.builtin.include_tasks:
+    file: verify_topology.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_topology_expectations: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.new_topology_expectations }}
+
+- name: Record cleaned distribution refresh batch
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_cleanup_results: >-
+      {{
+        switch_refresh_sda_fabric_distribution_cleanup_results + [
+          {
+            'name': switch_refresh_sda_fabric_distribution_plan.name,
+            'old_management_ips':
+              switch_refresh_sda_fabric_distribution_plan.resolved_mappings |
+              map(attribute='old_management_ip') | list,
+            'new_management_ips':
+              switch_refresh_sda_fabric_distribution_plan.new_management_ips,
+            'status': 'cleaned'
+          }
+        ]
+      }}

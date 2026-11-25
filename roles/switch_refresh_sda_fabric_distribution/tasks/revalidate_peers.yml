@@ -1,0 +1,53 @@
+---
+- name: Reset current peer fabric evidence
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_peer_validation_records: []
+
+- name: Re-query peer fabric membership and roles
+  ansible.builtin.include_role:
+    name: fabric_devices_info
+    apply:
+      tags:
+        - switch_refresh_sda_fabric_distribution_cleanup_old
+  vars:
+    fabric_devices_info_state: gathered
+    fabric_devices_info_config_verify: false
+    fabric_devices_info_config:
+      - fabric_devices:
+          - fabric_site_hierarchy: >-
+              {{ switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy }}
+            device_identifier:
+              - ip_address: >-
+                  {{
+                    switch_refresh_sda_fabric_distribution_plan.links |
+                    map(attribute='peer_management_ip') | unique | list
+                  }}
+            timeout: "{{ switch_refresh_sda_fabric_distribution_device_lookup_timeout }}"
+            retries: "{{ switch_refresh_sda_fabric_distribution_device_lookup_retries }}"
+            interval: "{{ switch_refresh_sda_fabric_distribution_device_lookup_interval }}"
+            requested_info:
+              - fabric_info
+
+- name: Extract current peer fabric evidence
+  ansible.builtin.include_tasks:
+    file: extract_peer_fabric_result.yml
+    apply:
+      tags: [always]
+  loop: "{{ fabric_devices_info_result.response | default([]) }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_fabric_fragment
+    label: current-fabric-evidence
+
+- name: Revalidate current peer fabric roles and identities
+  ansible.builtin.include_tasks:
+    file: validate_peer_result.yml
+    apply:
+      tags: [always]
+  vars:
+    switch_refresh_sda_fabric_distribution_expected_peer_ips: >-
+      {{
+        switch_refresh_sda_fabric_distribution_plan.links |
+        map(attribute='peer_management_ip') | unique | list
+      }}
+    switch_refresh_sda_fabric_distribution_expected_peer_records: >-
+      {{ switch_refresh_sda_fabric_distribution_plan.peer_records }}

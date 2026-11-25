@@ -1,0 +1,21 @@
+---
+- name: Retain topology evidence touching a pinned endpoint
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_relevant_topology_links: >-
+      {{
+        switch_refresh_sda_fabric_distribution_relevant_topology_links +
+        [switch_refresh_sda_fabric_distribution_candidate_topology_link]
+      }}
+  when: >-
+    (
+      switch_refresh_sda_fabric_distribution_candidate_topology_link is mapping and
+      switch_refresh_sda_fabric_distribution_candidate_topology_link.source is defined and
+      switch_refresh_sda_fabric_distribution_candidate_topology_link.source | string in
+      switch_refresh_sda_fabric_distribution_relevant_topology_device_ids
+    ) or
+    (
+      switch_refresh_sda_fabric_distribution_candidate_topology_link is mapping and
+      switch_refresh_sda_fabric_distribution_candidate_topology_link.target is defined and
+      switch_refresh_sda_fabric_distribution_candidate_topology_link.target | string in
+      switch_refresh_sda_fabric_distribution_relevant_topology_device_ids
+    )

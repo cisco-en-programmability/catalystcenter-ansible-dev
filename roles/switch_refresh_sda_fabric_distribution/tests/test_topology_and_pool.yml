@@ -1,0 +1,223 @@
+---
+- name: Validate distribution topology and IPv4 pool evaluators offline
+  hosts: plan_test
+  gather_facts: false
+  vars:
+    switch_refresh_sda_fabric_distribution_active_expectation:
+      distribution_management_ip: "192.0.2.20"
+      distribution_device_id: new-distribution-uuid
+      distribution_interface_name: GigabitEthernet1/0/47
+      peer_management_ip: "192.0.2.10"
+      peer_device_id: peer-edge-uuid
+      peer_interface_name: GigabitEthernet1/0/2
+      expected_state: active
+    switch_refresh_sda_fabric_distribution_exact_topology_result:
+      changed: false
+      failed: false
+      catalystcenter_response:
+        response:
+          links:
+            - id: physical-link-1
+              source: new-distribution-uuid
+              target: peer-edge-uuid
+              startPortName: GigabitEthernet1/0/47
+              startPortID: new-interface-uuid
+              endPortName: GigabitEthernet1/0/2
+              endPortID: peer-interface-uuid
+              linkStatus: UP
+
+  tasks:
+    - name: Accept exact active replacement topology
+      ansible.builtin.include_tasks: ../tasks/validate_topology_result.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_topology_expectations:
+          - "{{ switch_refresh_sda_fabric_distribution_active_expectation }}"
+        switch_refresh_sda_fabric_distribution_topology_raw_result: >-
+          {{ switch_refresh_sda_fabric_distribution_exact_topology_result }}
+
+    - name: Reject a link on the wrong peer interface
+      block:
+        - name: Evaluate mismatched peer-interface topology
+          ansible.builtin.include_tasks: ../tasks/validate_topology_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_topology_expectations:
+              - "{{ switch_refresh_sda_fabric_distribution_active_expectation }}"
+            switch_refresh_sda_fabric_distribution_topology_raw_result:
+              changed: false
+              failed: false
+              catalystcenter_response:
+                response:
+                  links:
+                    - id: wrong-physical-link
+                      source: new-distribution-uuid
+                      target: peer-edge-uuid
+                      startPortName: GigabitEthernet1/0/47
+                      startPortID: new-interface-uuid
+                      endPortName: GigabitEthernet1/0/3
+                      endPortID: wrong-peer-interface-uuid
+                      linkStatus: UP
+
+        - name: Fail when wrong peer interface was accepted
+          ansible.builtin.fail:
+            msg: Topology verification unexpectedly accepted a different peer interface.
+      rescue:
+        - name: Confirm exact topology verification failed closed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Verify exact distribution topology'
+
+    - name: Reject contradictory active endpoint evidence
+      block:
+        - name: Evaluate an exact link with a conflicting active neighbor
+          ansible.builtin.include_tasks: ../tasks/validate_topology_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_topology_expectations:
+              - "{{ switch_refresh_sda_fabric_distribution_active_expectation }}"
+            switch_refresh_sda_fabric_distribution_topology_raw_result:
+              changed: false
+              failed: false
+              catalystcenter_response:
+                response:
+                  links:
+                    - id: physical-link-1
+                      source: new-distribution-uuid
+                      target: peer-edge-uuid
+                      startPortName: GigabitEthernet1/0/47
+                      startPortID: new-interface-uuid
+                      endPortName: GigabitEthernet1/0/2
+                      endPortID: peer-interface-uuid
+                      linkStatus: UP
+                    - id: conflicting-physical-link
+                      source: new-distribution-uuid
+                      target: unexpected-neighbor-uuid
+                      startPortName: GigabitEthernet1/0/47
+                      startPortID: new-interface-uuid
+                      endPortName: GigabitEthernet1/0/9
+                      endPortID: unexpected-interface-uuid
+                      linkStatus: ACTIVE
+
+        - name: Fail when contradictory endpoint evidence was accepted
+          ansible.builtin.fail:
+            msg: An interface with two active neighbors unexpectedly passed.
+      rescue:
+        - name: Confirm contradictory endpoint evidence was rejected
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Verify exact distribution topology'
+
+    - name: Accept a site-scoped IPv4 LAN pool
+      ansible.builtin.include_tasks: ../tasks/validate_pool_result.yml
+      vars:
+        switch_refresh_sda_fabric_distribution_requested_pool_names:
+          - LAN_AUTO_P2P
+        switch_refresh_sda_fabric_distribution_pool_site_id: site-uuid-23
+        switch_refresh_sda_fabric_distribution_site_pool_records:
+          - name: LAN_AUTO_P2P
+            siteId: site-uuid-23
+            poolType: LAN
+            ipV4AddressSpace:
+              subnet: 10.255.0.0
+              prefixLength: 24
+
+    - name: Reject a pool without IPv4 address space
+      block:
+        - name: Evaluate a non-IPv4 site pool
+          ansible.builtin.include_tasks: ../tasks/validate_pool_result.yml
+          vars:
+            switch_refresh_sda_fabric_distribution_requested_pool_names:
+              - LAN_AUTO_P2P
+            switch_refresh_sda_fabric_distribution_pool_site_id: site-uuid-23
+            switch_refresh_sda_fabric_distribution_site_pool_records:
+              - name: LAN_AUTO_P2P
+                siteId: site-uuid-23
+                poolType: LAN
+                ipV4AddressSpace: {}
+
+        - name: Fail when pool without IPv4 address space was accepted
+          ansible.builtin.fail:
+            msg: A pool without IPv4 address space unexpectedly passed.
+      rescue:
+        - name: Confirm IPv4 pool validation failed
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Validate requested distribution IPv4 pool'
+
+    - name: Load bounded topology polling contracts
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_topology_wrapper_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/verify_topology.yml'
+            ) |
+            from_yaml
+          }}
+        switch_refresh_sda_fabric_distribution_topology_attempt_tasks: >-
+          {{
+            lookup(
+              'ansible.builtin.file',
+              playbook_dir ~ '/../tasks/verify_topology_attempt.yml'
+            ) |
+            from_yaml
+          }}
+
+    - name: Select bounded topology polling tasks
+      ansible.builtin.set_fact:
+        switch_refresh_sda_fabric_distribution_topology_init_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_topology_wrapper_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Initialize bounded distribution topology convergence check'
+            ) |
+            first
+          }}
+        switch_refresh_sda_fabric_distribution_topology_attempt_task: >-
+          {{
+            switch_refresh_sda_fabric_distribution_topology_attempt_tasks |
+            selectattr(
+              'name',
+              'equalto',
+              'Evaluate one exact distribution topology snapshot'
+            ) |
+            first
+          }}
+
+    - name: Verify topology convergence is bounded and fails closed
+      ansible.builtin.assert:
+        that:
+          - >-
+            'switch_refresh_sda_fabric_distribution_topology_validation_timeout' in
+            (
+              switch_refresh_sda_fabric_distribution_topology_init_task[
+                'ansible.builtin.set_fact'
+              ].switch_refresh_sda_fabric_distribution_topology_max_attempts |
+              string
+            )
+          - >-
+            'switch_refresh_sda_fabric_distribution_topology_validation_poll_interval' in
+            (
+              switch_refresh_sda_fabric_distribution_topology_init_task[
+                'ansible.builtin.set_fact'
+              ].switch_refresh_sda_fabric_distribution_topology_max_attempts |
+              string
+            )
+          - >-
+            switch_refresh_sda_fabric_distribution_topology_attempt_task.rescue |
+            selectattr(
+              'name',
+              'equalto',
+              'Retry exact distribution topology snapshot'
+            ) |
+            list |
+            length == 1
+          - >-
+            switch_refresh_sda_fabric_distribution_topology_attempt_task.rescue |
+            selectattr(
+              'name',
+              'equalto',
+              'Fail closed after distribution topology timeout'
+            ) |
+            list |
+            length == 1

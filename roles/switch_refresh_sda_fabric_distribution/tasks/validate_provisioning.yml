@@ -1,0 +1,64 @@
+---
+- name: Select distribution provisioning validation targets
+  ansible.builtin.set_fact:
+    switch_refresh_sda_fabric_distribution_provision_validation_targets: >-
+      {{
+        switch_refresh_sda_fabric_distribution_provision_validation_ips |
+        default(switch_refresh_sda_fabric_distribution_plan.new_management_ips)
+      }}
+
+- name: Poll distribution provisioning state
+  cisco.catalystcenter.sda_provision_device_info:
+    catalystcenter_host: "{{ catalystcenter_host }}"
+    catalystcenter_username: "{{ catalystcenter_username }}"
+    catalystcenter_password: "{{ catalystcenter_password }}"
+    catalystcenter_verify: "{{ catalystcenter_verify }}"
+    catalystcenter_port: "{{ catalystcenter_port }}"
+    catalystcenter_version: "{{ catalystcenter_version }}"
+    catalystcenter_debug: false
+    deviceManagementIpAddress: "{{ switch_refresh_sda_fabric_distribution_provision_ip }}"
+  register: switch_refresh_sda_fabric_distribution_provision_lookup
+  until:
+    - not (switch_refresh_sda_fabric_distribution_provision_lookup.failed | default(false) | bool)
+    - switch_refresh_sda_fabric_distribution_provision_lookup.catalystcenter_response is mapping
+    - >-
+      (switch_refresh_sda_fabric_distribution_provision_lookup.catalystcenter_response |
+      default({})).status |
+      default('') | lower == 'success'
+    - >-
+      (switch_refresh_sda_fabric_distribution_provision_lookup.catalystcenter_response |
+      default({})).deviceManagementIpAddress |
+      default('') == switch_refresh_sda_fabric_distribution_provision_ip
+    - >-
+      (switch_refresh_sda_fabric_distribution_provision_lookup.catalystcenter_response |
+      default({})).siteNameHierarchy |
+      default('') == switch_refresh_sda_fabric_distribution_plan.fabric_site_name_hierarchy
+  retries: >-
+    {{
+      (
+        (switch_refresh_sda_fabric_distribution_provision_validation_timeout | int) +
+        (switch_refresh_sda_fabric_distribution_provision_validation_poll_interval | int) - 1
+      ) //
+      (switch_refresh_sda_fabric_distribution_provision_validation_poll_interval | int)
+    }}
+  delay: "{{ switch_refresh_sda_fabric_distribution_provision_validation_poll_interval | int }}"
+  loop: "{{ switch_refresh_sda_fabric_distribution_provision_validation_targets }}"
+  loop_control:
+    loop_var: switch_refresh_sda_fabric_distribution_provision_ip
+    label: "{{ switch_refresh_sda_fabric_distribution_provision_ip }}"
+  no_log: true
+
+- name: Validate distribution provisioning convergence
+  ansible.builtin.assert:
+    that:
+      - >-
+        switch_refresh_sda_fabric_distribution_provision_lookup.results |
+        default([]) | length ==
+        switch_refresh_sda_fabric_distribution_provision_validation_targets | length
+      - >-
+        switch_refresh_sda_fabric_distribution_provision_lookup.results |
+        rejectattr('failed', 'equalto', true) | list | length ==
+        switch_refresh_sda_fabric_distribution_provision_validation_targets | length
+    fail_msg: >-
+      Devices did not converge to the exact requested provisioning site within
+      the configured timeout.
