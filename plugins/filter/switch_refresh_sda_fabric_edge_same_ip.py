@@ -258,8 +258,12 @@ def _legacy_plan(batches):
             if len(devices) > 50:
                 _fail("a LAN automation session supports at most 50 discovery devices")
             for device in devices:
-                _mapping(device, "discovery device", {"device_serial_number", "device_host_name",
-                                                       "device_site_name_hierarchy", "device_management_ip_address"})
+                _mapping(
+                    device,
+                    "discovery device",
+                    {"device_serial_number", "device_host_name", "device_site_name_hierarchy",
+                     "device_management_ip_address"},
+                )
                 ip = _ip(device.get("device_management_ip_address"))
                 if ip not in ips or ip in serial_by_ip:
                     _fail("discovery devices must cover each batch management IP exactly once")
@@ -292,12 +296,20 @@ def _legacy_plan(batches):
                       "allow_empty_host_port_config": allow_empty, "fingerprint": _hash(batch),
                       "generator_configs": {
                           "inventory": {"global_filters": {"devices": ips, "device_identifier": "ip_address"}},
-                          "provision": {"component_specific_filters": {"components_list": ["wired"],
-                                                                      "wired": [{"management_ip_address": ips}]}},
-                          "fabric": {"component_specific_filters": {"components_list": ["fabric_devices"],
-                                                                     "fabric_devices": [
-                                                                         {"fabric_name": site, "device_ip": ip}
-                                                                         for ip in ips]}},
+                          "provision": {
+                              "component_specific_filters": {
+                                  "components_list": ["wired"],
+                                  "wired": [{"management_ip_address": ips}],
+                              }
+                          },
+                          "fabric": {
+                              "component_specific_filters": {
+                                  "components_list": ["fabric_devices"],
+                                  "fabric_devices": [
+                                      {"fabric_name": site, "device_ip": ip} for ip in ips
+                                  ],
+                              }
+                          },
                           "cleanup": cleanup, "restore": restore}})
     _unique(names, "case-insensitive batch names")
     _unique(addresses, "management IPs across batches")
@@ -508,7 +520,7 @@ def edge_same_ip_plan(batches, swim_enabled=False):
             },
         )
         new = _mapping(batch.get("new_devices", {}), "new_devices")
-        if "lan_automation_config" in new or "device_ips" in new:
+        if "device_ips" in new:
             # Preserve the original fingerprint and schema for existing users
             # and their already-published recovery snapshots.
             legacy = deepcopy(batch)
@@ -525,7 +537,8 @@ def edge_same_ip_plan(batches, swim_enabled=False):
         if method not in ("lan_automation", "discovery"):
             _fail("onboarding_method must be lan_automation or discovery")
         _mapping(
-            new, "new_devices", {"isis_domain_pwd", "golden_image"} if method == "lan_automation"
+            new, "new_devices", {"isis_domain_pwd", "golden_image", "lan_automation_config"}
+            if method == "lan_automation"
             else {"discovery", "golden_image"}
         )
         if "isis_domain_pwd" in new:
@@ -647,6 +660,12 @@ def edge_same_ip_plan(batches, swim_enabled=False):
             edge_same_ip_discovery_config(plan)
         elif "isis_domain_pwd" in new:
             plan["isis_domain_pwd"] = new["isis_domain_pwd"]
+        if "lan_automation_config" in new:
+            plan["lan_config"] = _explicit_lan_config(new["lan_automation_config"], plan)
+            # Keep existing fingerprints unchanged when no override is supplied.
+            plan["fingerprint"] = _hash(
+                {"fingerprint": fingerprint, "lan_automation_config": plan["lan_config"]}
+            )
         plans.append(_golden_image_plan(plan, new, swim_enabled))
     _unique([p["name"].casefold() for p in plans], "case-insensitive batch names")
     _unique([ip for p in plans for ip in p["ips"]], "management IPs across batches")
@@ -665,21 +684,46 @@ def edge_same_ip_plan(batches, swim_enabled=False):
     return plans
 
 
+def _explicit_lan_config(config, plan):
+    """Validate supplied sessions and derive targets for a single unscoped session."""
+    config = deepcopy(_list(config, "new_devices.lan_automation_config"))
+    for operation in config:
+        _mapping(operation, "LAN automation operation", {"lan_automation"})
+        lan = _mapping(operation.get("lan_automation"), "lan_automation")
+        if "discovery_devices" not in lan and len(config) == 1:
+            lan["discovery_devices"] = [
+                {"device_management_ip_address": ip} for ip in plan["ips"]
+            ]
+    config = edge_same_ip_capture_lan(config, plan)
+    _legacy_plan(
+        [{
+            "name": plan["name"],
+            "fabric_site_name_hierarchy": plan["site"],
+            "new_devices": {"device_ips": plan["ips"], "lan_automation_config": config},
+            "device_mapping": [
+                {k: m[k] for k in ("management_ip", "interface_migration")}
+                for m in plan["mappings"]
+            ],
+        }]
+    )
+    return config
+
+
 def edge_same_ip_capture_lan(config, plan):
-    """Substitute serials by IP and validate all generated session settings."""
-    result = deepcopy(_list(config, "generated LAN automation config"))
+    """Substitute serials by IP and validate captured LAN session settings."""
+    result = deepcopy(_list(config, "LAN automation config"))
     covered = []
     for operation in result:
-        _mapping(operation, "generated LAN operation", {"lan_automation"})
-        lan = _mapping(operation.get("lan_automation"), "generated LAN session")
+        _mapping(operation, "LAN automation operation", {"lan_automation"})
+        lan = _mapping(operation.get("lan_automation"), "LAN session")
         if "isis_domain_pwd" in lan:
-            _fail("generated LAN capture must not contain IS-IS secrets")
-        devices = _list(lan.get("discovery_devices"), "generated discovery_devices")
+            _fail("LAN capture must not contain IS-IS secrets; use new_devices.isis_domain_pwd")
+        devices = _list(lan.get("discovery_devices"), "discovery_devices")
         for device in devices:
-            _mapping(device, "generated discovery device")
+            _mapping(device, "discovery device")
             ip = _ip(device.get("device_management_ip_address"))
             if ip not in plan["serial_by_ip"]:
-                _fail("generated LAN config contains an unexpected management IP")
+                _fail("LAN config contains an unexpected management IP")
             device["device_serial_number"] = plan["serial_by_ip"][ip]
             covered.append(ip)
         subset = [m for m in plan["mappings"] if m["management_ip"] in covered[-len(devices) :]]
@@ -703,7 +747,7 @@ def edge_same_ip_capture_lan(config, plan):
             ]
         )
     if sorted(covered) != sorted(plan["ips"]):
-        _fail("generated LAN config must cover exactly every replacement management IP once")
+        _fail("LAN config must cover exactly every replacement management IP once")
     return result
 
 
@@ -982,14 +1026,19 @@ def edge_same_ip_snapshot(plan, records, payloads, controller, fabric_id=None, l
         manifest["schema_version"] = 3
         manifest["onboarding"] = {
             "method": method,
-            "config": edge_same_ip_capture_lan(lan_config, plan) if method == "lan_automation" else [],
+            "config": edge_same_ip_capture_lan(plan.get("lan_config", lan_config), plan)
+            if method == "lan_automation" else [],
         }
     if "golden_image" in plan:
         manifest["schema_version"] = 4
         manifest["golden_image"] = deepcopy(plan["golden_image"])
     # Reject conflicting explicit LAN site placement while the original devices
     # still exist, rather than discovering the conflict after teardown.
-    edge_same_ip_lan_config(plan, manifest)
+    validated_lan = edge_same_ip_lan_config(plan, manifest)
+    if not plan.get("legacy_input", True) and "lan_config" in plan:
+        for operation in validated_lan:
+            operation["lan_automation"].pop("isis_domain_pwd", None)
+        manifest["onboarding"]["config"] = validated_lan
     manifest["capture_checksum"] = _capture_checksum(manifest)
     return manifest
 
@@ -1079,18 +1128,25 @@ def edge_same_ip_identity_guard(records, manifest, kind="old"):
     return [identity["management_ip"] for identity in found]
 
 
-def edge_same_ip_ready(raw_result, plan, manifest, required_role=""):
+def edge_same_ip_ready(raw_result, plan, manifest, required_role="", check_hostname=True):
     """Check full replacement readiness; temporary incomplete records can retry."""
+    if not isinstance(check_hostname, bool):
+        _fail("hostname verification control must be a boolean")
     records = edge_same_ip_devices(raw_result)
     seen, ready = [], True
     originals = {item["management_ip"]: item for item in manifest["old_devices"]}
     saved = {item["management_ip"]: item for item in manifest.get("replacement_devices", [])}
-    desired_hostnames = {ip: identity["hostname"].split(".")[0].casefold() for ip, identity in originals.items()}
-    desired_hostnames.update({
-        device["device_management_ip_address"]: device["device_host_name"].split(".")[0].casefold()
-        for operation in edge_same_ip_lan_config(plan, manifest)
-        for device in operation["lan_automation"]["discovery_devices"]
-    })
+    desired_hostnames = {ip: identity["hostname"].casefold() for ip, identity in originals.items()}
+    for operation in edge_same_ip_lan_config(plan, manifest):
+        for device in operation["lan_automation"]["discovery_devices"]:
+            ip = device["device_management_ip_address"]
+            hostname = device["device_host_name"]
+            domain = originals[ip]["hostname"].partition(".")[2]
+            # A short override retains the captured domain. An explicit FQDN
+            # supplies the complete desired hostname, including its domain.
+            if "." not in hostname and domain:
+                hostname += "." + domain
+            desired_hostnames[ip] = hostname.casefold()
     for record in records:
         ip = record.get("managementIpAddress")
         if ip not in plan["ips"] or ip in seen:
@@ -1107,7 +1163,7 @@ def edge_same_ip_ready(raw_result, plan, manifest, required_role=""):
         if not uuid or not record.get("hostname") or not record.get("serialNumber"):
             ready = False
         hostname = record.get("hostname")
-        if not isinstance(hostname, str) or hostname.split(".")[0].casefold() != desired_hostnames[ip]:
+        if check_hostname and (not isinstance(hostname, str) or hostname.casefold() != desired_hostnames[ip]):
             ready = False
         if record.get("collectionStatus") != "Managed" or record.get("managementState") != "Managed":
             ready = False
@@ -1147,6 +1203,16 @@ def edge_same_ip_lan_config(plan, manifest):
             device["device_site_name_hierarchy"] = sites[ip]
         if "isis_domain_pwd" in plan:
             operation["lan_automation"]["isis_domain_pwd"] = plan["isis_domain_pwd"]
+    return config
+
+
+def edge_same_ip_lan_execution_config(plan, manifest):
+    """Submit short LAN hostnames while preserving captured configuration."""
+    config = edge_same_ip_lan_config(plan, manifest)
+    for operation in config:
+        for device in operation["lan_automation"]["discovery_devices"]:
+            device["device_host_name"] = _string(
+                device["device_host_name"].split(".", 1)[0], "LAN automation hostname label")
     return config
 
 
@@ -1272,7 +1338,8 @@ class FilterModule:
         return {name: globals()[name] for name in (
             "edge_same_ip_plan", "edge_same_ip_devices", "edge_same_ip_snapshot",
             "edge_same_ip_manifest", "edge_same_ip_checkpoint", "edge_same_ip_identity_guard",
-            "edge_same_ip_ready", "edge_same_ip_lan_config", "edge_same_ip_subset", "edge_same_ip_ports_match",
+            "edge_same_ip_ready", "edge_same_ip_lan_config", "edge_same_ip_lan_execution_config",
+            "edge_same_ip_subset", "edge_same_ip_ports_match",
             "edge_same_ip_fabric",
             "edge_same_ip_site_id", "edge_same_ip_fabric_id", "edge_same_ip_old_fabric",
             "edge_same_ip_capture_lan", "edge_same_ip_discovery_config", "edge_same_ip_onboarding_preflight",

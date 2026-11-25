@@ -33,7 +33,10 @@
   ansible.builtin.set_fact:
     edge_same_ip_new_preflight_ready: >-
       {{ edge_same_ip_inventory_lookup |
-         cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest) }}
+         cisco.catalystcenter.edge_same_ip_ready(
+           edge_same_ip_plan, edge_same_ip_manifest, check_hostname=false) }}
+  # Hostname convergence is checked after onboarding and on every resume.
+  # Existing managed replacements require validation without another launch.
   no_log: true
 
 - name: Onboard the complete replacement batch
@@ -42,7 +45,7 @@
     - name: Build the complete LAN automation input with captured hostnames and sites
       ansible.builtin.set_fact:
         edge_same_ip_lan_execution_config: >-
-          {{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_lan_config(edge_same_ip_manifest) }}
+          {{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_lan_execution_config(edge_same_ip_manifest) }}
       no_log: true
       when: edge_same_ip_plan.onboarding_method == 'lan_automation'
 
@@ -66,10 +69,9 @@
         config_verify: "{{ switch_refresh_sda_fabric_edge_same_ip_config_verify }}"
         catalystcenter_api_task_timeout: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_timeout | int }}"
         catalystcenter_task_poll_interval: "{{ switch_refresh_sda_fabric_edge_same_ip_lan_automation_poll_interval | int }}"
-      when: >-
-        edge_same_ip_plan.onboarding_method == 'lan_automation' and
-        not (edge_same_ip_inventory_lookup |
-             cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest))
+      when:
+        - edge_same_ip_plan.onboarding_method == 'lan_automation'
+        - not edge_same_ip_new_preflight_ready
       no_log: true
 
     - name: Discover the replacement devices through the discovery role
@@ -86,7 +88,7 @@
         discovery_config: "{{ edge_same_ip_plan | cisco.catalystcenter.edge_same_ip_discovery_config }}"
       when:
         - edge_same_ip_plan.onboarding_method == 'discovery'
-        - not (edge_same_ip_inventory_lookup | cisco.catalystcenter.edge_same_ip_ready(edge_same_ip_plan, edge_same_ip_manifest))
+        - not edge_same_ip_new_preflight_ready
 
     - name: Wait for LAN automation configuration to finish
       ansible.builtin.include_tasks: wait_for_lan_automation.yml

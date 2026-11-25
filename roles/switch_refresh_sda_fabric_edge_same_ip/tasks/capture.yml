@@ -55,25 +55,51 @@
     loop_var: edge_same_ip_capture_component
   no_log: true
 
-- name: Capture LAN automation configuration through the generator role
-  ansible.builtin.include_role:
-    name: cisco.catalystcenter.lan_automation_config_generator
-    public: false
-    apply:
-      no_log: true
-  vars:
-    catalystcenter_debug: false
-    catalystcenter_log: false
-    lan_automation_config_generator_config:
-      site_name_hierarchy: "{{ edge_same_ip_plan.site }}"
-      ip_address_list: "{{ edge_same_ip_plan.ips }}"
-    lan_automation_config_generator_file_path: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
-    lan_automation_config_generator_file_mode: overwrite
-    # IS-IS passwords are supplied only during restore, never captured to disk.
-    lan_automation_config_generator_isis_domain_pwd: null
+- name: Save supplied LAN automation configuration without querying session history
+  ansible.builtin.copy:
+    dest: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
+    content: "{{ {'config': edge_same_ip_plan.lan_config} | to_nice_yaml }}"
+    mode: '0600'
+    unsafe_writes: false
   when:
     - edge_same_ip_plan.onboarding_method == 'lan_automation'
     - not edge_same_ip_plan.legacy_input
+    - edge_same_ip_plan.lan_config is defined
+  no_log: true
+
+- name: Capture LAN automation configuration when no override was supplied
+  block:
+    - name: Capture LAN automation configuration through the generator role
+      ansible.builtin.include_role:
+        name: cisco.catalystcenter.lan_automation_config_generator
+        public: false
+        apply:
+          no_log: true
+      vars:
+        catalystcenter_debug: false
+        catalystcenter_log: false
+        lan_automation_config_generator_config:
+          site_name_hierarchy: "{{ edge_same_ip_plan.site }}"
+          ip_address_list: "{{ edge_same_ip_plan.ips }}"
+        lan_automation_config_generator_file_path: "{{ edge_same_ip_batch_dir }}/lan_automation.yml"
+        lan_automation_config_generator_file_mode: overwrite
+        # IS-IS passwords are supplied only during restore, never captured to disk.
+        lan_automation_config_generator_isis_domain_pwd: null
+  rescue:
+    - name: Explain why LAN automation capture cannot proceed
+      ansible.builtin.fail:
+        msg: >-
+          {{ 'No matching stopped LAN automation history was found'
+             if 'No stopped LAN automation session' in (ansible_failed_result.msg | default(''))
+             else 'Unable to generate LAN automation configuration; check controller access and session status' }}
+          for batch {{ edge_same_ip_plan.name }} ({{ edge_same_ip_plan.ips | join(', ') }}).
+          Automatic capture requires matching history for each old device's current serial and site.
+          Provide new_devices.lan_automation_config or select onboarding_method: discovery
+          when no matching history exists. No old devices were removed.
+  when:
+    - edge_same_ip_plan.onboarding_method == 'lan_automation'
+    - not edge_same_ip_plan.legacy_input
+    - edge_same_ip_plan.lan_config is not defined
 
 - name: Capture inventory configuration for the entire batch
   cisco.catalystcenter.inventory_playbook_config_generator:

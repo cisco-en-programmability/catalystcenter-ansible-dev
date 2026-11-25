@@ -28,6 +28,8 @@ switch_refresh_sda_fabric_edge_same_ip_batches:
     fabric_site_name_hierarchy: Global/Region/Building
     onboarding_method: lan_automation
     allow_empty_host_port_config: false
+    # Omit new_devices.lan_automation_config to capture historical LAN settings.
+    # Missing matching history fails before any batch's old devices are removed.
     # Optional runtime password and golden-image prerequisite:
     # new_devices:
     #   # Password and import URLs are never saved in snapshots.
@@ -56,6 +58,42 @@ switch_refresh_sda_fabric_edge_same_ip_batches:
       - management_ip: "192.0.2.11"
         replacement_serial_number: NEW-SERIAL-02
         # Omit interface_migration to preserve existing interface names.
+
+  # Supply LAN settings when old devices were onboarded through Discovery,
+  # or when replacement onboarding should use explicitly selected settings.
+  - name: discovery-to-lan-automation-edge-refresh
+    fabric_site_name_hierarchy: Global/Region/Building
+    onboarding_method: lan_automation
+    new_devices:
+      # Optional runtime secret, excluded from snapshots:
+      # isis_domain_pwd: "{{ vault_lan_automation_isis_domain_pwd }}"
+      # A supplied non-empty configuration skips the LAN history generator.
+      lan_automation_config:
+        - lan_automation:
+            discovered_device_site_name_hierarchy: Global/Region/Building
+            primary_device_management_ip_address: "198.51.100.20"
+            peer_device_management_ip_address: "198.51.100.21"
+            primary_device_interface_names:
+              - GigabitEthernet1/0/1
+              - GigabitEthernet1/0/2
+            ip_pools:
+              - ip_pool_name: LAN_AUTO_MAIN
+                ip_pool_role: MAIN_POOL
+              - ip_pool_name: LAN_AUTO_P2P
+                ip_pool_role: PHYSICAL_LINK_POOL
+            discovery_level: 2
+            discovery_timeout: 40
+            launch_and_wait: true
+            # One session: omit discovery_devices to use all device_mapping IPs.
+            # Multiple sessions: list each session's IPs under discovery_devices:
+            # discovery_devices:
+            #   - device_management_ip_address: "192.0.2.40"
+            # Serial numbers come from device_mapping; hostnames/sites are captured.
+    device_mapping:
+      - management_ip: "192.0.2.40"
+        replacement_serial_number: NEW-SERIAL-40
+      - management_ip: "192.0.2.41"
+        replacement_serial_number: NEW-SERIAL-41
 
   # Prepare replacement IPs, routing, old hostnames, and SSH/SNMP after phase 1.
   - name: discovery-edge-refresh

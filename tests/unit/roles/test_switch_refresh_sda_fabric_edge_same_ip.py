@@ -231,11 +231,23 @@ def execute(module, args):
                     for device in group["lan_automation"]["discovery_devices"]:
                         ip = device["device_management_ip_address"]
                         if ip in apply_ips:
+                            # Model Catalyst Center/device DNS behavior: the
+                            # configured domain is appended to the LAN hostname.
+                            domain = state["domains_by_ip"][ip]
+                            hostname = device["device_host_name"] + ("." + domain if domain else "")
+                            if ip == next(iter(state["domains_by_ip"])):
+                                fault = state.get("replacement_hostname_fault")
+                                if fault == "duplicate_domain":
+                                    hostname += "." + domain
+                                elif fault == "wrong_domain":
+                                    hostname = device["device_host_name"] + ".other.test"
+                                elif fault == "short_only":
+                                    hostname = device["device_host_name"]
                             state["devices"][ip] = {
                                 "managementIpAddress": ip, "id": "new-uuid-" + ip.rsplit(".", 1)[1],
                                 "instanceUuid": "new-uuid-" + ip.rsplit(".", 1)[1],
                                 "serialNumber": device["device_serial_number"],
-                                "hostname": device["device_host_name"], "role": "UNKNOWN",
+                                "hostname": hostname, "role": "UNKNOWN",
                                 "family": "Switches and Hubs", "collectionStatus": "Managed",
                                 "managementState": "Managed", "reachabilityStatus": "Reachable",
                                 "inventoryStatusDetail": "<status><general code='SUCCESS'/></status>",
@@ -367,11 +379,22 @@ def _initial_state():
             "port_channels": [{"interface_names": ["GigabitEthernet1/0/47", "GigabitEthernet1/0/48"],
                                "protocol": "LACP", "connected_device_type": "TRUNKING_DEVICE"}],
         }
-    return {"devices": devices, "ports": ports, "fabric": {ip: ["EDGE_NODE"] for ip in IPS},
-            "fabric_memberships": {device["id"]: {"networkDeviceId": device["id"], "fabricId": "fabric-1",
-                                                    "deviceRoles": ["EDGE_NODE"]} for device in devices.values()},
-            "provisioned": {ip: SITE + "/Floor" + str(index + 1) for index, ip in enumerate(IPS)},
-            "calls": []}
+    return {
+        "devices": devices,
+        "domains_by_ip": {ip: device["hostname"].partition(".")[2] for ip, device in devices.items()},
+        "ports": ports,
+        "fabric": {ip: ["EDGE_NODE"] for ip in IPS},
+        "fabric_memberships": {
+            device["id"]: {
+                "networkDeviceId": device["id"],
+                "fabricId": "fabric-1",
+                "deviceRoles": ["EDGE_NODE"],
+            }
+            for device in devices.values()
+        },
+        "provisioned": {ip: SITE + "/Floor" + str(index + 1) for index, ip in enumerate(IPS)},
+        "calls": [],
+    }
 
 
 class OfflineRole:
@@ -455,7 +478,8 @@ class OfflineRole:
         variables_path.write_text(json.dumps(variables))
         result = subprocess.run([PLAYBOOK, "-i", "localhost,", str(self.play),
                                  "-e", "@" + str(variables_path)], env=self.env,
-                                cwd=str(self.directory), capture_output=True, text=True, timeout=180)
+                                cwd=str(self.directory), capture_output=True, text=True,
+                                timeout=180, check=False)
         if success:
             assert result.returncode == 0, result.stdout[-16000:] + result.stderr[-4000:]
         else:
@@ -805,6 +829,159 @@ def test_generated_lan_role_captures_once_and_restores_saved_serial_mappings(tmp
     assert "runtime-isis" not in case.manifest_path.read_text()
 
 
+def test_lan_hostname_submission_preserves_captured_fqdn_and_completed_verification(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    expected = "IAC-TB4-SJ-EN1-9300.cisco.com"
+    state = case.state()
+    state["devices"][IPS[0]]["hostname"] = expected
+    state["domains_by_ip"][IPS[0]] = "cisco.com"
+    case.save_state(state)
+    case.run("capture_and_remove")
+    captured = case.manifest()
+    assert captured["old_devices"][0]["hostname"] == expected
+    assert captured["onboarding"]["config"][0]["lan_automation"]["discovery_devices"][0]["device_host_name"] == expected
+    case.run("restore")
+    final = case.manifest()
+    assert final["stage"] == "complete"
+    assert case.state()["devices"][IPS[0]]["hostname"] == expected
+    for field in ("old_devices", "onboarding", "fingerprint", "hashes", "capture_checksum"):
+        assert final[field] == captured[field]
+    launches = [call for call in case.state()["calls"] if call["module"] == "lan_automation_workflow_manager"]
+    assert len(launches) == 1
+    devices = launches[0]["args"]["config"][0]["lan_automation"]["discovery_devices"]
+    assert devices[0]["device_host_name"] == "IAC-TB4-SJ-EN1-9300"
+    assert all("." not in device["device_host_name"] for device in devices)
+    count = len(case.state()["calls"])
+    case.run("restore")
+    assert _mutations(case.state()["calls"][count:]) == []
+    state = case.state()
+    state["devices"][IPS[0]]["hostname"] += ".cisco.com"
+    case.save_state(state)
+    count = len(state["calls"])
+    case.run("restore", success=False)
+    assert _mutations(case.state()["calls"][count:]) == []
+
+
+@pytest.mark.parametrize("fault", ["duplicate_domain", "wrong_domain", "short_only"])
+def test_hostname_convergence_blocks_lan_restoration_before_provisioning(tmp_path, fault):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    case.run("capture_and_remove")
+    state = case.state()
+    state["replacement_hostname_fault"] = fault
+    case.save_state(state)
+    count = len(state["calls"])
+    case.run("restore", success=False)
+    assert case.manifest()["stage"] == "restore_started"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations] == ["lan_automation_workflow_manager"]
+    if fault == "duplicate_domain":
+        # A retry must validate the managed replacements, without launching
+        # another onboarding session to repair a DNS/hostname mismatch.
+        count = len(case.state()["calls"])
+        case.run("restore", success=False)
+        assert _mutations(case.state()["calls"][count:]) == []
+        assert case.manifest()["stage"] == "restore_started"
+
+
+def test_hostname_convergence_blocks_discovery_with_a_duplicated_domain(tmp_path):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch("discovery")
+    case.run("capture_and_remove")
+    _prepare_discovery_replacements(case)
+    state = case.state()
+    state["prepared_devices"][IPS[0]]["hostname"] += ".example.test"
+    case.save_state(state)
+    count = len(state["calls"])
+    case.run("restore", success=False)
+    assert case.manifest()["stage"] == "restore_started"
+    mutations = _mutations(case.state()["calls"][count:])
+    assert [call["module"] for call in mutations] == ["discovery_workflow_manager"]
+
+
+@pytest.mark.parametrize("multiple_sessions", [False, True])
+def test_explicit_lan_config_restores_without_old_lan_history(tmp_path, multiple_sessions):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    config = deepcopy(_batch()["new_devices"]["lan_automation_config"])
+    lan = config[0]["lan_automation"]
+    lan.pop("discovery_devices")
+    lan["peer_device_management_ip_address"] = "198.51.100.11"
+    lan["ip_pools"].append({"ip_pool_name": "LAN_P2P", "ip_pool_role": "PHYSICAL_LINK_POOL"})
+    if multiple_sessions:
+        config.append(deepcopy(config[0]))
+        for index, operation in enumerate(config):
+            operation["lan_automation"]["primary_device_interface_names"] = [
+                "GigabitEthernet1/0/%d" % (index + 1)
+            ]
+            operation["lan_automation"]["discovery_devices"] = [
+                {"device_management_ip_address": IPS[index]}
+            ]
+    case.batch["new_devices"] = {
+        "lan_automation_config": config, "isis_domain_pwd": "<isis-password>"
+    }
+    state = case.state()
+    state["missing_lan_history"] = True
+    case.save_state(state)
+    case.run("capture_and_remove")
+    snapshot = case.manifest()
+    assert snapshot["stage"] == "awaiting_ip_release"
+    assert snapshot["schema_version"] == 3
+    saved = snapshot["onboarding"]["config"]
+    devices = [d for op in saved for d in op["lan_automation"]["discovery_devices"]]
+    assert {d["device_management_ip_address"]: d["device_serial_number"] for d in devices} == {
+        ip: "NEW-SERIAL-" + ip.rsplit(".", 1)[1] for ip in IPS
+    }
+    assert [d["device_site_name_hierarchy"] for d in devices] == [
+        SITE + "/Floor1", SITE + "/Floor2"
+    ]
+    assert [d["device_host_name"] for d in devices] == ["edge-10", "edge-11"]
+    exported = yaml.safe_load((case.manifest_path.parent / "lan_automation.yml").read_text())
+    assert exported["config"] == saved
+    assert "<isis-password>" not in case.manifest_path.read_text()
+    assert not any(
+        call["module"] == "lan_automation_playbook_config_generator"
+        for call in case.state()["calls"]
+    )
+    count = len(case.state()["calls"])
+    changed = deepcopy(case.batch)
+    case.batch["new_devices"]["lan_automation_config"][0]["lan_automation"]["ip_pools"][0][
+        "ip_pool_name"
+    ] = "OTHER_POOL"
+    case.run("restore", success=False)
+    assert case.state()["calls"][count:] == []
+    case.batch = changed
+    case.batch["new_devices"]["isis_domain_pwd"] = "<rotated-isis-password>"
+    case.run("restore")
+    assert case.manifest()["stage"] == "complete"
+    launches = [call for call in case.state()["calls"][count:]
+                if call["module"] == "lan_automation_workflow_manager"]
+    assert len(launches) == 1
+    restored = deepcopy(saved)
+    for operation in restored:
+        operation["lan_automation"]["isis_domain_pwd"] = "<rotated-isis-password>"
+    assert launches[0]["args"]["config"] == restored
+    assert not any(
+        call["module"] == "lan_automation_playbook_config_generator"
+        for call in case.state()["calls"][count:]
+    )
+    count = len(case.state()["calls"])
+    case.run("restore")
+    assert _mutations(case.state()["calls"][count:]) == []
+
+
+@pytest.mark.parametrize("invalid", [None, [], [{"lan_automation": {}}]])
+def test_invalid_explicit_lan_config_fails_before_generator_or_deletion(tmp_path, invalid):
+    case = OfflineRole(tmp_path)
+    case.batch = _generated_batch()
+    case.batch["new_devices"] = {"lan_automation_config": invalid}
+    case.run("capture_and_remove", success=False)
+    assert case.state()["calls"] == []
+    assert set(case.state()["devices"]) == set(IPS)
+    assert not case.manifest_path.exists()
+
+
 @pytest.mark.parametrize("credentials", ["global", "shared", "per_device"])
 def test_discovery_role_restores_prepared_devices_with_runtime_credentials(tmp_path, credentials):
     case = OfflineRole(tmp_path)
@@ -879,7 +1056,12 @@ def test_missing_lan_history_in_later_batch_prevents_every_removal(tmp_path):
     state = case.state()
     state["missing_lan_history_for"] = [IPS[1]]
     case.save_state(state)
-    case.run("capture_and_remove", success=False, extra={PREFIX + "batches": [first, second]})
+    result = case.run(
+        "capture_and_remove", success=False, extra={PREFIX + "batches": [first, second]}
+    )
+    assert "No matching stopped LAN automation history was found" in result.stdout
+    assert "new_devices.lan_automation_config" in result.stdout
+    assert "No old devices were removed" in result.stdout
     assert set(case.state()["devices"]) == set(IPS)
     assert _mutations(case.state()["calls"]) == []
     assert case.manifest()["stage"] == "captured"

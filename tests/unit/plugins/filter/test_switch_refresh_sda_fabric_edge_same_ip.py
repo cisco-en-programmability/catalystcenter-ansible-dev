@@ -113,6 +113,139 @@ def generated_lan():
     return config
 
 
+class TestExplicitLanOnboarding(TestCase):
+    def batch(self):
+        value = generated_batch()
+        config = generated_lan()
+        config[0]["lan_automation"].pop("discovery_devices")
+        value["new_devices"] = {"lan_automation_config": config}
+        return value
+
+    def test_single_override_derives_targets_and_captures_hostnames_sites_and_serials(self):
+        value = self.batch()
+        value["new_devices"]["isis_domain_pwd"] = "<isis-password>"
+        original = deepcopy(value)
+        plan = filters.edge_same_ip_plan([value])[0]
+        self.assertFalse(plan["legacy_input"])
+        captured = payloads()
+        captured["provision"][0]["site_name_hierarchy"] = SITE + "/Floor1"
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), captured, "controller", "fabric-1"
+        )
+        devices = manifest["onboarding"]["config"][0]["lan_automation"]["discovery_devices"]
+        self.assertEqual([d["device_serial_number"] for d in devices], ["NEW-0", "NEW-1"])
+        self.assertEqual([d["device_host_name"] for d in devices], ["edge-0", "edge-1"])
+        self.assertEqual(devices[0]["device_site_name_hierarchy"], SITE + "/Floor1")
+        self.assertNotIn("<isis-password>", str(manifest))
+        filters.edge_same_ip_manifest(manifest, plan, "controller")
+        restored = filters.edge_same_ip_lan_config(plan, manifest)
+        self.assertEqual(restored[0]["lan_automation"]["isis_domain_pwd"], "<isis-password>")
+        self.assertEqual(value, original)
+
+    def test_multiple_override_sessions_use_ip_scopes_and_mapping_serials(self):
+        value = self.batch()
+        config = value["new_devices"]["lan_automation_config"]
+        config.append(deepcopy(config[0]))
+        for index, operation in enumerate(config):
+            lan = operation["lan_automation"]
+            lan["primary_device_interface_names"] = ["GigabitEthernet1/0/%d" % (index + 1)]
+            lan["discovery_devices"] = [{"device_management_ip_address": IPS[index]}]
+        config.reverse()
+        plan = filters.edge_same_ip_plan([value])[0]
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1"
+        )
+        restored = filters.edge_same_ip_lan_config(plan, manifest)
+        self.assertEqual(
+            [op["lan_automation"]["discovery_devices"][0]["device_serial_number"]
+             for op in restored],
+            ["NEW-1", "NEW-0"],
+        )
+
+    def test_invalid_supplied_override_never_falls_back_to_automatic_capture(self):
+        for invalid in (None, [], {}, "config", [None], [{"lan_automation": {}}]):
+            value = self.batch()
+            value["new_devices"]["lan_automation_config"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_plan([value])
+        value = self.batch()
+        value["onboarding_method"] = "discovery"
+        with self.assertRaisesRegex(AnsibleFilterError, "unsupported keys"):
+            filters.edge_same_ip_plan([value])
+
+    def test_override_rejects_ambiguous_scopes_pool_errors_and_inline_secrets(self):
+        for kind in ("missing", "duplicate", "unknown", "unscoped", "pool", "secret", "site"):
+            value = self.batch()
+            config = value["new_devices"]["lan_automation_config"]
+            lan = config[0]["lan_automation"]
+            if kind == "missing":
+                lan["discovery_devices"] = [{"device_management_ip_address": IPS[0]}]
+            elif kind == "duplicate":
+                lan["discovery_devices"] = [{"device_management_ip_address": IPS[0]}] * 2
+            elif kind == "unknown":
+                lan["discovery_devices"] = [{"device_management_ip_address": "192.0.2.99"}]
+            elif kind == "unscoped":
+                config.append(deepcopy(config[0]))
+            elif kind == "pool":
+                lan["ip_pools"] = []
+            elif kind == "secret":
+                lan["isis_domain_pwd"] = "<isis-password>"
+            else:
+                lan["discovered_device_site_name_hierarchy"] = "Global/Other"
+            with self.subTest(kind=kind), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_plan([value])
+
+    def test_override_intent_is_immutable_but_runtime_password_can_rotate(self):
+        value = self.batch()
+        plan = filters.edge_same_ip_plan([value])[0]
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1"
+        )
+        value["new_devices"]["isis_domain_pwd"] = "<rotated-isis-password>"
+        rotated = filters.edge_same_ip_plan([value])[0]
+        filters.edge_same_ip_manifest(manifest, rotated, "controller")
+        for kind in ("remove", "seed", "pool"):
+            changed = deepcopy(value)
+            lan = changed["new_devices"]["lan_automation_config"][0]["lan_automation"]
+            if kind == "remove":
+                changed["new_devices"].pop("lan_automation_config")
+            elif kind == "seed":
+                lan["primary_device_management_ip_address"] = "198.51.100.99"
+            else:
+                lan["ip_pools"][0]["ip_pool_name"] = "OTHER_POOL"
+            with self.subTest(kind=kind), self.assertRaisesRegex(AnsibleFilterError, "fingerprint"):
+                filters.edge_same_ip_manifest(
+                    manifest, filters.edge_same_ip_plan([changed])[0], "controller"
+                )
+        automatic = filters.edge_same_ip_plan([generated_batch()])[0]
+        automatic_manifest = filters.edge_same_ip_snapshot(
+            automatic, records(), payloads(), "controller", "fabric-1", generated_lan()
+        )
+        with self.assertRaisesRegex(AnsibleFilterError, "fingerprint"):
+            filters.edge_same_ip_manifest(automatic_manifest, plan, "controller")
+
+    def test_override_supports_optional_golden_image_and_rejects_site_conflicts(self):
+        value = self.batch()
+        value["new_devices"]["golden_image"] = {
+            "image_name": "cat9k_iosxe.17.12.04.SPA.bin",
+            "device_image_family_name": "Cisco Catalyst 9300 Switch",
+        }
+        plan = filters.edge_same_ip_plan([value], True)[0]
+        manifest = filters.edge_same_ip_snapshot(
+            plan, records(), payloads(), "controller", "fabric-1"
+        )
+        self.assertEqual(manifest["schema_version"], 4)
+        filters.edge_same_ip_manifest(manifest, plan, "controller")
+        captured = payloads()
+        captured["provision"][0]["site_name_hierarchy"] = SITE + "/Floor1"
+        value["new_devices"]["lan_automation_config"][0]["lan_automation"]["discovery_devices"] = [
+            {"device_management_ip_address": ip, "device_site_name_hierarchy": SITE} for ip in IPS
+        ]
+        plan = filters.edge_same_ip_plan([value], True)[0]
+        with self.assertRaisesRegex(AnsibleFilterError, "captured provisioning site"):
+            filters.edge_same_ip_snapshot(plan, records(), captured, "controller", "fabric-1")
+
+
 class TestGeneratedOnboarding(TestCase):
     def snapshot(self, value):
         plan = filters.edge_same_ip_plan([value])[0]
@@ -509,6 +642,107 @@ class TestSameIpPlanner(TestCase):
             filters.edge_same_ip_plan([value])
 
 
+class TestSameIpHostnames(TestCase):
+    def test_runtime_short_names_preserve_existing_snapshot_intent_and_checksums(self):
+        old = records()
+        old[0]["hostname"] = "IAC-TB4-SJ-EN1-9300.cisco.com"
+        generated = generated_lan()
+        for device, identity in zip(generated[0]["lan_automation"]["discovery_devices"], old):
+            device["device_host_name"] = identity["hostname"]
+        for mode in ("generated", "explicit", "legacy", "golden"):
+            value = batch() if mode == "legacy" else generated_batch()
+            if mode == "legacy":
+                for device, identity in zip(value["new_devices"]["lan_automation_config"][0]["lan_automation"]["discovery_devices"], old):
+                    device["device_host_name"] = identity["hostname"]
+            elif mode == "explicit":
+                value["new_devices"] = {"lan_automation_config": deepcopy(generated)}
+            elif mode == "golden":
+                value["new_devices"] = {"golden_image": {
+                    "image_name": "cat9k.bin", "device_image_family_name": "Cisco Catalyst 9300 Switch"}}
+            plan = filters.edge_same_ip_plan([value])[0]
+            manifest = filters.edge_same_ip_snapshot(plan, old, payloads(), "controller", "fabric-1", generated)
+            schemas = (1, 2) if mode == "legacy" else (manifest["schema_version"],)
+            for schema in schemas:
+                saved = deepcopy(manifest)
+                saved["schema_version"] = schema
+                if schema == 1:
+                    saved.pop("fabric_id")
+                saved["capture_checksum"] = filters._capture_checksum(saved)
+                before, plan_before = deepcopy(saved), deepcopy(plan)
+                with self.subTest(mode=mode, schema=schema):
+                    runtime = filters.edge_same_ip_lan_execution_config(plan, saved)
+                    devices = runtime[0]["lan_automation"]["discovery_devices"]
+                    self.assertEqual([d["device_host_name"] for d in devices], ["IAC-TB4-SJ-EN1-9300", "edge-1"])
+                    self.assertEqual(saved, before)
+                    self.assertEqual(plan, plan_before)
+                    self.assertEqual(saved["old_devices"][0]["hostname"], old[0]["hostname"])
+                    if not plan["legacy_input"]:
+                        self.assertEqual(saved["onboarding"]["config"][0]["lan_automation"]["discovery_devices"][0]["device_host_name"], old[0]["hostname"])
+                    filters.edge_same_ip_manifest(saved, plan, "controller")
+
+    def test_readiness_checks_the_full_fqdn_case_insensitively(self):
+        plan = filters.edge_same_ip_plan([generated_batch()])[0]
+        old = records()
+        old[0]["hostname"] = "IAC-TB4-SJ-EN1-9300.cisco.com"
+        config = generated_lan()
+        config[0]["lan_automation"]["discovery_devices"][0]["device_host_name"] = old[0]["hostname"]
+        manifest = filters.edge_same_ip_snapshot(plan, old, payloads(), "controller", "fabric-1", config)
+        for hostname, expected in (
+            ("IAC-TB4-SJ-EN1-9300.cisco.com", True),
+            ("iac-tb4-sj-en1-9300.CISCO.COM", True),
+            ("IAC-TB4-SJ-EN1-9300", False),
+            ("IAC-TB4-SJ-EN1-9300.cisco.com.cisco.com", False),
+            ("IAC-TB4-SJ-EN1-9300.other.test", False),
+        ):
+            replacement = records(True)
+            replacement[0]["hostname"] = hostname
+            with self.subTest(hostname=hostname):
+                self.assertEqual(filters.edge_same_ip_ready(raw(replacement), plan, manifest), expected)
+
+    def test_explicit_short_and_qualified_overrides_keep_their_expected_domains(self):
+        for desired, qualified in (("custom-edge", "custom-edge.example.test"),
+                                   ("custom-edge.other.test", "custom-edge.other.test")):
+            value = batch()
+            value["new_devices"]["lan_automation_config"][0]["lan_automation"]["discovery_devices"][0]["device_host_name"] = desired
+            plan = filters.edge_same_ip_plan([value])[0]
+            manifest = filters.edge_same_ip_snapshot(plan, records(), payloads(), "controller", "fabric-1")
+            replacement = records(True)
+            replacement[0]["hostname"] = qualified.upper()
+            with self.subTest(desired=desired):
+                self.assertTrue(filters.edge_same_ip_ready(raw(replacement), plan, manifest))
+                runtime = filters.edge_same_ip_lan_execution_config(plan, manifest)
+                self.assertEqual(runtime[0]["lan_automation"]["discovery_devices"][0]["device_host_name"], "custom-edge")
+                replacement[0]["hostname"] = qualified + ".other.test"
+                self.assertFalse(filters.edge_same_ip_ready(raw(replacement), plan, manifest))
+
+    def test_unqualified_captured_names_are_compared_as_complete_names(self):
+        old, config = records(), generated_lan()
+        old[0]["hostname"] = "edge-0"
+        config[0]["lan_automation"]["discovery_devices"][0]["device_host_name"] = "edge-0"
+        plan = filters.edge_same_ip_plan([generated_batch()])[0]
+        manifest = filters.edge_same_ip_snapshot(plan, old, payloads(), "controller", "fabric-1", config)
+        replacement = records(True)
+        replacement[0]["hostname"] = "EDGE-0"
+        self.assertTrue(filters.edge_same_ip_ready(raw(replacement), plan, manifest))
+        replacement[0]["hostname"] = "edge-0.example.test"
+        self.assertFalse(filters.edge_same_ip_ready(raw(replacement), plan, manifest))
+
+    def test_identity_preflight_keeps_guards_while_hostname_convergence_is_pending(self):
+        plan = filters.edge_same_ip_plan([generated_batch()])[0]
+        manifest = filters.edge_same_ip_snapshot(plan, records(), payloads(), "controller", "fabric-1", generated_lan())
+        replacement = records(True)
+        replacement[0]["hostname"] += ".example.test"
+        self.assertTrue(filters.edge_same_ip_ready(raw(replacement), plan, manifest, check_hostname=False))
+        self.assertFalse(filters.edge_same_ip_ready(raw(replacement), plan, manifest))
+        for field, value in (("id", "old-0"), ("serialNumber", "WRONG-SERIAL")):
+            invalid = deepcopy(replacement)
+            invalid[0][field] = value
+            with self.subTest(field=field), self.assertRaises(AnsibleFilterError):
+                filters.edge_same_ip_ready(raw(invalid), plan, manifest, check_hostname=False)
+        with self.assertRaisesRegex(AnsibleFilterError, "must be a boolean"):
+            filters.edge_same_ip_ready(raw(replacement), plan, manifest, check_hostname="false")
+
+
 class TestSameIpHostPortComponents(TestCase):
     def setUp(self):
         self.plan = filters.edge_same_ip_plan([generated_batch("discovery")])[0]
@@ -884,6 +1118,8 @@ class TestSameIpIdentityAndPostconditions(TestCase):
         value[0]["hostname"] = "wrong-name.example.test"
         self.assertFalse(filters.edge_same_ip_ready(raw(value), self.plan, self.manifest))
         value[0]["hostname"] = "EDGE-0.other-domain.test"
+        self.assertFalse(filters.edge_same_ip_ready(raw(value), self.plan, self.manifest))
+        value[0]["hostname"] = "EDGE-0.EXAMPLE.TEST"
         self.assertTrue(filters.edge_same_ip_ready(raw(value), self.plan, self.manifest))
         self.plan["lan_config"][0]["lan_automation"]["discovery_devices"][0]["device_host_name"] = "desired-custom-name"
         self.assertFalse(filters.edge_same_ip_ready(raw(value), self.plan, self.manifest))

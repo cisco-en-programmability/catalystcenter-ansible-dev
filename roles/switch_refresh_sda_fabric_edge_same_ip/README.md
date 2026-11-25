@@ -14,7 +14,7 @@ There is no separate replacement IP list in the new input format.
 
 1. Run `capture_and_remove`. All batch inputs are validated first. The role
    captures and validates every batch before any old-device mutation, then
-   checks generated seed claims and physical identities across batches.
+   checks selected seed claims and physical identities across batches.
 2. For each batch, remove original host-port configuration, fabric membership,
    provisioning, and remaining inventory records, in that order. Verify old
    UUID fabric memberships and inventory absence by IP and serial. Save the
@@ -99,16 +99,55 @@ It never permits missing inventory, provisioning, fabric, or LAN automation data
 
 ### LAN automation
 
-The role invokes `cisco.catalystcenter.lan_automation_config_generator` before
-removal, using IPs derived from `device_mapping` and the batch site. It maps
-placeholder serials to each entry's required `replacement_serial_number`,
-validates complete target coverage, and saves the resulting configuration in
-`manifest.json` and `lan_automation.yml`. Restore loads the protected snapshot;
+`new_devices.lan_automation_config` is optional. When supplied, the role validates
+and uses those sessions without invoking the LAN automation generator. When
+omitted, the role invokes `cisco.catalystcenter.lan_automation_config_generator`
+before removal, using IPs derived from `device_mapping` and the batch site.
+An explicitly empty, null, or invalid override fails validation instead of
+falling back to the generator.
+
+For either source, the role sets serials from each entry's required
+`replacement_serial_number`, validates complete target coverage, and saves the
+configuration in `manifest.json` and `lan_automation.yml`. Restore loads the protected snapshot;
 it never regenerates configuration from deleted devices.
 
 The generator requires stopped, inactive session history for the original
 physical devices in their site ancestry. A source without matching LAN automation
-history fails before removal. Seeds, interfaces, and pools must remain available;
+history fails before **any batch's old devices are removed**, with instructions
+to supply `new_devices.lan_automation_config` or select `onboarding_method: discovery`.
+This includes old devices onboarded only through Discovery. To replace those
+devices using LAN automation, provide explicit LAN settings:
+
+```yaml
+onboarding_method: lan_automation
+new_devices:
+  lan_automation_config:
+    - lan_automation:
+        discovered_device_site_name_hierarchy: Global/Region/Building
+        primary_device_management_ip_address: "198.51.100.20"
+        primary_device_interface_names:
+          - GigabitEthernet1/0/1
+        ip_pools:
+          - ip_pool_name: LAN_AUTO_MAIN
+            ip_pool_role: MAIN_POOL
+          - ip_pool_name: LAN_AUTO_P2P
+            ip_pool_role: PHYSICAL_LINK_POOL
+        launch_and_wait: true
+device_mapping:
+  - management_ip: "192.0.2.40"
+    replacement_serial_number: NEW-SERIAL-40
+```
+
+A single supplied session may omit `discovery_devices`; the role builds that
+list from all batch mappings. Multiple sessions require
+`discovery_devices[].device_management_ip_address` to assign each IP to exactly
+one session. Unknown, duplicate, or missing targets are rejected. Replacement
+serials always come from `device_mapping`. Omitted device hostnames and site
+hierarchies are filled from the captured old hostname and provisioning site.
+Explicit site assignments must match the captured provisioning site. Supply
+IS-IS passwords only through `new_devices.isis_domain_pwd`, outside the sessions.
+
+Seeds, interfaces, and pools must remain available;
 seed devices cannot be targets of this refresh. Different batches cannot claim
 the same primary seed port; put coupled devices in one batch.
 
@@ -117,6 +156,21 @@ including floors below the fabric target. Captured hostnames, reused management
 IPs, pools, interfaces, and supported session settings are retained. Sessions
 use `launch_and_wait: true`; the role additionally waits for zero active LAN
 sessions and verifies managed/reachable replacement inventory.
+
+The captured full hostname remains unchanged in the snapshot. LAN Automation
+requests send only its leftmost label: `edge-01.example.test` is submitted as
+`edge-01`, and the configured DNS domain supplies the suffix. This also applies
+to qualified hostnames in supplied LAN configuration and existing snapshots.
+An explicit short hostname override retains the captured DNS suffix for
+verification; a qualified override supplies the complete expected name.
+
+After onboarding, inventory must report the complete expected hostname,
+compared case-insensitively. A repeated suffix, a different domain, or a missing
+suffix fails verification before provisioning and on resumed/completed runs.
+The role validates existing managed replacements without relaunching onboarding
+to repair a hostname mismatch. Configure the replacement/site DNS domain to
+match the captured or explicitly requested domain; the role does not change
+DNS-domain settings. Captured unqualified names are checked as complete names.
 
 After phase 1, prepare seed interfaces and resynchronize seeds as needed, and
 connect new switches in the required PnP state. Supply any required IS-IS
@@ -265,7 +319,7 @@ the immutable physical device mapping. Protect input credentials with Vault.
 | `sda_fabric_devices_playbook_config_generator` | Pure edge fabric membership | `sda_fabric_devices_workflow_manager` |
 | `sda_host_port_onboarding_playbook_config_generator` | Original ports/channels | Delete with `sda_host_port_onboarding_workflow_manager` |
 | `sda_host_port_migration_playbook_config_generator` | Mapped replacement ports/channels | Merge with `sda_host_port_onboarding_workflow_manager` |
-| `lan_automation_config_generator` role, LAN method only | Replacement LAN automation input | `lan_automation_workflow_manager` |
+| Supplied `new_devices.lan_automation_config`, or `lan_automation_config_generator` role when omitted | Replacement LAN automation input | `lan_automation_workflow_manager` |
 
 The five common native workflow payloads remain separate from onboarding data.
 The migration generator runs before deletion while old devices are available.
@@ -295,8 +349,10 @@ Normal completion and task failure release it. After an interrupted Ansible
 process, confirm that no run remains active before removing a stale lock.
 
 Resume using the same batch names, site, mappings, replacement serials, onboarding
-method, and snapshot directory. Existing valid manifests are loaded instead of
-recapturing partially removed devices. Verified checkpoints advance monotonically:
+method, supplied LAN configuration (if any), and snapshot directory. Adding,
+removing, or changing a supplied LAN override invalidates the saved input
+fingerprint. Runtime IS-IS passwords may rotate. Existing valid manifests are
+loaded instead of recapturing partially removed devices. Verified checkpoints advance monotonically:
 `captured`, `ports_removed`, `fabric_removed`, `old_inventory_absent`,
 `awaiting_ip_release`, `restore_started`, `onboarded`, `inventory_ready`,
 `provisioned`, `fabric_added`, `ports_restored`, `complete`.
